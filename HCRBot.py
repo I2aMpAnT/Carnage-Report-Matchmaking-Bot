@@ -4,7 +4,7 @@
 # ============================================
 # VERSION INFO
 # ============================================
-BOT_VERSION = "1.1.0"
+BOT_VERSION = "1.2.0"
 BOT_BUILD_DATE = "2025-11-27"
 # ============================================
 
@@ -184,6 +184,13 @@ async def on_ready():
     if channel:
         await create_queue_embed(channel)
         print(f'✅ Queue embed created in {channel.name}')
+
+        # Start inactivity timer task
+        from searchmatchmaking import queue_state, check_queue_inactivity
+        import asyncio
+        if queue_state.inactivity_timer_task is None or queue_state.inactivity_timer_task.done():
+            queue_state.inactivity_timer_task = asyncio.create_task(check_queue_inactivity())
+            print('✅ Queue inactivity timer started')
     else:
         print(f'⚠️ Could not find queue channel {QUEUE_CHANNEL_ID}')
     
@@ -227,10 +234,75 @@ async def on_ready():
 async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandNotFound):
         return
-    
+
     from searchmatchmaking import log_action
     log_action(f"Command error: {error}")
     await ctx.send(f"❌ Error: {error}")
+
+@bot.event
+async def on_interaction(interaction: discord.Interaction):
+    """Handle interactions, including inactivity confirmation buttons after restart"""
+    if interaction.type != discord.InteractionType.component:
+        return
+
+    custom_id = interaction.data.get("custom_id", "")
+
+    # Handle inactivity confirmation buttons (dynamic custom_ids)
+    if custom_id.startswith("inactivity_yes_") or custom_id.startswith("inactivity_no_"):
+        from searchmatchmaking import (
+            queue_state, cleanup_inactivity_messages, remove_inactive_user,
+            update_queue_embed, log_action
+        )
+        from datetime import datetime
+
+        # Extract user_id from custom_id
+        try:
+            user_id = int(custom_id.split("_")[-1])
+        except ValueError:
+            return
+
+        # Only the target user can respond
+        if interaction.user.id != user_id:
+            await interaction.response.send_message("This confirmation is not for you!", ephemeral=True)
+            return
+
+        if custom_id.startswith("inactivity_yes_"):
+            # User wants to stay in queue
+            if user_id in queue_state.queue:
+                queue_state.queue_join_times[user_id] = datetime.now()
+                log_action(f"User {interaction.user.display_name} confirmed to stay in queue - timer reset")
+
+                await cleanup_inactivity_messages(user_id)
+
+                try:
+                    await interaction.response.edit_message(
+                        content="✅ **You've been kept in the queue!** Your timer has been reset for another hour.",
+                        embed=None,
+                        view=None
+                    )
+                except:
+                    await interaction.response.send_message("✅ You've been kept in the queue!", ephemeral=True)
+
+                if queue_state.queue_channel:
+                    await update_queue_embed(queue_state.queue_channel)
+            else:
+                await interaction.response.send_message("You're no longer in the queue.", ephemeral=True)
+
+        elif custom_id.startswith("inactivity_no_"):
+            # User wants to leave queue
+            if user_id in queue_state.queue:
+                await remove_inactive_user(interaction.guild, user_id, reason="chose to leave")
+
+                try:
+                    await interaction.response.edit_message(
+                        content="👋 **You've been removed from the queue.** Feel free to rejoin anytime!",
+                        embed=None,
+                        view=None
+                    )
+                except:
+                    await interaction.response.send_message("👋 You've been removed from the queue.", ephemeral=True)
+            else:
+                await interaction.response.send_message("You're no longer in the queue.", ephemeral=True)
 
 # Run bot - works both when imported and when run directly
 if not TOKEN:
