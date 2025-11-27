@@ -1812,7 +1812,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             ephemeral=True
         )
     
-    @bot.tree.command(name='adminsetteams', description='[STAFF] Manually set teams and start a match')
+    @bot.tree.command(name='adminarrange', description='[STAFF] Manually set teams and start a match')
     @app_commands.describe(
         red1="Red Team Player 1",
         red2="Red Team Player 2",
