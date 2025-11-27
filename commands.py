@@ -1617,4 +1617,136 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         
         await interaction.response.send_message("✅ Player names are now visible in the queue.", ephemeral=True)
     
+    @bot.tree.command(name='guest', description='[STAFF] Add a guest player attached to a host')
+    @app_commands.describe(
+        host="The player this guest is attached to (will always be on same team)",
+        guest_name="Name for the guest (will show as 'Host\'s Guest' if left blank)",
+        mmr="The guest's MMR rating"
+    )
+    @has_staff_role()
+    async def add_guest(
+        interaction: discord.Interaction,
+        host: discord.Member,
+        mmr: int,
+        guest_name: str = None
+    ):
+        """Add a guest player to the queue attached to a host"""
+        from searchmatchmaking import queue_state, update_queue_embed, log_action, MAX_QUEUE_SIZE
+        
+        # Check if host is in queue
+        if host.id not in queue_state.queue:
+            await interaction.response.send_message(
+                f"❌ {host.display_name} is not in the queue! They must join first.", 
+                ephemeral=True
+            )
+            return
+        
+        # Check if host already has a guest
+        for guest_id, guest_info in queue_state.guests.items():
+            if guest_info["host_id"] == host.id and guest_id in queue_state.queue:
+                await interaction.response.send_message(
+                    f"❌ {host.display_name} already has a guest in the queue!", 
+                    ephemeral=True
+                )
+                return
+        
+        # Check if queue is full
+        if len(queue_state.queue) >= MAX_QUEUE_SIZE:
+            await interaction.response.send_message("❌ Queue is already full!", ephemeral=True)
+            return
+        
+        # Generate guest ID and name
+        guest_id = queue_state.guest_counter
+        queue_state.guest_counter += 1
+        
+        if guest_name:
+            display_name = f"{guest_name} ({host.display_name}'s Guest)"
+        else:
+            display_name = f"{host.display_name}'s Guest"
+        
+        # Add guest to tracking
+        queue_state.guests[guest_id] = {
+            "host_id": host.id,
+            "mmr": mmr,
+            "name": display_name
+        }
+        
+        # Add guest to queue
+        queue_state.queue.append(guest_id)
+        queue_state.queue_join_times[guest_id] = datetime.now()
+        
+        # Update embed
+        if queue_state.queue_channel:
+            await update_queue_embed(queue_state.queue_channel)
+        
+        log_action(f"Guest added: {display_name} (MMR: {mmr}) attached to {host.display_name}")
+        
+        await interaction.response.send_message(
+            f"✅ Added **{display_name}** to queue with **{mmr} MMR**\n"
+            f"They will always be on the same team as {host.mention}",
+            ephemeral=True
+        )
+    
+    @bot.tree.command(name='removeguest', description='[STAFF] Remove a guest from the queue')
+    @app_commands.describe(host="The host whose guest should be removed")
+    @has_staff_role()
+    async def remove_guest(interaction: discord.Interaction, host: discord.Member):
+        """Remove a guest from the queue"""
+        from searchmatchmaking import queue_state, update_queue_embed, log_action
+        
+        # Find guest attached to this host
+        guest_to_remove = None
+        for guest_id, guest_info in queue_state.guests.items():
+            if guest_info["host_id"] == host.id and guest_id in queue_state.queue:
+                guest_to_remove = guest_id
+                break
+        
+        if not guest_to_remove:
+            await interaction.response.send_message(
+                f"❌ {host.display_name} doesn't have a guest in the queue!", 
+                ephemeral=True
+            )
+            return
+        
+        guest_name = queue_state.guests[guest_to_remove]["name"]
+        
+        # Remove from queue
+        queue_state.queue.remove(guest_to_remove)
+        if guest_to_remove in queue_state.queue_join_times:
+            del queue_state.queue_join_times[guest_to_remove]
+        del queue_state.guests[guest_to_remove]
+        
+        # Update embed
+        if queue_state.queue_channel:
+            await update_queue_embed(queue_state.queue_channel)
+        
+        log_action(f"Guest removed: {guest_name}")
+        
+        await interaction.response.send_message(f"✅ Removed **{guest_name}** from queue", ephemeral=True)
+    
+    @bot.tree.command(name='resetmatchmaking', description='[STAFF] Reset and empty the matchmaking queue')
+    @has_staff_role()
+    async def reset_matchmaking(interaction: discord.Interaction):
+        """Reset the matchmaking queue completely"""
+        from searchmatchmaking import queue_state, update_queue_embed, log_action
+        
+        old_count = len(queue_state.queue)
+        
+        # Clear queue
+        queue_state.queue.clear()
+        queue_state.queue_join_times.clear()
+        queue_state.guests.clear()
+        queue_state.recent_action = None
+        
+        # Update embed
+        if queue_state.queue_channel:
+            await update_queue_embed(queue_state.queue_channel)
+        
+        log_action(f"Queue reset by {interaction.user.display_name} - {old_count} players removed")
+        
+        await interaction.response.send_message(
+            f"✅ Matchmaking queue has been reset! ({old_count} players removed)",
+            ephemeral=True
+        )
+    
     return bot

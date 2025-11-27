@@ -335,42 +335,127 @@ class TeamSelectionView(View):
             await self.start_players_pick(interaction)
     
     async def create_balanced_teams(self, interaction: discord.Interaction):
-        """Create balanced teams using MMR"""
+        """Create balanced teams using MMR - keeps guests with their hosts"""
+        from searchmatchmaking import queue_state
+        
         # Get all MMRs
         player_mmrs = {}
         for user_id in self.players:
-            player_mmrs[user_id] = await get_player_mmr(user_id)
+            # Check if this is a guest - use their set MMR
+            if user_id in queue_state.guests:
+                player_mmrs[user_id] = queue_state.guests[user_id]["mmr"]
+            else:
+                player_mmrs[user_id] = await get_player_mmr(user_id)
+        
+        # Identify host-guest pairs (treat as single unit for balancing)
+        pairs = []  # [(host_id, guest_id, combined_mmr)]
+        paired_players = set()
+        
+        for guest_id, guest_info in queue_state.guests.items():
+            if guest_id in self.players:
+                host_id = guest_info["host_id"]
+                if host_id in self.players:
+                    combined_mmr = player_mmrs[host_id] + player_mmrs[guest_id]
+                    pairs.append((host_id, guest_id, combined_mmr))
+                    paired_players.add(host_id)
+                    paired_players.add(guest_id)
+        
+        # Get solo players (not in a pair)
+        solo_players = [uid for uid in self.players if uid not in paired_players]
+        
+        # Create items to balance: pairs count as single unit, solos are individual
+        balance_items = []
+        for host_id, guest_id, combined_mmr in pairs:
+            balance_items.append({
+                "type": "pair",
+                "ids": [host_id, guest_id],
+                "mmr": combined_mmr
+            })
+        for uid in solo_players:
+            balance_items.append({
+                "type": "solo",
+                "ids": [uid],
+                "mmr": player_mmrs[uid]
+            })
         
         # Sort by MMR (high to low)
-        sorted_players = sorted(player_mmrs.items(), key=lambda x: x[1], reverse=True)
+        balance_items.sort(key=lambda x: x["mmr"], reverse=True)
         
-        # Snake draft
+        # Snake draft for balance items
+        red_items = []
+        blue_items = []
+        
+        for i, item in enumerate(balance_items):
+            if i % 2 == 0:
+                red_items.append(item)
+            else:
+                blue_items.append(item)
+        
+        # Flatten to team lists
         red_team = []
         blue_team = []
+        for item in red_items:
+            red_team.extend(item["ids"])
+        for item in blue_items:
+            blue_team.extend(item["ids"])
         
-        for i, (user_id, mmr) in enumerate(sorted_players):
-            if i % 2 == 0:
-                red_team.append(user_id)
-            else:
-                blue_team.append(user_id)
-        
-        # Optimize for balance
-        best_diff = abs(sum(player_mmrs[uid] for uid in red_team) - sum(player_mmrs[uid] for uid in blue_team))
+        # Calculate current diff
+        red_mmr = sum(player_mmrs[uid] for uid in red_team)
+        blue_mmr = sum(player_mmrs[uid] for uid in blue_team)
+        best_diff = abs(red_mmr - blue_mmr)
         best_red = red_team[:]
         best_blue = blue_team[:]
         
-        for i in range(len(red_team)):
-            for j in range(len(blue_team)):
+        # Try swapping solo players only (never break up pairs)
+        red_solos = [uid for uid in red_team if uid not in paired_players]
+        blue_solos = [uid for uid in blue_team if uid not in paired_players]
+        
+        for r_uid in red_solos:
+            for b_uid in blue_solos:
                 test_red = red_team[:]
                 test_blue = blue_team[:]
-                test_red[i], test_blue[j] = test_blue[j], test_red[i]
+                
+                # Swap
+                r_idx = test_red.index(r_uid)
+                b_idx = test_blue.index(b_uid)
+                test_red[r_idx] = b_uid
+                test_blue[b_idx] = r_uid
                 
                 diff = abs(sum(player_mmrs[uid] for uid in test_red) - sum(player_mmrs[uid] for uid in test_blue))
                 
                 if diff < best_diff:
                     best_diff = diff
-                    best_red = test_red
-                    best_blue = test_blue
+                    best_red = test_red[:]
+                    best_blue = test_blue[:]
+        
+        # Also try swapping pairs between teams if there are multiple pairs
+        if len(pairs) >= 2:
+            red_pairs = [(h, g) for h, g, _ in pairs if h in best_red]
+            blue_pairs = [(h, g) for h, g, _ in pairs if h in best_blue]
+            
+            for rp in red_pairs:
+                for bp in blue_pairs:
+                    test_red = best_red[:]
+                    test_blue = best_blue[:]
+                    
+                    # Remove red pair from red, add to blue
+                    test_red.remove(rp[0])
+                    test_red.remove(rp[1])
+                    test_blue.append(rp[0])
+                    test_blue.append(rp[1])
+                    
+                    # Remove blue pair from blue, add to red
+                    test_blue.remove(bp[0])
+                    test_blue.remove(bp[1])
+                    test_red.append(bp[0])
+                    test_red.append(bp[1])
+                    
+                    diff = abs(sum(player_mmrs[uid] for uid in test_red) - sum(player_mmrs[uid] for uid in test_blue))
+                    
+                    if diff < best_diff:
+                        best_diff = diff
+                        best_red = test_red[:]
+                        best_blue = test_blue[:]
         
         log_action(f"Balanced teams created - MMR diff: {best_diff}")
         await finalize_teams(interaction.channel, best_red, best_blue, test_mode=self.test_mode)

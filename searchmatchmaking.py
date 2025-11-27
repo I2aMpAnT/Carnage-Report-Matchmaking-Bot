@@ -42,6 +42,8 @@ class QueueState:
         self.last_ping_time: Optional[datetime] = None  # Last time ping was used
         self.ping_message: Optional[discord.Message] = None  # Ping message in general chat
         self.hide_player_names: bool = False  # Hide player names in queue list
+        self.guests: dict = {}  # guest_id -> {"host_id": int, "mmr": int, "name": str}
+        self.guest_counter: int = 1000000  # Start guest IDs at 1 million to avoid conflicts
 
 # Global queue state
 queue_state = QueueState()
@@ -553,6 +555,9 @@ async def update_queue_embed(channel: discord.TextChannel):
             # Check if we should hide names
             if queue_state.hide_player_names:
                 display_name = "Matched Player"
+            elif uid in queue_state.guests:
+                # This is a guest - use their custom name
+                display_name = queue_state.guests[uid]["name"]
             else:
                 # Get member to ensure we have their display name
                 member = guild.get_member(uid)

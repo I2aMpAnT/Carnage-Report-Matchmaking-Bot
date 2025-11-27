@@ -18,9 +18,9 @@ logger = logging.getLogger("twitch")
 
 # File path for player Twitch data
 # This file contains confidential player data and should NOT be in the GitHub repo
-# It stays on the server in the PARENT directory (same folder as bot.py launcher)
-PLAYERS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "players.json")
-PLAYERS_BACKUP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "players.json.bak")
+# It stays on the server in the same directory as bot.py
+PLAYERS_FILE = "players.json"
+PLAYERS_BACKUP = "players.json.bak"
 
 # Multi-stream base URLs
 MULTITWITCH_BASE = "https://multitwitch.tv/"
