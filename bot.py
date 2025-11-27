@@ -1,12 +1,13 @@
 # bot.py - Launcher that updates from GitHub then runs the bot
 # Files are pulled directly into root directory for easy manual editing
 
-import subprocess
 import os
 import sys
 
-# GitHub repo URL
-GITHUB_REPO = "https://github.com/I2aMpAnT/HCR-Bot.git"
+# GitHub repo info
+GITHUB_USER = "I2aMpAnT"
+GITHUB_REPO = "HCR-Bot"
+GITHUB_BRANCH = "main"
 
 # Files to pull from GitHub (these go in root alongside bot.py)
 GITHUB_FILES = [
@@ -23,70 +24,62 @@ GITHUB_FILES = [
 ]
 
 def update_from_github():
-    """Pull latest files from GitHub into root directory"""
-    temp_dir = "/tmp/hcr-bot-repo"
-    
+    """Pull latest files from GitHub into root directory using requests"""
     try:
-        # Remove old temp directory if exists
-        if os.path.exists(temp_dir):
-            subprocess.run(["rm", "-rf", temp_dir], check=True)
-        
-        print("📥 Cloning latest from GitHub...")
-        result = subprocess.run(
-            ["git", "clone", "--depth", "1", GITHUB_REPO, temp_dir],
-            capture_output=True,
-            text=True
-        )
-        
-        if result.returncode != 0:
-            print(f"⚠️ Git clone failed: {result.stderr}")
-            print("Continuing with existing files...")
-            return False
-        
-        # Copy each file from temp repo to root
-        copied = 0
-        for filename in GITHUB_FILES:
-            src = os.path.join(temp_dir, filename)
-            dst = filename  # Current directory (root)
-            
-            if os.path.exists(src):
-                subprocess.run(["cp", src, dst], check=True)
-                print(f"  ✅ {filename}")
-                copied += 1
-            else:
-                print(f"  ⚠️ {filename} not found in repo")
-        
-        # Cleanup temp directory
-        subprocess.run(["rm", "-rf", temp_dir], check=True)
-        
-        print(f"📦 Updated {copied} files from GitHub")
-        return True
-        
-    except Exception as e:
-        print(f"⚠️ GitHub update error: {e}")
-        print("Continuing with existing files...")
+        import requests
+    except ImportError:
+        print("⚠️ requests module not available, skipping GitHub update")
         return False
+    
+    print("📥 Downloading latest files from GitHub...")
+    
+    downloaded = 0
+    failed = 0
+    
+    for filename in GITHUB_FILES:
+        url = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/{GITHUB_BRANCH}/{filename}"
+        
+        try:
+            response = requests.get(url, timeout=10)
+            
+            if response.status_code == 200:
+                with open(filename, 'w', encoding='utf-8') as f:
+                    f.write(response.text)
+                print(f"  ✅ {filename}")
+                downloaded += 1
+            else:
+                print(f"  ❌ {filename} (HTTP {response.status_code})")
+                failed += 1
+                
+        except Exception as e:
+            print(f"  ❌ {filename} ({e})")
+            failed += 1
+    
+    print(f"📦 Downloaded {downloaded} files, {failed} failed")
+    return downloaded > 0
 
 def main():
+    print()
     print("=" * 50)
-    print("HCR Bot Launcher")
+    print("  Carnage Report Matchmaking Bot Launcher")
     print("=" * 50)
+    print()
     
     # Update from GitHub on startup
     update_from_github()
     
     print()
-    print("🚀 Starting HCRBot...")
-    print("=" * 50)
+    print("🚀 Starting bot...")
     
     # Check if HCRBot.py exists
     if not os.path.exists("HCRBot.py"):
         print("❌ HCRBot.py not found!")
         print("Make sure the GitHub repo contains HCRBot.py")
+        print("Or manually upload HCRBot.py to your server")
         sys.exit(1)
     
     # Run HCRBot.py (exec replaces this process)
-    exec(open("HCRBot.py").read())
+    exec(open("HCRBot.py", encoding='utf-8').read())
 
 if __name__ == "__main__":
     main()
