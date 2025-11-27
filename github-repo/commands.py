@@ -1656,7 +1656,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             
             embed.add_field(
                 name="⚙️ Staff - Match",
-                value="`/cancelmatch` `/correctcurrent`\n`/setgamestats` `/adminarrange`\n`/adminguestmatch`",
+                value="`/cancelmatch` `/correctcurrent`\n`/setgamestats` `/adminarrange`\n`/adminguestmatch`\n`/manualmatchentry`",
                 inline=True
             )
             
@@ -2308,5 +2308,277 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         
         # Start the match
         await finalize_teams(channel, red_team, blue_team, test_mode=False)
+    
+    # ========== MANUAL MATCH ENTRY ==========
+    
+    # Store pending manual matches
+    pending_manual_matches = {}  # user_id -> match_data
+    
+    class AddGameModal(discord.ui.Modal, title="Add Game Result"):
+        """Modal for adding a game to a manual match"""
+        
+        def __init__(self, match_data: dict, game_number: int):
+            super().__init__()
+            self.match_data = match_data
+            self.game_number = game_number
+        
+        winner = discord.ui.TextInput(
+            label="Winner (RED or BLUE)",
+            placeholder="RED or BLUE",
+            max_length=4,
+            required=True
+        )
+        
+        map_name = discord.ui.TextInput(
+            label="Map",
+            placeholder="e.g., Lockout, Midship, Sanctuary",
+            max_length=50,
+            required=True
+        )
+        
+        gametype = discord.ui.TextInput(
+            label="Gametype",
+            placeholder="e.g., TS, CTF, Ball, KOTH",
+            max_length=50,
+            required=True
+        )
+        
+        async def on_submit(self, interaction: discord.Interaction):
+            winner_input = self.winner.value.strip().upper()
+            
+            if winner_input not in ['RED', 'BLUE']:
+                await interaction.response.send_message(
+                    "❌ Winner must be RED or BLUE!",
+                    ephemeral=True
+                )
+                return
+            
+            # Add game to match data
+            self.match_data["games"].append({
+                "winner": winner_input,
+                "map": self.map_name.value.strip(),
+                "gametype": self.gametype.value.strip()
+            })
+            
+            game_count = len(self.match_data["games"])
+            red_wins = sum(1 for g in self.match_data["games"] if g["winner"] == "RED")
+            blue_wins = sum(1 for g in self.match_data["games"] if g["winner"] == "BLUE")
+            
+            # Show current games and prompt for more
+            games_summary = ""
+            for i, game in enumerate(self.match_data["games"], 1):
+                emoji = "🔴" if game["winner"] == "RED" else "🔵"
+                games_summary += f"{emoji} Game {i}: {game['winner']} - {game['map']} - {game['gametype']}\n"
+            
+            await interaction.response.send_message(
+                f"✅ **Game {game_count} Added!**\n\n"
+                f"**Current Score:** Red {red_wins} - {blue_wins} Blue\n\n"
+                f"**Games:**\n{games_summary}\n"
+                f"Use the buttons below to add more games or submit the match.",
+                view=ManualMatchView(self.match_data, interaction.user.id),
+                ephemeral=True
+            )
+    
+    class ManualMatchView(discord.ui.View):
+        """View with buttons to add games or submit manual match"""
+        
+        def __init__(self, match_data: dict, user_id: int):
+            super().__init__(timeout=600)  # 10 minute timeout
+            self.match_data = match_data
+            self.user_id = user_id
+        
+        @discord.ui.button(label="Add Another Game", style=discord.ButtonStyle.primary)
+        async def add_game(self, interaction: discord.Interaction, button: discord.ui.Button):
+            if interaction.user.id != self.user_id:
+                await interaction.response.send_message("❌ This isn't your match entry!", ephemeral=True)
+                return
+            
+            game_num = len(self.match_data["games"]) + 1
+            await interaction.response.send_modal(AddGameModal(self.match_data, game_num))
+        
+        @discord.ui.button(label="Submit Match", style=discord.ButtonStyle.success)
+        async def submit_match(self, interaction: discord.Interaction, button: discord.ui.Button):
+            if interaction.user.id != self.user_id:
+                await interaction.response.send_message("❌ This isn't your match entry!", ephemeral=True)
+                return
+            
+            if not self.match_data["games"]:
+                await interaction.response.send_message("❌ You must add at least one game!", ephemeral=True)
+                return
+            
+            await submit_manual_match(interaction, self.match_data)
+        
+        @discord.ui.button(label="Cancel", style=discord.ButtonStyle.danger)
+        async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+            if interaction.user.id != self.user_id:
+                await interaction.response.send_message("❌ This isn't your match entry!", ephemeral=True)
+                return
+            
+            await interaction.response.send_message("❌ Match entry cancelled.", ephemeral=True)
+            self.stop()
+    
+    async def submit_manual_match(interaction: discord.Interaction, match_data: dict):
+        """Submit the completed manual match"""
+        from searchmatchmaking import log_action
+        from ingame import RED_TEAM_EMOJI_ID, BLUE_TEAM_EMOJI_ID
+        
+        match_number = match_data["match_number"]
+        red_team = match_data["red_team"]
+        blue_team = match_data["blue_team"]
+        games = match_data["games"]
+        
+        # Calculate winner
+        red_wins = sum(1 for g in games if g["winner"] == "RED")
+        blue_wins = sum(1 for g in games if g["winner"] == "BLUE")
+        
+        if red_wins > blue_wins:
+            winner = "RED"
+            embed_color = discord.Color.red()
+        elif blue_wins > red_wins:
+            winner = "BLUE"
+            embed_color = discord.Color.blue()
+        else:
+            winner = "TIE"
+            embed_color = discord.Color.greyple()
+        
+        # Create results embed
+        if winner == "TIE":
+            embed = discord.Embed(
+                title=f"Match #{match_number} Results - TIE!",
+                color=embed_color
+            )
+        else:
+            embed = discord.Embed(
+                title=f"Match #{match_number} Results - {winner} WINS!",
+                color=embed_color
+            )
+        
+        # Team mentions
+        red_mentions = "\n".join([f"<@{uid}>" for uid in red_team])
+        blue_mentions = "\n".join([f"<@{uid}>" for uid in blue_team])
+        
+        embed.add_field(
+            name=f"<:redteam:{RED_TEAM_EMOJI_ID}> Red Team - {red_wins}", 
+            value=red_mentions, 
+            inline=True
+        )
+        embed.add_field(
+            name=f"<:blueteam:{BLUE_TEAM_EMOJI_ID}> Blue Team - {blue_wins}", 
+            value=blue_mentions, 
+            inline=True
+        )
+        
+        embed.add_field(name="Final Score", value=f"Red **{red_wins}** - **{blue_wins}** Blue", inline=False)
+        
+        # Game results with map/gametype
+        results_text = ""
+        for i, game in enumerate(games, 1):
+            if game["winner"] == "RED":
+                emoji = f"<:redteam:{RED_TEAM_EMOJI_ID}>"
+            else:
+                emoji = f"<:blueteam:{BLUE_TEAM_EMOJI_ID}>"
+            results_text += f"{emoji} Game {i} Winner - {game['map']} - {game['gametype']}\n"
+        
+        embed.add_field(name="Game Results", value=results_text, inline=False)
+        embed.set_footer(text="Manual Entry")
+        
+        # Post to queue channel
+        queue_channel = interaction.guild.get_channel(QUEUE_CHANNEL_ID)
+        if queue_channel:
+            await queue_channel.send(embed=embed)
+        
+        # Record stats for all players
+        try:
+            import STATSRANKS
+            
+            # Record match using the manual match function
+            await STATSRANKS.record_manual_match(
+                red_team, blue_team, games, winner, interaction.guild, match_number
+            )
+            log_action(f"Manual match #{match_number} stats recorded")
+        except Exception as e:
+            log_action(f"Failed to record manual match stats: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        log_action(f"Manual match #{match_number} submitted by {interaction.user.display_name}")
+        log_action(f"Result: {winner} ({red_wins}-{blue_wins})")
+        
+        await interaction.response.send_message(
+            f"✅ **Match #{match_number} submitted!**\n\n"
+            f"**Winner:** {winner}\n"
+            f"**Score:** Red {red_wins} - {blue_wins} Blue\n"
+            f"**Games:** {len(games)}\n\n"
+            f"Results posted to {queue_channel.mention if queue_channel else 'queue channel'}",
+            ephemeral=True
+        )
+    
+    @bot.tree.command(name='manualmatchentry', description='[STAFF] Manually enter a completed match with results')
+    @app_commands.describe(
+        match_number="The match number to register",
+        red1="Red Team Player 1",
+        red2="Red Team Player 2", 
+        red3="Red Team Player 3",
+        red4="Red Team Player 4",
+        blue1="Blue Team Player 1",
+        blue2="Blue Team Player 2",
+        blue3="Blue Team Player 3",
+        blue4="Blue Team Player 4"
+    )
+    @has_staff_role()
+    async def manual_match_entry(
+        interaction: discord.Interaction,
+        match_number: int,
+        red1: discord.Member,
+        red2: discord.Member,
+        red3: discord.Member,
+        red4: discord.Member,
+        blue1: discord.Member,
+        blue2: discord.Member,
+        blue3: discord.Member,
+        blue4: discord.Member
+    ):
+        """Manually enter a completed match - opens a form to add games"""
+        from searchmatchmaking import log_action
+        
+        # Validate match number
+        if match_number < 1:
+            await interaction.response.send_message("❌ Match number must be 1 or higher!", ephemeral=True)
+            return
+        
+        # Check for duplicate players
+        all_players = [red1, red2, red3, red4, blue1, blue2, blue3, blue4]
+        player_ids = [p.id for p in all_players]
+        
+        if len(player_ids) != len(set(player_ids)):
+            await interaction.response.send_message("❌ Duplicate players detected!", ephemeral=True)
+            return
+        
+        red_team = [red1.id, red2.id, red3.id, red4.id]
+        blue_team = [blue1.id, blue2.id, blue3.id, blue4.id]
+        
+        # Create match data structure
+        match_data = {
+            "match_number": match_number,
+            "red_team": red_team,
+            "blue_team": blue_team,
+            "games": []
+        }
+        
+        red_names = [p.display_name for p in [red1, red2, red3, red4]]
+        blue_names = [p.display_name for p in [blue1, blue2, blue3, blue4]]
+        
+        log_action(f"Manual match entry started: Match #{match_number} by {interaction.user.display_name}")
+        
+        # Send initial message with Add Game button
+        await interaction.response.send_message(
+            f"📝 **Manual Match Entry - Match #{match_number}**\n\n"
+            f"🔴 **Red Team:** {', '.join(red_names)}\n"
+            f"🔵 **Blue Team:** {', '.join(blue_names)}\n\n"
+            f"Click **Add Game** to enter each game's result.\n"
+            f"When done, click **Submit Match** to post the results.",
+            view=ManualMatchView(match_data, interaction.user.id),
+            ephemeral=True
+        )
     
     return bot
