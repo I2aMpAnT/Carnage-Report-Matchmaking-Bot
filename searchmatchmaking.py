@@ -44,6 +44,7 @@ class QueueState:
         self.hide_player_names: bool = False  # Hide player names in queue list
         self.guests: dict = {}  # guest_id -> {"host_id": int, "mmr": int, "name": str}
         self.guest_counter: int = 1000000  # Start guest IDs at 1 million to avoid conflicts
+        self.paused: bool = False  # Matchmaking paused flag
 
 # Global queue state
 queue_state = QueueState()
@@ -85,6 +86,14 @@ class QueueView(View):
     async def join_queue(self, interaction: discord.Interaction, button: discord.ui.Button):
         user_id = interaction.user.id
         user_roles = [role.name for role in interaction.user.roles]
+        
+        # Check if matchmaking is paused
+        if queue_state.paused:
+            await interaction.response.send_message(
+                "⏸️ **Sorry, Matchmaking is currently paused.**\n\nPlease wait for a staff member to resume it.",
+                ephemeral=True
+            )
+            return
         
         # Check banned/required roles
         import json
@@ -340,6 +349,14 @@ class PingJoinView(View):
         """Join queue from the ping message"""
         user_id = interaction.user.id
         user_roles = [role.name for role in interaction.user.roles]
+        
+        # Check if matchmaking is paused
+        if queue_state.paused:
+            await interaction.response.send_message(
+                "⏸️ **Sorry, Matchmaking is currently paused.**\n\nPlease wait for a staff member to resume it.",
+                ephemeral=True
+            )
+            return
         
         # Check banned/required roles
         import json

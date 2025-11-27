@@ -1749,4 +1749,40 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             ephemeral=True
         )
     
+    @bot.tree.command(name='pause', description='[STAFF] Pause matchmaking - prevents new players from joining')
+    @has_staff_role()
+    async def pause_matchmaking(interaction: discord.Interaction):
+        """Pause matchmaking queue"""
+        from searchmatchmaking import queue_state, log_action
+        
+        if queue_state.paused:
+            await interaction.response.send_message("⏸️ Matchmaking is already paused!", ephemeral=True)
+            return
+        
+        queue_state.paused = True
+        log_action(f"Matchmaking paused by {interaction.user.display_name}")
+        
+        await interaction.response.send_message(
+            "⏸️ **Matchmaking is now PAUSED**\n\nPlayers cannot join the queue until you use `/unpause`",
+            ephemeral=True
+        )
+    
+    @bot.tree.command(name='unpause', description='[STAFF] Unpause matchmaking - allows players to join again')
+    @has_staff_role()
+    async def unpause_matchmaking(interaction: discord.Interaction):
+        """Unpause matchmaking queue"""
+        from searchmatchmaking import queue_state, log_action
+        
+        if not queue_state.paused:
+            await interaction.response.send_message("▶️ Matchmaking is not paused!", ephemeral=True)
+            return
+        
+        queue_state.paused = False
+        log_action(f"Matchmaking unpaused by {interaction.user.display_name}")
+        
+        await interaction.response.send_message(
+            "▶️ **Matchmaking is now RESUMED**\n\nPlayers can join the queue again!",
+            ephemeral=True
+        )
+    
     return bot
