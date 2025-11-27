@@ -1,6 +1,6 @@
 # searchmatchmaking.py - Queue Management System
 
-MODULE_VERSION = "1.1.0"
+MODULE_VERSION = "1.2.0"
 
 import discord
 from discord.ui import View, Button
@@ -47,6 +47,8 @@ class QueueState:
         self.guests: dict = {}  # guest_id -> {"host_id": int, "mmr": int, "name": str}
         self.guest_counter: int = 1000000  # Start guest IDs at 1 million to avoid conflicts
         self.paused: bool = False  # Matchmaking paused flag
+        self.inactivity_pending: dict = {}  # user_id -> {"prompt_time": datetime, "dm_message": Message, "general_message": Message}
+        self.inactivity_timer_task: Optional[asyncio.Task] = None  # Background task for inactivity checks
 
 # Global queue state
 queue_state = QueueState()
@@ -56,6 +58,8 @@ MAX_QUEUE_SIZE = 8
 PREGAME_TIMER_SECONDS = 60
 GENERAL_CHANNEL_ID = 1403855176460406805
 PING_COOLDOWN_MINUTES = 15
+INACTIVITY_CHECK_MINUTES = 60  # Time before prompting user (1 hour)
+INACTIVITY_RESPONSE_MINUTES = 5  # Time user has to respond
 
 def log_action(message: str):
     """Log actions to log.txt"""
@@ -79,6 +83,290 @@ async def auto_update_queue_times():
         except Exception as e:
             log_action(f"Error in auto-update: {e}")
             await asyncio.sleep(10)
+
+
+class InactivityConfirmView(View):
+    """View for inactivity confirmation with Yes/No buttons - uses dynamic custom_ids"""
+    def __init__(self, user_id: int):
+        super().__init__(timeout=INACTIVITY_RESPONSE_MINUTES * 60)  # 5 minute timeout
+        self.user_id = user_id
+        self.responded = False
+
+        # Add buttons with dynamic custom_ids (include user_id so each user has unique buttons)
+        yes_button = Button(
+            label="Yes, Keep Me In Queue",
+            style=discord.ButtonStyle.success,
+            custom_id=f"inactivity_yes_{user_id}"
+        )
+        yes_button.callback = self.stay_in_queue
+        self.add_item(yes_button)
+
+        no_button = Button(
+            label="No, Remove Me",
+            style=discord.ButtonStyle.danger,
+            custom_id=f"inactivity_no_{user_id}"
+        )
+        no_button.callback = self.leave_queue_btn
+        self.add_item(no_button)
+
+    async def stay_in_queue(self, interaction: discord.Interaction):
+        """User wants to stay in queue"""
+        # Only the original user can respond
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This confirmation is not for you!", ephemeral=True)
+            return
+
+        self.responded = True
+
+        # Reset their join time to give them another hour
+        if self.user_id in queue_state.queue:
+            queue_state.queue_join_times[self.user_id] = datetime.now()
+            log_action(f"User {interaction.user.display_name} confirmed to stay in queue - timer reset")
+
+            # Clean up pending confirmation
+            await cleanup_inactivity_messages(self.user_id)
+
+            # Update the message to show confirmation
+            try:
+                await interaction.response.edit_message(
+                    content="✅ **You've been kept in the queue!** Your timer has been reset for another hour.",
+                    embed=None,
+                    view=None
+                )
+            except:
+                await interaction.response.send_message("✅ You've been kept in the queue!", ephemeral=True)
+
+            # Update queue embed
+            if queue_state.queue_channel:
+                await update_queue_embed(queue_state.queue_channel)
+        else:
+            await interaction.response.send_message("You're no longer in the queue.", ephemeral=True)
+
+    async def leave_queue_btn(self, interaction: discord.Interaction):
+        """User wants to leave queue"""
+        # Only the original user can respond
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This confirmation is not for you!", ephemeral=True)
+            return
+
+        self.responded = True
+
+        # Remove from queue
+        if self.user_id in queue_state.queue:
+            await remove_inactive_user(interaction.guild, self.user_id, reason="chose to leave")
+
+            try:
+                await interaction.response.edit_message(
+                    content="👋 **You've been removed from the queue.** Feel free to rejoin anytime!",
+                    embed=None,
+                    view=None
+                )
+            except:
+                await interaction.response.send_message("👋 You've been removed from the queue.", ephemeral=True)
+        else:
+            await interaction.response.send_message("You're no longer in the queue.", ephemeral=True)
+
+    async def on_timeout(self):
+        """Called when the view times out (no response in 5 minutes)"""
+        if not self.responded and self.user_id in queue_state.queue:
+            # Need to get guild from somewhere - use stored channel
+            if queue_state.queue_channel:
+                guild = queue_state.queue_channel.guild
+                await remove_inactive_user(guild, self.user_id, reason="did not respond to inactivity check")
+
+
+async def remove_inactive_user(guild: discord.Guild, user_id: int, reason: str = "inactivity"):
+    """Remove a user from queue due to inactivity"""
+    if user_id not in queue_state.queue:
+        return
+
+    # Calculate time in queue
+    time_in_queue = ""
+    if user_id in queue_state.queue_join_times:
+        join_time = queue_state.queue_join_times[user_id]
+        elapsed = datetime.now() - join_time
+        total_minutes = int(elapsed.total_seconds() / 60)
+
+        if total_minutes >= 60:
+            hours = total_minutes // 60
+            mins = total_minutes % 60
+            time_in_queue = f"{hours}h {mins}m"
+        else:
+            time_in_queue = f"{total_minutes}m"
+
+        del queue_state.queue_join_times[user_id]
+
+    # Get member for display name and role removal
+    member = guild.get_member(user_id)
+    display_name = member.display_name if member else f"User {user_id}"
+
+    # Remove from queue
+    queue_state.queue.remove(user_id)
+    queue_state.recent_action = {
+        'type': 'leave',
+        'user_id': user_id,
+        'name': display_name,
+        'time_in_queue': time_in_queue
+    }
+
+    log_action(f"{display_name} removed from queue ({reason}) after {time_in_queue} ({len(queue_state.queue)}/{MAX_QUEUE_SIZE})")
+
+    # Remove SearchingMatchmaking role
+    if member:
+        try:
+            searching_role = discord.utils.get(guild.roles, name="SearchingMatchmaking")
+            if searching_role:
+                await member.remove_roles(searching_role)
+                log_action(f"Removed SearchingMatchmaking role from {display_name}")
+        except Exception as e:
+            log_action(f"Failed to remove SearchingMatchmaking role: {e}")
+
+    # Clean up pending confirmation messages
+    await cleanup_inactivity_messages(user_id)
+
+    # Save state
+    try:
+        import state_manager
+        state_manager.save_state()
+    except:
+        pass
+
+    # Update queue embed
+    if queue_state.queue_channel:
+        await update_queue_embed(queue_state.queue_channel)
+
+    # Update ping message if exists
+    await update_ping_message(guild)
+
+
+async def cleanup_inactivity_messages(user_id: int):
+    """Clean up DM and general chat messages for a user's inactivity prompt"""
+    if user_id in queue_state.inactivity_pending:
+        pending = queue_state.inactivity_pending[user_id]
+
+        # Try to delete the general chat message
+        if pending.get("general_message"):
+            try:
+                await pending["general_message"].delete()
+            except:
+                pass
+
+        # Try to edit the DM message (can't delete DMs sent by bot)
+        if pending.get("dm_message"):
+            try:
+                await pending["dm_message"].edit(
+                    content="⏱️ *This inactivity check has expired.*",
+                    embed=None,
+                    view=None
+                )
+            except:
+                pass
+
+        del queue_state.inactivity_pending[user_id]
+
+
+async def send_inactivity_prompt(guild: discord.Guild, user_id: int):
+    """Send inactivity prompt to user via DM and general chat"""
+    member = guild.get_member(user_id)
+    if not member:
+        return
+
+    # Create the confirmation view
+    view = InactivityConfirmView(user_id)
+
+    # Create embed for the prompt
+    embed = discord.Embed(
+        title="⏰ Queue Inactivity Check",
+        description=f"You've been in the matchmaking queue for **1 hour**.\n\n"
+                   f"Would you like to remain in the queue?\n\n"
+                   f"**If you don't respond within {INACTIVITY_RESPONSE_MINUTES} minutes, you'll be automatically removed.**",
+        color=discord.Color.orange()
+    )
+    embed.set_thumbnail(url=HEADER_IMAGE_URL)
+    embed.set_footer(text="Click a button below to respond")
+
+    dm_message = None
+    general_message = None
+
+    # Try to DM the user
+    try:
+        dm_message = await member.send(embed=embed, view=view)
+        log_action(f"Sent inactivity DM to {member.display_name}")
+    except discord.Forbidden:
+        log_action(f"Could not DM {member.display_name} - DMs disabled")
+    except Exception as e:
+        log_action(f"Error sending inactivity DM to {member.display_name}: {e}")
+
+    # Also send a message in general chat with @mention
+    general_channel = guild.get_channel(GENERAL_CHANNEL_ID)
+    if general_channel:
+        try:
+            general_embed = discord.Embed(
+                title="⏰ Queue Inactivity Check",
+                description=f"{member.mention} has been in queue for **1 hour**.\n\n"
+                           f"Please respond within {INACTIVITY_RESPONSE_MINUTES} minutes or you'll be removed from the queue.",
+                color=discord.Color.orange()
+            )
+            general_message = await general_channel.send(
+                content=member.mention,
+                embed=general_embed,
+                view=InactivityConfirmView(user_id)  # Separate view instance for general chat
+            )
+            log_action(f"Sent inactivity ping in general for {member.display_name}")
+        except Exception as e:
+            log_action(f"Error sending inactivity message to general chat: {e}")
+
+    # Store the pending confirmation
+    queue_state.inactivity_pending[user_id] = {
+        "prompt_time": datetime.now(),
+        "dm_message": dm_message,
+        "general_message": general_message
+    }
+
+
+async def check_queue_inactivity():
+    """Background task to check for inactive users in queue"""
+    await asyncio.sleep(30)  # Wait 30 seconds on startup before first check
+
+    while True:
+        try:
+            now = datetime.now()
+
+            # Check each user in queue
+            for user_id in list(queue_state.queue):  # Use list() to avoid modification during iteration
+                # Skip if user already has a pending confirmation
+                if user_id in queue_state.inactivity_pending:
+                    # Check if the pending confirmation has timed out
+                    pending = queue_state.inactivity_pending[user_id]
+                    prompt_time = pending.get("prompt_time")
+                    if prompt_time:
+                        elapsed = now - prompt_time
+                        if elapsed.total_seconds() >= INACTIVITY_RESPONSE_MINUTES * 60:
+                            # Time's up - remove the user
+                            if queue_state.queue_channel:
+                                guild = queue_state.queue_channel.guild
+                                await remove_inactive_user(guild, user_id, reason="did not respond to inactivity check")
+                    continue
+
+                # Check how long they've been in queue
+                join_time = queue_state.queue_join_times.get(user_id)
+                if join_time:
+                    elapsed = now - join_time
+                    if elapsed.total_seconds() >= INACTIVITY_CHECK_MINUTES * 60:
+                        # User has been in queue for 1 hour - send prompt
+                        if queue_state.queue_channel:
+                            guild = queue_state.queue_channel.guild
+                            await send_inactivity_prompt(guild, user_id)
+
+            # Check every 30 seconds for more responsive timeout handling
+            await asyncio.sleep(30)
+
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            log_action(f"Error in inactivity check: {e}")
+            await asyncio.sleep(30)
+
 
 class QueueView(View):
     def __init__(self):
@@ -237,7 +525,10 @@ class QueueView(View):
         }
         
         log_action(f"{interaction.user.display_name} left matchmaking after {time_in_queue} ({len(queue_state.queue)}/{MAX_QUEUE_SIZE})")
-        
+
+        # Clean up any pending inactivity confirmation
+        await cleanup_inactivity_messages(user_id)
+
         # Remove SearchingMatchmaking role
         try:
             searching_role = discord.utils.get(interaction.guild.roles, name="SearchingMatchmaking")
