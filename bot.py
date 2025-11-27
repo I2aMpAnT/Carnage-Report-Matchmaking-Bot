@@ -12,17 +12,17 @@ if __name__ == '__main__':
     print("=" * 50)
     print()
     
-    # Add the repo directory to Python path
-    # This allows importing from the cloned GitHub repo folder
+    # Add the GitHub repo folder to Python path
     repo_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Carnage-Report-Matchmaking-Bot")
     
     if os.path.exists(repo_dir):
         sys.path.insert(0, repo_dir)
-        os.chdir(repo_dir)  # Change to repo dir so file paths work
+        os.chdir(repo_dir)
         print(f"📁 Loading from: {repo_dir}")
     else:
-        # Fallback: HCRBot.py is in same directory as bot.py
-        print(f"📁 Loading from current directory")
+        print(f"❌ ERROR: Cannot find repo folder: {repo_dir}")
+        print("Make sure you cloned the GitHub repo into this directory.")
+        sys.exit(1)
     
     print()
     
