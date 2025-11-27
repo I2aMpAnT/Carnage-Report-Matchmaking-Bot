@@ -3,6 +3,8 @@ state_manager.py - Matchmaking State Persistence
 Saves and restores queue/match state across bot restarts
 """
 
+MODULE_VERSION = "1.1.0"
+
 import json
 import os
 from datetime import datetime

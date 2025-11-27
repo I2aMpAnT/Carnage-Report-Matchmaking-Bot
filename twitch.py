@@ -3,6 +3,8 @@ twitch.py - Twitch Integration Module
 Manages player Twitch links and multi-stream URLs
 """
 
+MODULE_VERSION = "1.1.0"
+
 import discord
 from discord import app_commands
 from discord.ext import commands

@@ -1,5 +1,7 @@
 # ingame.py - In-Game Series Management and Voting
 
+MODULE_VERSION = "1.1.0"
+
 import discord
 from discord.ui import View, Button
 from typing import List, Dict, Optional
