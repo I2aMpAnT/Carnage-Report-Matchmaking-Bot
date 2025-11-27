@@ -1616,69 +1616,79 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         is_admin = any(role in ADMIN_ROLES for role in user_roles)
         
         embed = discord.Embed(
-            title="Bot Commands",
-            description="Here are all available commands:",
+            title="HCR Bot Commands",
+            description="Halo 2 Carnage Report Matchmaking",
             color=discord.Color.blue()
         )
         
-        # Public Commands - Split into smaller sections
+        # Public Commands
         embed.add_field(
-            name="Queue & Match",
-            value="• Buttons in queue channel to join/leave\n• `/swap @red @blue` - Swap players\n• `/stream` - MultiTwitch links",
-            inline=False
+            name="🎮 Matchmaking",
+            value="`/swap` `/stream`",
+            inline=True
         )
         
         embed.add_field(
-            name="Twitch & Alias",
-            value="• `/settwitch <n>` / `/removetwitch`\n• `/mytwitch` / `/checktwitch @user`\n• `/linkalias <n>` / `/unlinkalias <n>`\n• `/myaliases` / `/checkaliases @user`",
-            inline=False
+            name="📺 Twitch",
+            value="`/settwitch` `/removetwitch`\n`/mytwitch` `/checktwitch`",
+            inline=True
         )
         
         embed.add_field(
-            name="Stats",
-            value="• `/playerstats` - Your stats\n• `/leaderboard` - Rankings\n• `/verifystats` - Update rank role",
-            inline=False
+            name="🏷️ Aliases",
+            value="`/linkalias` `/unlinkalias`\n`/myaliases` `/checkaliases`",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="📊 Stats",
+            value="`/playerstats` `/leaderboard` `/verifystats`",
+            inline=True
         )
         
         # Admin Commands - only show to admins
         if is_admin:
             embed.add_field(
-                name="Admin - Queue",
-                value="• `/addplayer` / `/removeplayer`\n• `/resetqueue` / `/cancelmatch`",
+                name="⚙️ Staff - Queue",
+                value="`/addplayer` `/removeplayer` `/resetqueue`\n`/pause` `/unpause` `/resetmatchmaking`",
                 inline=True
             )
             
             embed.add_field(
-                name="Admin - Match",
-                value="• `/correctcurrent <#> <winner>`\n• `/mmr @user <value>`\n• `/silentrankrefresh`",
+                name="⚙️ Staff - Match",
+                value="`/cancelmatch` `/correctcurrent`\n`/setgamestats` `/adminarrange`\n`/adminguestmatch`",
                 inline=True
             )
             
             embed.add_field(
-                name="Admin - Config",
-                value="• `/bannedroles <roles>`\n• `/requiredroles <roles>`",
+                name="⚙️ Staff - Guests",
+                value="`/guest` `/removeguest`",
                 inline=True
             )
             
             embed.add_field(
-                name="Admin - Testing",
-                value="• `/testmatchmaking` - 2p test\n• `/testmatchmakingred` - 8p RED\n• `/testmatchmakingblue` - 8p BLUE",
+                name="⚙️ Staff - MAC Tracking",
+                value="`/linkmac` `/unlinkmac` `/checkmac`",
                 inline=True
             )
             
             embed.add_field(
-                name="Admin - Twitch/Alias",
-                value="• `/adminsettwitch @user <n>`\n• `/adminremovetwitch @user`\n• `/adminunlinkalias @user <alias>`",
+                name="⚙️ Staff - Players",
+                value="`/mmr` `/adminsettwitch`\n`/adminremovetwitch` `/adminunlinkalias`",
                 inline=True
             )
             
             embed.add_field(
-                name="Admin - Display",
-                value="• `/hideplayernames` - Show 'Matched Player'\n• `/showplayernames` - Show real names",
+                name="⚙️ Staff - Config",
+                value="`/bannedroles` `/requiredroles`\n`/hideplayernames` `/showplayernames`\n`/silentrankrefresh`",
                 inline=True
             )
-        
-        embed.set_footer(text="Use /help anytime to see this list")
+            
+            embed.add_field(
+                name="⚙️ Staff - Testing",
+                value="`/testmatchmaking`\n`/testmatchmakingred`\n`/testmatchmakingblue`",
+                inline=True
+            )
         
         await interaction.response.send_message(embed=embed, ephemeral=True)
     
@@ -1814,6 +1824,205 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         log_action(f"Guest removed: {guest_name}")
         
         await interaction.response.send_message(f"✅ Removed **{guest_name}** from queue", ephemeral=True)
+    
+    @bot.tree.command(name='linkmac', description='[STAFF] Link a player to their MAC address for stat tracking')
+    @app_commands.describe(
+        player="The player to link",
+        mac_address="The MAC address (copy/paste from game)"
+    )
+    @has_staff_role()
+    async def link_mac(interaction: discord.Interaction, player: discord.Member, mac_address: str):
+        """Link a player's Discord ID to their MAC address"""
+        from searchmatchmaking import log_action
+        import json
+        import os
+        
+        # Clean up MAC address - remove extra spaces, normalize format
+        mac_address = mac_address.strip().upper()
+        
+        # Basic validation - MAC should have colons or dashes
+        # Accept various formats: AA:BB:CC:DD:EE:FF or AA-BB-CC-DD-EE-FF or AABBCCDDEEFF
+        clean_mac = mac_address.replace("-", ":").replace(" ", "")
+        
+        # If no colons, try to format it
+        if ":" not in clean_mac and len(clean_mac) == 12:
+            clean_mac = ":".join(clean_mac[i:i+2] for i in range(0, 12, 2))
+        
+        # Load players.json
+        players_file = "players.json"
+        if os.path.exists(players_file):
+            with open(players_file, 'r') as f:
+                players = json.load(f)
+        else:
+            players = {}
+        
+        user_id = str(player.id)
+        
+        # Initialize player entry if doesn't exist
+        if user_id not in players:
+            players[user_id] = {}
+        
+        # Check if this MAC is already linked to someone else
+        for other_id, other_data in players.items():
+            if other_id != user_id:
+                other_macs = other_data.get("mac_addresses", [])
+                if clean_mac in other_macs:
+                    other_member = interaction.guild.get_member(int(other_id))
+                    other_name = other_member.display_name if other_member else f"User {other_id}"
+                    await interaction.response.send_message(
+                        f"⚠️ This MAC address is already linked to **{other_name}**!\n"
+                        f"Use `/unlinkmac` on them first if you want to reassign it.",
+                        ephemeral=True
+                    )
+                    return
+        
+        # Initialize mac_addresses list if doesn't exist
+        if "mac_addresses" not in players[user_id]:
+            players[user_id]["mac_addresses"] = []
+        
+        # Check if already linked to this player
+        if clean_mac in players[user_id]["mac_addresses"]:
+            await interaction.response.send_message(
+                f"ℹ️ MAC address `{clean_mac}` is already linked to **{player.display_name}**",
+                ephemeral=True
+            )
+            return
+        
+        # Add the MAC address
+        players[user_id]["mac_addresses"].append(clean_mac)
+        
+        # Save players.json
+        with open(players_file, 'w') as f:
+            json.dump(players, f, indent=2)
+        
+        mac_count = len(players[user_id]["mac_addresses"])
+        log_action(f"MAC linked: {player.display_name} -> {clean_mac}")
+        
+        await interaction.response.send_message(
+            f"✅ Linked MAC address to **{player.display_name}**\n"
+            f"**MAC:** `{clean_mac}`\n"
+            f"**Total MACs linked:** {mac_count}",
+            ephemeral=True
+        )
+    
+    @bot.tree.command(name='unlinkmac', description='[STAFF] Remove a MAC address from a player')
+    @app_commands.describe(
+        player="The player to unlink from",
+        mac_address="The MAC address to remove (or 'all' to remove all)"
+    )
+    @has_staff_role()
+    async def unlink_mac(interaction: discord.Interaction, player: discord.Member, mac_address: str):
+        """Remove a MAC address from a player"""
+        from searchmatchmaking import log_action
+        import json
+        import os
+        
+        players_file = "players.json"
+        if not os.path.exists(players_file):
+            await interaction.response.send_message("❌ No player data found!", ephemeral=True)
+            return
+        
+        with open(players_file, 'r') as f:
+            players = json.load(f)
+        
+        user_id = str(player.id)
+        
+        if user_id not in players or "mac_addresses" not in players[user_id]:
+            await interaction.response.send_message(
+                f"❌ **{player.display_name}** has no MAC addresses linked!",
+                ephemeral=True
+            )
+            return
+        
+        if not players[user_id]["mac_addresses"]:
+            await interaction.response.send_message(
+                f"❌ **{player.display_name}** has no MAC addresses linked!",
+                ephemeral=True
+            )
+            return
+        
+        # Handle "all" to remove all MACs
+        if mac_address.lower() == "all":
+            count = len(players[user_id]["mac_addresses"])
+            players[user_id]["mac_addresses"] = []
+            
+            with open(players_file, 'w') as f:
+                json.dump(players, f, indent=2)
+            
+            log_action(f"All MACs unlinked from {player.display_name} ({count} removed)")
+            
+            await interaction.response.send_message(
+                f"✅ Removed all **{count}** MAC addresses from **{player.display_name}**",
+                ephemeral=True
+            )
+            return
+        
+        # Clean up MAC address
+        clean_mac = mac_address.strip().upper().replace("-", ":").replace(" ", "")
+        if ":" not in clean_mac and len(clean_mac) == 12:
+            clean_mac = ":".join(clean_mac[i:i+2] for i in range(0, 12, 2))
+        
+        if clean_mac not in players[user_id]["mac_addresses"]:
+            await interaction.response.send_message(
+                f"❌ MAC address `{clean_mac}` is not linked to **{player.display_name}**!",
+                ephemeral=True
+            )
+            return
+        
+        players[user_id]["mac_addresses"].remove(clean_mac)
+        
+        with open(players_file, 'w') as f:
+            json.dump(players, f, indent=2)
+        
+        remaining = len(players[user_id]["mac_addresses"])
+        log_action(f"MAC unlinked from {player.display_name}: {clean_mac}")
+        
+        await interaction.response.send_message(
+            f"✅ Removed MAC `{clean_mac}` from **{player.display_name}**\n"
+            f"**Remaining MACs:** {remaining}",
+            ephemeral=True
+        )
+    
+    @bot.tree.command(name='checkmac', description='[STAFF] Check MAC addresses linked to a player')
+    @app_commands.describe(player="The player to check")
+    @has_staff_role()
+    async def check_mac(interaction: discord.Interaction, player: discord.Member):
+        """Check what MAC addresses are linked to a player"""
+        import json
+        import os
+        
+        players_file = "players.json"
+        if not os.path.exists(players_file):
+            await interaction.response.send_message("❌ No player data found!", ephemeral=True)
+            return
+        
+        with open(players_file, 'r') as f:
+            players = json.load(f)
+        
+        user_id = str(player.id)
+        
+        if user_id not in players or "mac_addresses" not in players[user_id]:
+            await interaction.response.send_message(
+                f"ℹ️ **{player.display_name}** has no MAC addresses linked.",
+                ephemeral=True
+            )
+            return
+        
+        macs = players[user_id]["mac_addresses"]
+        
+        if not macs:
+            await interaction.response.send_message(
+                f"ℹ️ **{player.display_name}** has no MAC addresses linked.",
+                ephemeral=True
+            )
+            return
+        
+        mac_list = "\n".join([f"• `{mac}`" for mac in macs])
+        
+        await interaction.response.send_message(
+            f"**{player.display_name}**'s MAC Addresses ({len(macs)}):\n{mac_list}",
+            ephemeral=True
+        )
     
     @bot.tree.command(name='resetmatchmaking', description='[STAFF] Reset and empty the matchmaking queue')
     @has_staff_role()
