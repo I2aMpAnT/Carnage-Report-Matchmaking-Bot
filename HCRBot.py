@@ -171,11 +171,10 @@ async def on_command_error(ctx, error):
     log_action(f"Command error: {error}")
     await ctx.send(f"❌ Error: {error}")
 
-# Run bot
-if __name__ == '__main__':
-    if not TOKEN:
-        print("❌ Error: No Discord token found!")
-        print("Please set DISCORD_TOKEN in your .env file")
-    else:
-        print("🚀 Starting bot...")
-        bot.run(TOKEN)
+# Run bot - works both when imported and when run directly
+if not TOKEN:
+    print("❌ Error: No Discord token found!")
+    print("Please set DISCORD_TOKEN in your .env file")
+else:
+    print("🚀 Starting bot...")
+    bot.run(TOKEN)
