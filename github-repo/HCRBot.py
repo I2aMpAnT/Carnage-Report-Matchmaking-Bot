@@ -1,4 +1,12 @@
-# bot.py - Main Bot Entry Point
+# HCRBot.py - Main Bot Entry Point
+# Halo 2 Carnage Report Matchmaking Bot
+
+# ============================================
+# VERSION INFO
+# ============================================
+BOT_VERSION = "1.0.0"
+BOT_BUILD_DATE = "2025-11-27"
+# ============================================
 
 import discord
 from discord.ext import commands
@@ -85,12 +93,18 @@ def setup_module_config():
 # Bot Events
 @bot.event
 async def on_ready():
+    print()
+    print("=" * 50)
+    print(f"  HCR BOT v{BOT_VERSION}")
+    print(f"  Build Date: {BOT_BUILD_DATE}")
+    print("=" * 50)
+    print()
     print(f'✅ {bot.user} connected to Discord!')
     print(f'Bot ID: {bot.user.id}')
     print(f'Guilds: {len(bot.guilds)}')
     
     from searchmatchmaking import log_action, create_queue_embed
-    log_action(f"Bot started as {bot.user}")
+    log_action(f"Bot v{BOT_VERSION} started as {bot.user}")
     
     # Setup module configuration
     setup_module_config()
