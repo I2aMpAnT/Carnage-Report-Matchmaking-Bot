@@ -16,6 +16,27 @@ def log_action(message: str):
     from searchmatchmaking import log_action as queue_log
     queue_log(message)
 
+def format_game_result(game_num: int, winner: str, game_stats: dict) -> str:
+    """Format a game result line with map/gametype if available"""
+    if winner == 'RED':
+        emoji = f"<:redteam:{RED_TEAM_EMOJI_ID}>"
+    else:
+        emoji = f"<:blueteam:{BLUE_TEAM_EMOJI_ID}>"
+    
+    # Check if stats exist for this game
+    if game_num in game_stats:
+        stats = game_stats[game_num]
+        map_name = stats.get("map", "")
+        gametype = stats.get("gametype", "")
+        if map_name and gametype:
+            return f"{emoji} Game {game_num} Winner - {map_name} - {gametype}\n"
+        elif map_name:
+            return f"{emoji} Game {game_num} Winner - {map_name}\n"
+        elif gametype:
+            return f"{emoji} Game {game_num} Winner - {gametype}\n"
+    
+    return f"{emoji} Game {game_num} Winner\n"
+
 async def update_general_chat_embed(guild: discord.Guild, series):
     """Send/update match-in-progress embed in general chat with Twitch links and multistream buttons"""
     channel = guild.get_channel(GENERAL_CHANNEL_ID)
@@ -139,6 +160,7 @@ class Series:
         self.red_team = red_team
         self.blue_team = blue_team
         self.games: List[str] = []
+        self.game_stats: Dict[int, dict] = {}  # game_number -> {"map": str, "gametype": str}
         self.votes: Dict[int, str] = {}
         self.current_game = 1
         self.series_message: Optional[discord.Message] = None
@@ -369,11 +391,7 @@ class SeriesView(View):
         if series.games:
             games_text = ""
             for i, winner in enumerate(series.games, 1):
-                if winner == 'RED':
-                    emoji = f"<:redteam:{RED_TEAM_EMOJI_ID}>"
-                else:
-                    emoji = f"<:blueteam:{BLUE_TEAM_EMOJI_ID}>"
-                games_text += f"{emoji} Game {i} Winner\n"
+                games_text += format_game_result(i, winner, series.game_stats)
             
             embed.add_field(
                 name="Completed Games",
@@ -446,11 +464,7 @@ async def show_series_embed(channel: discord.TextChannel):
     if series.games:
         games_text = ""
         for i, winner in enumerate(series.games, 1):
-            if winner == 'RED':
-                emoji = f"<:redteam:{RED_TEAM_EMOJI_ID}>"
-            else:
-                emoji = f"<:blueteam:{BLUE_TEAM_EMOJI_ID}>"
-            games_text += f"{emoji} Game {i} Winner\n"
+            games_text += format_game_result(i, winner, series.game_stats)
         
         embed.add_field(
             name="Completed Games",

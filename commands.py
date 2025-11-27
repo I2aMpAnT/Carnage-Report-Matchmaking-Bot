@@ -1179,6 +1179,70 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             ephemeral=True
         )
     
+    @bot.tree.command(name='setgamestats', description='[STAFF] Set map and gametype for a completed game')
+    @app_commands.describe(
+        game_number="The game number (1, 2, 3, etc.)",
+        map_name="The map played",
+        gametype="The gametype played"
+    )
+    @has_staff_role()
+    async def set_game_stats(
+        interaction: discord.Interaction,
+        game_number: int,
+        map_name: str,
+        gametype: str
+    ):
+        """Set map and gametype stats for a completed game"""
+        from searchmatchmaking import queue_state, log_action
+        
+        # Check if there's an active series
+        if not queue_state.current_series:
+            await interaction.response.send_message("❌ No active match!", ephemeral=True)
+            return
+        
+        series = queue_state.current_series
+        
+        # Validate game number
+        if game_number < 1:
+            await interaction.response.send_message("❌ Game number must be 1 or higher!", ephemeral=True)
+            return
+        
+        if game_number > len(series.games):
+            await interaction.response.send_message(
+                f"❌ Game {game_number} hasn't been played yet! Only {len(series.games)} game(s) completed.",
+                ephemeral=True
+            )
+            return
+        
+        # Set the stats
+        series.game_stats[game_number] = {
+            "map": map_name.strip(),
+            "gametype": gametype.strip()
+        }
+        
+        log_action(f"Game {game_number} stats set: {map_name} - {gametype}")
+        
+        # Update series embed
+        from ingame import SeriesView
+        if series.series_message:
+            try:
+                view = SeriesView(series)
+                await view.update_series_embed(interaction.channel)
+            except Exception as e:
+                log_action(f"Failed to update series embed: {e}")
+        
+        # Update general chat embed
+        try:
+            from ingame import update_general_chat_embed
+            await update_general_chat_embed(interaction.guild, series)
+        except Exception as e:
+            log_action(f"Failed to update general chat embed: {e}")
+        
+        await interaction.response.send_message(
+            f"✅ Set Game {game_number} stats: **{map_name}** - **{gametype}**",
+            ephemeral=True
+        )
+    
     # ========== ALIAS COMMANDS ==========
     
     @bot.tree.command(name="linkalias", description="Link an in-game alias to your Discord account")

@@ -284,13 +284,10 @@ def build_match_embed_with_twitch(
     
     # Completed games
     if series.games:
+        from ingame import format_game_result
         games_text = ""
         for i, winner in enumerate(series.games, 1):
-            if winner == 'RED':
-                emoji = red_emoji
-            else:
-                emoji = blue_emoji
-            games_text += f"{emoji} Game {i} Winner!\n"
+            games_text += format_game_result(i, winner, series.game_stats)
         
         embed.add_field(
             name="Completed Games",

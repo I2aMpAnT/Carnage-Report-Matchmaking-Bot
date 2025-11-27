@@ -319,14 +319,11 @@ async def end_series(series_view, channel: discord.TextChannel):
     
     embed.add_field(name="Final Score", value=f"Red **{red_wins}** - **{blue_wins}** Blue", inline=False)
     
-    # Show game results with same format as ingame (no buttons, just emoji text)
+    # Show game results with map/gametype stats
+    from ingame import format_game_result
     results_text = ""
     for i, game_winner in enumerate(series.games, 1):
-        if game_winner == 'RED':
-            emoji = f"<:redteam:{RED_TEAM_EMOJI_ID}>"
-        else:
-            emoji = f"<:blueteam:{BLUE_TEAM_EMOJI_ID}>"
-        results_text += f"{emoji} Game {i} Winner\n"
+        results_text += format_game_result(i, game_winner, series.game_stats)
     
     embed.add_field(name="Game Results", value=results_text, inline=False)
     
