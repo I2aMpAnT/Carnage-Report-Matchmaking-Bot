@@ -323,10 +323,14 @@ def add_game_stats(match_number: int, game_number: int, map_name: str, gametype:
 
 def record_match_results(winners: List[int], losers: List[int], is_series_end: bool = False):
     """Record match results for all players with XP (no series bonuses)"""
+    from searchmatchmaking import queue_state
+    
     xp_config = get_xp_config()
     
-    # Update winners
+    # Update winners (skip guests - they don't track stats)
     for user_id in winners:
+        if user_id in queue_state.guests:
+            continue  # Skip guests
         update = {
             "wins": 1,
             "total_games": 1,
@@ -337,8 +341,10 @@ def record_match_results(winners: List[int], losers: List[int], is_series_end: b
             update["total_series"] = 1
         update_player_stats(user_id, update)
     
-    # Update losers
+    # Update losers (skip guests - they don't track stats)
     for user_id in losers:
+        if user_id in queue_state.guests:
+            continue  # Skip guests
         update = {
             "losses": 1,
             "total_games": 1,
@@ -351,7 +357,11 @@ def record_match_results(winners: List[int], losers: List[int], is_series_end: b
 
 async def refresh_all_ranks(guild: discord.Guild, player_ids: List[int], send_dm: bool = True):
     """Refresh rank roles for all players in a match"""
+    from searchmatchmaking import queue_state
+    
     for user_id in player_ids:
+        if user_id in queue_state.guests:
+            continue  # Skip guests
         player_stats = get_player_stats(user_id)
         new_level = calculate_rank(player_stats["xp"])
         await update_player_rank_role(guild, user_id, new_level, send_dm=send_dm)

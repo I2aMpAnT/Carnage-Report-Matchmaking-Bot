@@ -289,10 +289,12 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         # Update ping message
         await update_ping_message(interaction.guild)
         
-        await interaction.response.defer()
-        
+        # Check if queue is now full
         if len(queue_state.queue) == MAX_QUEUE_SIZE:
+            await interaction.response.send_message(f"✅ Added {user.display_name} - Queue full! Starting pregame...", ephemeral=True)
             await start_pregame(channel if channel else interaction.channel)
+        else:
+            await interaction.response.send_message(f"✅ Added {user.display_name} to queue ({len(queue_state.queue)}/{MAX_QUEUE_SIZE})", ephemeral=True)
     
     @bot.tree.command(name="removeplayer", description="[STAFF] Remove a player from current matchmaking")
     @has_staff_role()
@@ -1075,6 +1077,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
     ):
         """Swap players between teams mid-series"""
         from searchmatchmaking import queue_state, log_action
+        from pregame import get_player_mmr
         
         if not queue_state.current_series:
             await interaction.response.send_message("❌ No active series to swap players in!", ephemeral=True)
@@ -1131,6 +1134,28 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                         await blue_player.move_to(red_vc)
                     except:
                         pass
+                
+                # Recalculate MMR averages and rename VCs
+                red_mmrs = []
+                blue_mmrs = []
+                for uid in series.red_team:
+                    mmr = await get_player_mmr(uid)
+                    red_mmrs.append(mmr)
+                for uid in series.blue_team:
+                    mmr = await get_player_mmr(uid)
+                    blue_mmrs.append(mmr)
+                
+                new_red_avg = int(sum(red_mmrs) / len(red_mmrs)) if red_mmrs else 1500
+                new_blue_avg = int(sum(blue_mmrs) / len(blue_mmrs)) if blue_mmrs else 1500
+                
+                # Rename VCs with new MMR averages
+                series_label = series.series_number
+                try:
+                    await red_vc.edit(name=f"🔴 Red {series_label} - {new_red_avg} MMR")
+                    await blue_vc.edit(name=f"🔵 Blue {series_label} - {new_blue_avg} MMR")
+                    log_action(f"VCs renamed after swap - Red: {new_red_avg} MMR, Blue: {new_blue_avg} MMR")
+                except Exception as e:
+                    log_action(f"Failed to rename VCs: {e}")
         
         # Update series embed if it exists
         from ingame import SeriesView
@@ -1148,7 +1173,11 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         except:
             pass
         
-        await interaction.response.defer()
+        await interaction.response.send_message(
+            f"✅ Swapped **{red_player.display_name}** ↔ **{blue_player.display_name}**\n"
+            f"Voice channels updated with new MMR averages.",
+            ephemeral=True
+        )
     
     # ========== ALIAS COMMANDS ==========
     
@@ -1617,21 +1646,18 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         
         await interaction.response.send_message("✅ Player names are now visible in the queue.", ephemeral=True)
     
-    @bot.tree.command(name='guest', description='[STAFF] Add a guest player attached to a host')
+    @bot.tree.command(name='guest', description='[STAFF] Add a guest player attached to a host (MMR = half of host)')
     @app_commands.describe(
-        host="The player this guest is attached to (will always be on same team)",
-        guest_name="Name for the guest (will show as 'Host\'s Guest' if left blank)",
-        mmr="The guest's MMR rating"
+        host="The player this guest is attached to (will always be on same team)"
     )
     @has_staff_role()
     async def add_guest(
         interaction: discord.Interaction,
-        host: discord.Member,
-        mmr: int,
-        guest_name: str = None
+        host: discord.Member
     ):
-        """Add a guest player to the queue attached to a host"""
+        """Add a guest player to the queue attached to a host - guest MMR is half of host's MMR"""
         from searchmatchmaking import queue_state, update_queue_embed, log_action, MAX_QUEUE_SIZE
+        from pregame import get_player_mmr
         
         # Check if host is in queue
         if host.id not in queue_state.queue:
@@ -1655,19 +1681,19 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             await interaction.response.send_message("❌ Queue is already full!", ephemeral=True)
             return
         
-        # Generate guest ID and name
+        # Get host's MMR and calculate guest MMR as HALF
+        host_mmr = await get_player_mmr(host.id)
+        guest_mmr = host_mmr // 2
+        
+        # Generate guest ID and name (always "Host's Guest")
         guest_id = queue_state.guest_counter
         queue_state.guest_counter += 1
-        
-        if guest_name:
-            display_name = f"{guest_name} ({host.display_name}'s Guest)"
-        else:
-            display_name = f"{host.display_name}'s Guest"
+        display_name = f"{host.display_name}'s Guest"
         
         # Add guest to tracking
         queue_state.guests[guest_id] = {
             "host_id": host.id,
-            "mmr": mmr,
+            "mmr": guest_mmr,
             "name": display_name
         }
         
@@ -1679,10 +1705,11 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         if queue_state.queue_channel:
             await update_queue_embed(queue_state.queue_channel)
         
-        log_action(f"Guest added: {display_name} (MMR: {mmr}) attached to {host.display_name}")
+        log_action(f"Guest added: {display_name} (MMR: {guest_mmr}, half of {host.display_name}'s {host_mmr})")
         
         await interaction.response.send_message(
-            f"✅ Added **{display_name}** to queue with **{mmr} MMR**\n"
+            f"✅ Added **{display_name}** to queue\n"
+            f"**MMR:** {guest_mmr} (half of {host.display_name}'s {host_mmr})\n"
             f"They will always be on the same team as {host.mention}",
             ephemeral=True
         )
@@ -1784,5 +1811,229 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             "▶️ **Matchmaking is now RESUMED**\n\nPlayers can join the queue again!",
             ephemeral=True
         )
+    
+    @bot.tree.command(name='adminsetteams', description='[STAFF] Manually set teams and start a match')
+    @app_commands.describe(
+        red1="Red Team Player 1",
+        red2="Red Team Player 2",
+        red3="Red Team Player 3",
+        red4="Red Team Player 4",
+        blue1="Blue Team Player 1",
+        blue2="Blue Team Player 2",
+        blue3="Blue Team Player 3",
+        blue4="Blue Team Player 4"
+    )
+    @has_staff_role()
+    async def admin_set_teams(
+        interaction: discord.Interaction,
+        red1: discord.Member,
+        red2: discord.Member,
+        red3: discord.Member,
+        red4: discord.Member,
+        blue1: discord.Member,
+        blue2: discord.Member,
+        blue3: discord.Member,
+        blue4: discord.Member
+    ):
+        """Manually set teams and start a match immediately"""
+        from searchmatchmaking import queue_state, log_action, QUEUE_CHANNEL_ID
+        from pregame import finalize_teams
+        
+        # Check for active series
+        if queue_state.current_series:
+            await interaction.response.send_message("❌ There's already an active match! End it first.", ephemeral=True)
+            return
+        
+        # Build teams
+        red_team = [red1.id, red2.id, red3.id, red4.id]
+        blue_team = [blue1.id, blue2.id, blue3.id, blue4.id]
+        
+        # Check for duplicates
+        all_players = red_team + blue_team
+        if len(all_players) != len(set(all_players)):
+            await interaction.response.send_message("❌ Duplicate players detected! Each player can only be on one team.", ephemeral=True)
+            return
+        
+        # Clear the queue since we're manually setting teams
+        queue_state.queue.clear()
+        queue_state.queue_join_times.clear()
+        
+        log_action(f"Admin {interaction.user.display_name} manually set teams")
+        log_action(f"Red: {[m.display_name for m in [red1, red2, red3, red4]]}")
+        log_action(f"Blue: {[m.display_name for m in [blue1, blue2, blue3, blue4]]}")
+        
+        await interaction.response.send_message(
+            f"✅ **Teams Set!**\n\n"
+            f"🔴 **Red Team:** {red1.mention}, {red2.mention}, {red3.mention}, {red4.mention}\n"
+            f"🔵 **Blue Team:** {blue1.mention}, {blue2.mention}, {blue3.mention}, {blue4.mention}\n\n"
+            f"Starting match...",
+            ephemeral=True
+        )
+        
+        # Get the queue channel
+        channel = interaction.guild.get_channel(QUEUE_CHANNEL_ID)
+        if not channel:
+            channel = interaction.channel
+        
+        # Start the match
+        await finalize_teams(channel, red_team, blue_team, test_mode=False)
+    
+    @bot.tree.command(name='adminguestmatch', description='[STAFF] Set teams with guests (use guest:HostName format)')
+    @app_commands.describe(
+        red1="Red Team Player 1 (or guest:HostName)",
+        red2="Red Team Player 2 (or guest:HostName)",
+        red3="Red Team Player 3 (or guest:HostName)",
+        red4="Red Team Player 4 (or guest:HostName)",
+        blue1="Blue Team Player 1 (or guest:HostName)",
+        blue2="Blue Team Player 2 (or guest:HostName)",
+        blue3="Blue Team Player 3 (or guest:HostName)",
+        blue4="Blue Team Player 4 (or guest:HostName)"
+    )
+    @has_staff_role()
+    async def admin_guest_match(
+        interaction: discord.Interaction,
+        red1: str,
+        red2: str,
+        red3: str,
+        red4: str,
+        blue1: str,
+        blue2: str,
+        blue3: str,
+        blue4: str
+    ):
+        """Set teams with guests - enter Discord username or 'guest:HostName'"""
+        from searchmatchmaking import queue_state, log_action, QUEUE_CHANNEL_ID
+        from pregame import finalize_teams, get_player_mmr
+        
+        # Check for active series
+        if queue_state.current_series:
+            await interaction.response.send_message("❌ There's already an active match! End it first.", ephemeral=True)
+            return
+        
+        async def parse_player(player_str: str, guild: discord.Guild) -> tuple:
+            """Parse player string - returns (user_id, display_name) or None if invalid"""
+            player_str = player_str.strip()
+            
+            # Check if it's a guest format: guest:HostName
+            if player_str.lower().startswith("guest:"):
+                parts = player_str.split(":")
+                if len(parts) >= 2:
+                    host_name = parts[1]
+                    
+                    # Find host member
+                    host_member = discord.utils.find(
+                        lambda m: m.display_name.lower() == host_name.lower() or m.name.lower() == host_name.lower(),
+                        guild.members
+                    )
+                    
+                    if not host_member:
+                        return None, f"Could not find host '{host_name}'"
+                    
+                    # Get host's MMR and set guest to HALF
+                    host_mmr = await get_player_mmr(host_member.id)
+                    guest_mmr = host_mmr // 2
+                    
+                    # Create guest - always named "Host's Guest"
+                    guest_id = queue_state.guest_counter
+                    queue_state.guest_counter += 1
+                    display_name = f"{host_member.display_name}'s Guest"
+                    
+                    queue_state.guests[guest_id] = {
+                        "host_id": host_member.id,
+                        "mmr": guest_mmr,
+                        "name": display_name
+                    }
+                    
+                    return guest_id, display_name
+                else:
+                    return None, "Invalid guest format. Use: guest:HostName"
+            
+            # Try to find as Discord member
+            # Try by mention format
+            if player_str.startswith("<@") and player_str.endswith(">"):
+                user_id = int(player_str.replace("<@", "").replace(">", "").replace("!", ""))
+                member = guild.get_member(user_id)
+                if member:
+                    return member.id, member.display_name
+            
+            # Try by name/display name
+            member = discord.utils.find(
+                lambda m: m.display_name.lower() == player_str.lower() or m.name.lower() == player_str.lower(),
+                guild.members
+            )
+            if member:
+                return member.id, member.display_name
+            
+            # Try by ID
+            try:
+                user_id = int(player_str)
+                member = guild.get_member(user_id)
+                if member:
+                    return member.id, member.display_name
+            except:
+                pass
+            
+            return None, f"Could not find player '{player_str}'"
+        
+        # Parse all players
+        red_team = []
+        blue_team = []
+        red_names = []
+        blue_names = []
+        errors = []
+        
+        for i, p in enumerate([red1, red2, red3, red4], 1):
+            user_id, result = await parse_player(p, interaction.guild)
+            if user_id is None:
+                errors.append(f"Red {i}: {result}")
+            else:
+                red_team.append(user_id)
+                red_names.append(result)
+        
+        for i, p in enumerate([blue1, blue2, blue3, blue4], 1):
+            user_id, result = await parse_player(p, interaction.guild)
+            if user_id is None:
+                errors.append(f"Blue {i}: {result}")
+            else:
+                blue_team.append(user_id)
+                blue_names.append(result)
+        
+        if errors:
+            await interaction.response.send_message(
+                f"❌ **Errors parsing players:**\n" + "\n".join(errors) +
+                "\n\n**Format:** Use Discord username OR `guest:HostName:GuestName:MMR`",
+                ephemeral=True
+            )
+            return
+        
+        # Check for duplicates
+        all_players = red_team + blue_team
+        if len(all_players) != len(set(all_players)):
+            await interaction.response.send_message("❌ Duplicate players detected!", ephemeral=True)
+            return
+        
+        # Clear the queue
+        queue_state.queue.clear()
+        queue_state.queue_join_times.clear()
+        
+        log_action(f"Admin {interaction.user.display_name} set guest match")
+        log_action(f"Red: {red_names}")
+        log_action(f"Blue: {blue_names}")
+        
+        await interaction.response.send_message(
+            f"✅ **Teams Set!**\n\n"
+            f"🔴 **Red Team:** {', '.join(red_names)}\n"
+            f"🔵 **Blue Team:** {', '.join(blue_names)}\n\n"
+            f"Starting match...",
+            ephemeral=True
+        )
+        
+        # Get the queue channel
+        channel = interaction.guild.get_channel(QUEUE_CHANNEL_ID)
+        if not channel:
+            channel = interaction.channel
+        
+        # Start the match
+        await finalize_teams(channel, red_team, blue_team, test_mode=False)
     
     return bot

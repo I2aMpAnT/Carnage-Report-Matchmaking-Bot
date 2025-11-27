@@ -16,7 +16,15 @@ def log_action(message: str):
     queue_log(message)
 
 async def get_player_mmr(user_id: int) -> int:
-    """Get player MMR from STATSRANKS"""
+    """Get player MMR from STATSRANKS or guest data"""
+    from searchmatchmaking import queue_state
+    
+    # Check if this is a guest
+    if user_id in queue_state.guests:
+        mmr = queue_state.guests[user_id]["mmr"]
+        log_action(f"get_player_mmr({user_id}) = {mmr} (guest)")
+        return mmr
+    
     import STATSRANKS
     stats = STATSRANKS.get_player_stats(user_id, skip_github=True)
     if stats and 'mmr' in stats:
