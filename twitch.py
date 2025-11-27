@@ -16,9 +16,15 @@ from typing import Optional, List, Dict, Tuple
 # Logging
 logger = logging.getLogger("twitch")
 
-# File path for player Twitch data
-PLAYERS_FILE = "players.json"
-PLAYERS_BACKUP = "players.json.bak"
+# File path for player Twitch data (stored in parent directory with bot.py for privacy)
+# This file contains confidential player data and should NOT be in the GitHub repo
+PLAYERS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "players.json")
+PLAYERS_BACKUP = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "players.json.bak")
+
+# Fallback: if running from same directory as players.json, use current directory
+if not os.path.exists(os.path.dirname(PLAYERS_FILE)):
+    PLAYERS_FILE = "players.json"
+    PLAYERS_BACKUP = "players.json.bak"
 
 # Multi-stream base URLs
 MULTITWITCH_BASE = "https://multitwitch.tv/"

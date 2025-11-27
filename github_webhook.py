@@ -15,13 +15,14 @@ GITHUB_REPO = "I2aMpAnT/H2CarnageReport.com"
 GITHUB_BRANCH = "main"
 
 # JSON files to sync (local filename -> GitHub path)
-# Does NOT include matchmakingstate.json (internal bot state only)
+# Does NOT include:
+#   - matchmakingstate.json (internal bot state only)
+#   - players.json (confidential player data - stays on server only)
 JSON_FILES = {
     "matchhistory.json": "matchhistory.json",
     "testmatchhistory.json": "testmatchhistory.json",
     "rankstats.json": "rankstats.json",
     "gamestats.json": "gamestats.json",
-    "players.json": "players.json",
     "queue_config.json": "queue_config.json",
     "xp_config.json": "xp_config.json"
 }
@@ -131,8 +132,9 @@ def update_gamestats_on_github():
     return push_file_to_github("gamestats.json", "gamestats.json")
 
 def update_players_on_github():
-    """Push players.json to GitHub"""
-    return push_file_to_github("players.json", "players.json")
+    """DISABLED - players.json contains confidential data and stays on server only"""
+    log_github_action("⚠️ players.json is confidential - not pushing to GitHub")
+    return False
 
 def update_queue_config_on_github():
     """Push queue_config.json to GitHub"""
