@@ -3,6 +3,8 @@ github_webhook.py - Automatic GitHub Updates
 Pushes all JSON data files to GitHub whenever they're updated
 """
 
+MODULE_VERSION = "1.1.0"
+
 import requests
 import json
 import base64

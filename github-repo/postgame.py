@@ -1,5 +1,7 @@
 # postgame.py - Postgame Processing, Stats Recording, and Cleanup
 
+MODULE_VERSION = "1.1.0"
+
 import discord
 from discord.ui import View, Button
 from typing import List

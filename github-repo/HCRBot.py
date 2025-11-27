@@ -4,7 +4,7 @@
 # ============================================
 # VERSION INFO
 # ============================================
-BOT_VERSION = "1.0.0"
+BOT_VERSION = "1.1.0"
 BOT_BUILD_DATE = "2025-11-27"
 # ============================================
 
@@ -99,6 +99,53 @@ async def on_ready():
     print(f"  Build Date: {BOT_BUILD_DATE}")
     print("=" * 50)
     print()
+    
+    # Show all module versions
+    print("Module Versions:")
+    print("-" * 30)
+    try:
+        import commands as cmd_module
+        print(f"  commands.py:         v{cmd_module.MODULE_VERSION}")
+    except:
+        print(f"  commands.py:         (no version)")
+    try:
+        import searchmatchmaking
+        print(f"  searchmatchmaking.py: v{searchmatchmaking.MODULE_VERSION}")
+    except:
+        print(f"  searchmatchmaking.py: (no version)")
+    try:
+        import pregame
+        print(f"  pregame.py:          v{pregame.MODULE_VERSION}")
+    except:
+        print(f"  pregame.py:          (no version)")
+    try:
+        import ingame
+        print(f"  ingame.py:           v{ingame.MODULE_VERSION}")
+    except:
+        print(f"  ingame.py:           (no version)")
+    try:
+        import postgame
+        print(f"  postgame.py:         v{postgame.MODULE_VERSION}")
+    except:
+        print(f"  postgame.py:         (no version)")
+    try:
+        import STATSRANKS
+        print(f"  STATSRANKS.py:       v{STATSRANKS.MODULE_VERSION}")
+    except:
+        print(f"  STATSRANKS.py:       (no version)")
+    try:
+        import twitch
+        print(f"  twitch.py:           v{twitch.MODULE_VERSION}")
+    except:
+        print(f"  twitch.py:           (no version)")
+    try:
+        import state_manager
+        print(f"  state_manager.py:    v{state_manager.MODULE_VERSION}")
+    except:
+        print(f"  state_manager.py:    (no version)")
+    print("-" * 30)
+    print()
+    
     print(f'✅ {bot.user} connected to Discord!')
     print(f'Bot ID: {bot.user.id}')
     print(f'Guilds: {len(bot.guilds)}')

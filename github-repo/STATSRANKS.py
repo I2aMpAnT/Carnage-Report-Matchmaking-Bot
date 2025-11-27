@@ -7,6 +7,8 @@ Import this module in bot.py with:
     await bot.load_extension('STATSRANKS')
 """
 
+MODULE_VERSION = "1.1.0"
+
 import discord
 from discord import app_commands
 from discord.ext import commands

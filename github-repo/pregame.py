@@ -1,5 +1,7 @@
 # pregame.py - Pregame Lobby and Team Selection
 
+MODULE_VERSION = "1.1.0"
+
 import discord
 from discord.ui import View, Button, Select
 from typing import List
