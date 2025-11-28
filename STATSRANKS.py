@@ -7,7 +7,7 @@ Import this module in bot.py with:
     await bot.load_extension('STATSRANKS')
 """
 
-MODULE_VERSION = "1.1.0"
+MODULE_VERSION = "1.2.0"
 
 import discord
 from discord import app_commands
@@ -33,6 +33,17 @@ ALL_GAMETYPES = ["MLG CTF5", "MLG CTF3", "MLG Team Slayer", "MLG Oddball", "MLG 
 
 # Admin roles
 ADMIN_ROLES = ["Overlord", "Staff", "Server Support"]
+
+# Playlist types for per-playlist ranking
+PLAYLIST_TYPES = ["mlg_4v4", "team_hardcore", "double_team", "head_to_head"]
+
+# Default playlist stats structure
+def get_default_playlist_stats() -> dict:
+    """Get default playlist stats for a new player"""
+    return {
+        ptype: {"xp": 0, "wins": 0, "losses": 0, "series_wins": 0, "series_losses": 0}
+        for ptype in PLAYLIST_TYPES
+    }
 
 # File paths
 GAMESTATS_FILE = "gamestats.json"
@@ -146,7 +157,7 @@ def get_player_stats(user_id: int, skip_github: bool = False) -> dict:
     """Get player stats from rankstats.json"""
     stats = load_json_file(RANKSTATS_FILE)
     user_key = str(user_id)
-    
+
     if user_key not in stats:
         stats[user_key] = {
             "xp": 0,
@@ -156,10 +167,18 @@ def get_player_stats(user_id: int, skip_github: bool = False) -> dict:
             "series_losses": 0,
             "total_games": 0,
             "total_series": 0,
-            "mmr": 1500  # Default MMR
+            "mmr": 1500,  # Default MMR
+            "playlist_stats": get_default_playlist_stats(),
+            "highest_rank": 1
         }
         save_json_file(RANKSTATS_FILE, stats, skip_github=skip_github)
-    
+    else:
+        # Ensure existing players have playlist_stats and highest_rank
+        if "playlist_stats" not in stats[user_key]:
+            stats[user_key]["playlist_stats"] = get_default_playlist_stats()
+            stats[user_key]["highest_rank"] = 1
+            save_json_file(RANKSTATS_FILE, stats, skip_github=skip_github)
+
     return stats[user_key]
 
 def get_existing_player_stats(user_id: int) -> dict:
@@ -175,7 +194,7 @@ def update_player_stats(user_id: int, stats_update: dict):
     """Update player stats - XP never goes below 0"""
     stats = load_json_file(RANKSTATS_FILE)
     user_key = str(user_id)
-    
+
     if user_key not in stats:
         stats[user_key] = {
             "xp": 0,
@@ -185,19 +204,140 @@ def update_player_stats(user_id: int, stats_update: dict):
             "series_losses": 0,
             "total_games": 0,
             "total_series": 0,
-            "mmr": 1500
+            "mmr": 1500,
+            "playlist_stats": get_default_playlist_stats(),
+            "highest_rank": 1
         }
-    
+    elif "playlist_stats" not in stats[user_key]:
+        stats[user_key]["playlist_stats"] = get_default_playlist_stats()
+        stats[user_key]["highest_rank"] = 1
+
     for key, value in stats_update.items():
         if key in stats[user_key]:
             stats[user_key][key] += value
         else:
             stats[user_key][key] = value
-    
+
     # Ensure XP never goes below 0
     stats[user_key]["xp"] = max(0, stats[user_key]["xp"])
-    
+
     save_json_file(RANKSTATS_FILE, stats)
+
+
+def update_playlist_stats(user_id: int, playlist_type: str, stats_update: dict):
+    """Update player stats for a specific playlist - XP never goes below 0"""
+    stats = load_json_file(RANKSTATS_FILE)
+    user_key = str(user_id)
+
+    # Initialize player if doesn't exist
+    if user_key not in stats:
+        stats[user_key] = {
+            "xp": 0,
+            "wins": 0,
+            "losses": 0,
+            "series_wins": 0,
+            "series_losses": 0,
+            "total_games": 0,
+            "total_series": 0,
+            "mmr": 1500,
+            "playlist_stats": get_default_playlist_stats(),
+            "highest_rank": 1
+        }
+    elif "playlist_stats" not in stats[user_key]:
+        stats[user_key]["playlist_stats"] = get_default_playlist_stats()
+        stats[user_key]["highest_rank"] = 1
+
+    # Ensure playlist exists in player's playlist_stats
+    if playlist_type not in stats[user_key]["playlist_stats"]:
+        stats[user_key]["playlist_stats"][playlist_type] = {
+            "xp": 0, "wins": 0, "losses": 0, "series_wins": 0, "series_losses": 0
+        }
+
+    playlist_stats = stats[user_key]["playlist_stats"][playlist_type]
+
+    # Update playlist-specific stats
+    for key, value in stats_update.items():
+        if key in playlist_stats:
+            playlist_stats[key] += value
+        else:
+            playlist_stats[key] = value
+
+    # Ensure XP never goes below 0
+    playlist_stats["xp"] = max(0, playlist_stats["xp"])
+
+    # Also update global stats for backwards compatibility
+    for key in ["xp", "wins", "losses", "series_wins", "series_losses"]:
+        if key in stats_update:
+            if key in stats[user_key]:
+                stats[user_key][key] += stats_update[key]
+            else:
+                stats[user_key][key] = stats_update[key]
+    stats[user_key]["xp"] = max(0, stats[user_key]["xp"])
+
+    # Increment global counters
+    if "wins" in stats_update or "losses" in stats_update:
+        stats[user_key]["total_games"] = stats[user_key].get("total_games", 0) + stats_update.get("wins", 0) + stats_update.get("losses", 0)
+    if "series_wins" in stats_update or "series_losses" in stats_update:
+        stats[user_key]["total_series"] = stats[user_key].get("total_series", 0) + stats_update.get("series_wins", 0) + stats_update.get("series_losses", 0)
+
+    # Recalculate highest rank
+    stats[user_key]["highest_rank"] = calculate_highest_rank(stats[user_key])
+
+    save_json_file(RANKSTATS_FILE, stats)
+    return stats[user_key]
+
+
+def calculate_playlist_rank(xp: int) -> int:
+    """Calculate rank level (1-50) based on XP from config"""
+    thresholds = get_rank_thresholds()
+    for level in range(50, 0, -1):
+        min_xp, max_xp = thresholds[level]
+        if xp >= min_xp:
+            return level
+    return 1
+
+
+def calculate_highest_rank(player_stats: dict) -> int:
+    """Calculate the highest rank across all playlists for a player"""
+    highest = 1
+
+    # Check playlist-specific ranks
+    playlist_stats = player_stats.get("playlist_stats", {})
+    for ptype, pstats in playlist_stats.items():
+        playlist_xp = pstats.get("xp", 0)
+        rank = calculate_playlist_rank(playlist_xp)
+        if rank > highest:
+            highest = rank
+
+    return highest
+
+
+def get_playlist_rank(user_id: int, playlist_type: str) -> int:
+    """Get a player's rank for a specific playlist"""
+    player_stats = get_player_stats(user_id)
+    playlist_stats = player_stats.get("playlist_stats", {})
+
+    if playlist_type in playlist_stats:
+        xp = playlist_stats[playlist_type].get("xp", 0)
+        return calculate_playlist_rank(xp)
+
+    return 1
+
+
+def get_all_playlist_ranks(user_id: int) -> dict:
+    """Get all playlist ranks for a player"""
+    player_stats = get_player_stats(user_id)
+    playlist_stats = player_stats.get("playlist_stats", {})
+
+    ranks = {}
+    for ptype in PLAYLIST_TYPES:
+        if ptype in playlist_stats:
+            xp = playlist_stats[ptype].get("xp", 0)
+            ranks[ptype] = calculate_playlist_rank(xp)
+        else:
+            ranks[ptype] = 1
+
+    return ranks
 
 def calculate_rank(xp: int) -> int:
     """Calculate rank level based on XP from config"""
@@ -436,15 +576,27 @@ async def record_manual_match(red_team: List[int], blue_team: List[int], games: 
     print(f"✅ Manual match {match_label} recorded: {series_winner} wins ({red_game_wins}-{blue_game_wins})")
 
 async def refresh_all_ranks(guild: discord.Guild, player_ids: List[int], send_dm: bool = True):
-    """Refresh rank roles for all players in a match"""
+    """Refresh rank roles for all players in a match - uses highest_rank across playlists"""
     from searchmatchmaking import queue_state
-    
+
     for user_id in player_ids:
         if user_id in queue_state.guests:
             continue  # Skip guests
         player_stats = get_player_stats(user_id)
-        new_level = calculate_rank(player_stats["xp"])
-        await update_player_rank_role(guild, user_id, new_level, send_dm=send_dm)
+        # Use highest rank across all playlists for Discord role
+        highest = player_stats.get("highest_rank", 1)
+        if highest < 1:
+            highest = calculate_highest_rank(player_stats)
+        await update_player_rank_role(guild, user_id, highest, send_dm=send_dm)
+
+
+async def refresh_playlist_ranks(guild: discord.Guild, player_ids: List[int], playlist_type: str, send_dm: bool = True):
+    """Refresh rank roles for players after a playlist match - uses highest_rank"""
+    for user_id in player_ids:
+        player_stats = get_player_stats(user_id)
+        # Recalculate highest rank
+        highest = calculate_highest_rank(player_stats)
+        await update_player_rank_role(guild, user_id, highest, send_dm=send_dm)
 
 def get_all_players_sorted(sort_by: str = "rank") -> List[Tuple[str, dict]]:
     """Get all players sorted by specified criteria"""
@@ -544,166 +696,194 @@ class StatsCommands(commands.Cog):
     @app_commands.command(name="playerstats", description="View player matchmaking statistics")
     @app_commands.describe(user="User to view stats for (optional)")
     async def playerstats(self, interaction: discord.Interaction, user: discord.User = None):
-        """Show player stats (NeatQueue style)"""
+        """Show player stats with per-playlist ranks"""
         target_user = user or interaction.user
-        
+
         # Get stats
         player_stats = get_player_stats(target_user.id)
-        
-        # Calculate rank and XP progress
-        xp = player_stats["xp"]
-        rank, xp_in_rank, xp_for_next = get_rank_progress(xp)
-        
+
+        # Get highest rank and per-playlist ranks
+        highest_rank = player_stats.get("highest_rank", 1)
+        playlist_ranks = get_all_playlist_ranks(target_user.id)
+
         # Calculate win rate
         total_games = player_stats["total_games"]
         wins = player_stats["wins"]
         losses = player_stats["losses"]
         win_rate = (wins / total_games * 100) if total_games > 0 else 0
-        
+
         # Get MMR
         mmr = player_stats.get("mmr", 1500)
-        
-        # Create embed (NeatQueue style)
+
+        # Create embed
         embed = discord.Embed(
-            title=f"{target_user.name}'s ranked queue Stats",
+            title=f"{target_user.name}'s Matchmaking Stats",
             color=discord.Color.from_rgb(0, 112, 192)
         )
-        
+
         # Header with player name and MMR
         embed.add_field(
             name="PLAYER",
             value=f"**{target_user.name}**",
             inline=True
         )
-        
+
         embed.add_field(
             name="MMR",
             value=f"**{mmr:.1f}**",
             inline=True
         )
-        
-        embed.add_field(name="\u200b", value="\u200b", inline=False)  # Spacer
-        
-        # Rank
+
         embed.add_field(
-            name="RANK",
-            value=f"**#{rank}**\nTOP {rank*2}%",
+            name="HIGHEST RANK",
+            value=f"**Level {highest_rank}**",
             inline=True
         )
-        
+
+        embed.add_field(name="\u200b", value="\u200b", inline=False)  # Spacer
+
+        # Per-Playlist Ranks section
+        playlist_names = {
+            "mlg_4v4": "MLG 4v4",
+            "team_hardcore": "Team Hardcore",
+            "double_team": "Double Team",
+            "head_to_head": "Head to Head"
+        }
+
+        # Get playlist-specific stats for display
+        playlist_stats = player_stats.get("playlist_stats", {})
+
+        ranks_text = ""
+        for ptype in PLAYLIST_TYPES:
+            pname = playlist_names.get(ptype, ptype)
+            prank = playlist_ranks.get(ptype, 1)
+            pstats = playlist_stats.get(ptype, {})
+            pxp = pstats.get("xp", 0)
+            pwins = pstats.get("wins", 0)
+            plosses = pstats.get("losses", 0)
+            ranks_text += f"**{pname}**: Level {prank} ({pxp} XP) - {pwins}W/{plosses}L\n"
+
+        embed.add_field(
+            name="📊 PLAYLIST RANKS",
+            value=ranks_text.strip() if ranks_text else "No playlist data yet",
+            inline=False
+        )
+
+        embed.add_field(name="\u200b", value="\u200b", inline=False)  # Spacer
+
         # Win Rate
         embed.add_field(
             name="WINRATE",
-            value=f"**{win_rate:.0f}%**\nTOP {100-win_rate:.0f}%",
+            value=f"**{win_rate:.0f}%**",
             inline=True
         )
-        
-        # Points (XP)
-        embed.add_field(
-            name="POINTS",
-            value=f"**{xp}**\nTOP {rank*2}%",
-            inline=True
-        )
-        
-        embed.add_field(name="\u200b", value="\u200b", inline=False)  # Spacer
-        
+
         # Wins
         embed.add_field(
             name="WINS",
-            value=f"**{wins}**\nTOP {100-win_rate:.0f}%",
+            value=f"**{wins}**",
             inline=True
         )
-        
+
         # Losses
         embed.add_field(
             name="LOSSES",
-            value=f"**{losses}**\nTOP {win_rate:.0f}%",
+            value=f"**{losses}**",
             inline=True
         )
-        
-        # Games
-        embed.add_field(
-            name="GAMES",
-            value=f"**{total_games}**\nBOTTOM {rank}%",
-            inline=True
-        )
-        
-        # Progress to next rank
-        if rank < 50:
-            embed.add_field(
-                name="📈 Next Rank",
-                value=f"Level {rank+1} in **{xp_for_next} XP**",
-                inline=False
-            )
-        else:
-            embed.add_field(
-                name="📈 Rank",
-                value="🌟 **MAX LEVEL REACHED!** 🌟",
-                inline=False
-            )
-        
+
         embed.set_thumbnail(url=target_user.display_avatar.url)
-        embed.set_footer(text=f"Total Series: {player_stats['total_series']} | Series W/L: {player_stats['series_wins']}/{player_stats['series_losses']}")
+        embed.set_footer(text=f"Total Games: {total_games} | Series W/L: {player_stats['series_wins']}/{player_stats['series_losses']}")
         
         await interaction.response.send_message(embed=embed)
     
     @app_commands.command(name="verifystats", description="Update your rank role based on your current stats")
     async def verifystats(self, interaction: discord.Interaction):
-        """Verify and update your own rank"""
+        """Verify and update your own rank - uses highest rank across all playlists"""
         await interaction.response.defer(ephemeral=True)
-        
+
         # Get player stats
         player_stats = get_player_stats(interaction.user.id)
-        new_level = calculate_rank(player_stats["xp"])
-        
-        # Update role
-        await update_player_rank_role(interaction.guild, interaction.user.id, new_level, send_dm=True)
-        
+
+        # Calculate and update highest rank
+        highest = calculate_highest_rank(player_stats)
+        player_stats["highest_rank"] = highest
+
+        # Save the updated highest_rank
+        stats = load_json_file(RANKSTATS_FILE)
+        stats[str(interaction.user.id)]["highest_rank"] = highest
+        save_json_file(RANKSTATS_FILE, stats)
+
+        # Update role based on highest rank
+        await update_player_rank_role(interaction.guild, interaction.user.id, highest, send_dm=True)
+
+        # Get per-playlist ranks for display
+        playlist_ranks = get_all_playlist_ranks(interaction.user.id)
+        ranks_display = "\n".join([
+            f"• **{ptype.replace('_', ' ').title()}**: Level {rank}"
+            for ptype, rank in playlist_ranks.items()
+        ])
+
         await interaction.followup.send(
             f"✅ Your rank has been verified!\n"
-            f"**Level {new_level}** ({player_stats['xp']} XP)",
+            f"**Highest Rank: Level {highest}**\n\n"
+            f"Per-playlist ranks:\n{ranks_display}",
             ephemeral=True
         )
-        print(f"[VERIFY] {interaction.user.name} verified rank: Level {new_level}")
+        print(f"[VERIFY] {interaction.user.name} verified rank: Level {highest}")
     
     @app_commands.command(name="verifystatsall", description="[ADMIN] Refresh all players' rank roles")
     @has_admin_role()
     async def verifystatsall(self, interaction: discord.Interaction):
-        """Refresh all ranks (Admin only)"""
+        """Refresh all ranks (Admin only) - uses highest rank across all playlists"""
         await interaction.response.send_message(
             "🔄 Starting rank refresh for all players... This may take a while.",
             ephemeral=True
         )
-        
+
         guild = interaction.guild
         stats = load_json_file(RANKSTATS_FILE)
-        
+
         updated_count = 0
         error_count = 0
-        
+        migrated_count = 0
+
         for user_id_str, player_stats in stats.items():
             try:
                 user_id = int(user_id_str)
-                new_level = calculate_rank(player_stats["xp"])
-                
-                await update_player_rank_role(guild, user_id, new_level, send_dm=False)
+
+                # Migrate old players to new structure if needed
+                if "playlist_stats" not in player_stats:
+                    player_stats["playlist_stats"] = get_default_playlist_stats()
+                    migrated_count += 1
+
+                # Calculate highest rank across all playlists
+                highest = calculate_highest_rank(player_stats)
+                player_stats["highest_rank"] = highest
+                stats[user_id_str]["highest_rank"] = highest
+
+                await update_player_rank_role(guild, user_id, highest, send_dm=False)
                 updated_count += 1
-                
+
                 # Small delay to avoid rate limits
                 await asyncio.sleep(0.5)
-                
+
             except Exception as e:
                 print(f"❌ Error updating user {user_id_str}: {e}")
                 error_count += 1
-        
+
+        # Save migrated data
+        save_json_file(RANKSTATS_FILE, stats)
+
         # Summary
         await interaction.followup.send(
             f"✅ Rank refresh complete!\n"
             f"**Updated:** {updated_count}\n"
+            f"**Migrated:** {migrated_count}\n"
             f"**Errors:** {error_count}",
             ephemeral=True
         )
-        print(f"[VERIFY ALL] Refreshed {updated_count} ranks, {error_count} errors")
+        print(f"[VERIFY ALL] Refreshed {updated_count} ranks, migrated {migrated_count}, {error_count} errors")
     
     @app_commands.command(name="mmr", description="[ADMIN] Set a player's MMR")
     @has_admin_role()
@@ -911,7 +1091,16 @@ async def setup(bot):
 __all__ = [
     'record_match_results',
     'refresh_all_ranks',
+    'refresh_playlist_ranks',
     'get_player_stats',
+    'get_existing_player_stats',
     'calculate_rank',
+    'calculate_playlist_rank',
+    'calculate_highest_rank',
+    'update_playlist_stats',
+    'get_playlist_rank',
+    'get_all_playlist_ranks',
+    'get_xp_config',
+    'PLAYLIST_TYPES',
     'setup'
 ]

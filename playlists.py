@@ -14,6 +14,9 @@ import os
 # Header image for embeds
 HEADER_IMAGE_URL = "https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/MessagefromCarnageReportHEADER.png"
 
+# Matchmaking progress images (1-8 players) - using 8-player images temporarily for all queues
+MATCHMAKING_IMAGE_BASE = "https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/assets/matchmaking"
+
 # General channel for announcements
 GENERAL_CHANNEL_ID = 1403855176460406805
 
@@ -171,6 +174,7 @@ class PlaylistMatch:
         self.general_message: Optional[discord.Message] = None
 
         self.start_time = datetime.now()
+        self.end_series_votes: set = set()  # User IDs who voted to end
 
     def get_match_label(self) -> str:
         """Get display label for this match"""
@@ -218,6 +222,39 @@ def select_random_map_gametype(playlist_type: str) -> Tuple[str, str]:
     elif playlist_type in [PlaylistType.TEAM_HARDCORE, PlaylistType.DOUBLE_TEAM]:
         return random.choice(MLG_MAP_GAMETYPES)
     return ("", "")
+
+
+def get_queue_progress_image(player_count: int, max_players: int = 8) -> str:
+    """Get the queue progress image URL for current player count.
+    Temporarily using 8-player images for all queues - scales smaller queues to 8."""
+    # Scale to 8-player images temporarily
+    if max_players == 8:
+        scaled_count = player_count
+    elif max_players == 4:
+        # 2v2: 1->2, 2->4, 3->6, 4->8
+        scaled_count = player_count * 2
+    elif max_players == 2:
+        # 1v1: 1->4, 2->8
+        scaled_count = player_count * 4
+    else:
+        scaled_count = player_count
+
+    if scaled_count < 1:
+        return f"{MATCHMAKING_IMAGE_BASE}/1outof8.png"
+    if scaled_count > 8:
+        scaled_count = 8
+    return f"{MATCHMAKING_IMAGE_BASE}/{scaled_count}outof8.png"
+
+
+def get_end_series_votes_needed(playlist_type: str) -> int:
+    """Get number of votes needed to end series for a playlist type"""
+    if playlist_type == PlaylistType.HEAD_TO_HEAD:
+        return 1  # 1v1: either player can end
+    elif playlist_type == PlaylistType.DOUBLE_TEAM:
+        return 3  # 2v2: 3 of 4 players
+    elif playlist_type == PlaylistType.TEAM_HARDCORE:
+        return 5  # 4v4: 5 of 8 players
+    return 5  # Default
 
 
 async def balance_teams_by_mmr(players: List[int], team_size: int) -> Tuple[List[int], List[int]]:
@@ -443,7 +480,7 @@ class PlaylistQueueView(View):
             description=f"We have **{current_count}/{ps.max_players}** players searching.\nNeed **{needed}** more to start!",
             color=discord.Color.blue()
         )
-        embed.set_thumbnail(url=HEADER_IMAGE_URL)
+        embed.set_author(name="Message From Carnage Report", icon_url=HEADER_IMAGE_URL)
 
         # Create view with join button
         view = PlaylistPingJoinView(ps)
@@ -547,7 +584,7 @@ async def update_playlist_ping_message(guild: discord.Guild, ps: PlaylistQueueSt
         description=f"We have **{current_count}/{ps.max_players}** players searching.\nNeed **{needed}** more to start!",
         color=discord.Color.green()
     )
-    embed.set_thumbnail(url=HEADER_IMAGE_URL)
+    embed.set_author(name="Message From Carnage Report", icon_url=HEADER_IMAGE_URL)
 
     try:
         await ps.ping_message.edit(embed=embed)
@@ -602,6 +639,11 @@ async def create_playlist_embed(channel: discord.TextChannel, playlist_state: Pl
     if ps.paused:
         embed.add_field(name="Status", value="**PAUSED**", inline=False)
         embed.color = discord.Color.orange()
+
+    # Add queue progress image (temporarily using 8-player images scaled for all queues)
+    player_count = len(ps.queue)
+    if player_count > 0:
+        embed.set_image(url=get_queue_progress_image(player_count, ps.max_players))
 
     view = PlaylistQueueView(ps)
 
@@ -684,7 +726,7 @@ async def start_playlist_match(channel: discord.TextChannel, playlist_state: Pla
         p2_name = player2.display_name if player2 else "Player 2"
 
         vc = await guild.create_voice_channel(
-            name=f"1v1: {p1_name} vs {p2_name}",
+            name=f"{p1_name} vs {p2_name}",
             category=category,
             user_limit=4
         )
@@ -759,13 +801,6 @@ async def show_playlist_match_embed(channel: discord.TextChannel, match: Playlis
         color=discord.Color.green()
     )
 
-    if match.map_name and match.gametype:
-        embed.add_field(
-            name="Map & Gametype",
-            value=f"**{match.map_name}** - {match.gametype}",
-            inline=False
-        )
-
     if ps.playlist_type == PlaylistType.HEAD_TO_HEAD:
         # 1v1 format
         player1 = guild.get_member(match.team1[0])
@@ -773,9 +808,12 @@ async def show_playlist_match_embed(channel: discord.TextChannel, match: Playlis
         p1_name = player1.display_name if player1 else "Player 1"
         p2_name = player2.display_name if player2 else "Player 2"
 
+        p1_wins = match.games.count('TEAM1')
+        p2_wins = match.games.count('TEAM2')
+
         embed.add_field(
             name="Match",
-            value=f"**{p1_name}** vs **{p2_name}**",
+            value=f"**{p1_name}** ({p1_wins}) vs **{p2_name}** ({p2_wins})",
             inline=False
         )
     else:
@@ -796,6 +834,45 @@ async def show_playlist_match_embed(channel: discord.TextChannel, match: Playlis
             value=team2_mentions or "TBD",
             inline=True
         )
+
+    # Show completed games
+    if match.games:
+        games_text = ""
+        for i, winner in enumerate(match.games, 1):
+            stats = match.game_stats.get(i, {})
+            map_name = stats.get("map", "")
+            if ps.playlist_type == PlaylistType.HEAD_TO_HEAD:
+                winner_label = "P1" if winner == "TEAM1" else "P2"
+            else:
+                winner_label = "🔴" if winner == "TEAM1" else "🔵"
+            if map_name:
+                games_text += f"Game {i}: {winner_label} - {map_name}\n"
+            else:
+                games_text += f"Game {i}: {winner_label}\n"
+        embed.add_field(
+            name="Completed Games",
+            value=games_text.strip(),
+            inline=False
+        )
+
+    # Show next map/gametype
+    if match.map_name and match.gametype:
+        embed.add_field(
+            name=f"Game {match.current_game} - Next Map",
+            value=f"**{match.map_name}** - {match.gametype}",
+            inline=False
+        )
+
+    # Show end series votes
+    votes_needed = get_end_series_votes_needed(ps.playlist_type)
+    current_votes = len(match.end_series_votes)
+    total_players = len(match.team1) + len(match.team2)
+
+    embed.add_field(
+        name=f"End Series Votes ({current_votes}/{votes_needed})",
+        value=f"{current_votes} vote{'s' if current_votes != 1 else ''} to end",
+        inline=False
+    )
 
     view = PlaylistMatchView(match)
 
@@ -853,13 +930,22 @@ class PlaylistMatchView(View):
             await interaction.response.send_message("Only players or staff can vote!", ephemeral=True)
             return
 
-        # Record game winner
+        # Record game winner with current map/gametype
         self.match.games.append(winner)
+        self.match.game_stats[len(self.match.games)] = {
+            "map": self.match.map_name,
+            "gametype": self.match.gametype
+        }
         self.match.current_game += 1
 
-        log_action(f"{self.match.get_match_label()} - Game {len(self.match.games)} won by {winner}")
+        log_action(f"{self.match.get_match_label()} - Game {len(self.match.games)} won by {winner} on {self.match.map_name}")
 
         await interaction.response.defer()
+
+        # Select NEW random map/gametype for next game
+        new_map, new_gametype = select_random_map_gametype(self.match.playlist_state.playlist_type)
+        self.match.map_name = new_map
+        self.match.gametype = new_gametype
 
         # Update buttons
         if self.match.playlist_state.playlist_type == PlaylistType.HEAD_TO_HEAD:
@@ -872,18 +958,45 @@ class PlaylistMatchView(View):
         await show_playlist_match_embed(interaction.channel, self.match)
 
     async def end_match(self, interaction: discord.Interaction):
-        """End the match"""
+        """Vote to end the series"""
         # Check permissions
         user_roles = [role.name for role in interaction.user.roles]
         is_staff = any(role in ["Overlord", "Staff", "Server Tech Support"] for role in user_roles)
         all_players = self.match.team1 + self.match.team2
 
         if not is_staff and interaction.user.id not in all_players:
-            await interaction.response.send_message("Only players or staff can end the match!", ephemeral=True)
+            await interaction.response.send_message("Only players or staff can vote to end!", ephemeral=True)
             return
 
+        # Toggle vote
+        user_id = interaction.user.id
+        if user_id in self.match.end_series_votes:
+            self.match.end_series_votes.remove(user_id)
+            await interaction.response.defer()
+            await show_playlist_match_embed(interaction.channel, self.match)
+            return
+        else:
+            self.match.end_series_votes.add(user_id)
+
         await interaction.response.defer()
-        await end_playlist_match(interaction.channel, self.match)
+
+        # Check if enough votes to end
+        votes_needed = get_end_series_votes_needed(self.match.playlist_state.playlist_type)
+        current_votes = len(self.match.end_series_votes)
+
+        # Staff can force end with 2 votes
+        staff_votes = 0
+        for uid in self.match.end_series_votes:
+            member = interaction.guild.get_member(uid)
+            if member:
+                member_roles = [role.name for role in member.roles]
+                if any(role in ["Overlord", "Staff", "Server Tech Support"] for role in member_roles):
+                    staff_votes += 1
+
+        if current_votes >= votes_needed or staff_votes >= 2:
+            await end_playlist_match(interaction.channel, self.match)
+        else:
+            await show_playlist_match_embed(interaction.channel, self.match)
 
 
 async def end_playlist_match(channel: discord.TextChannel, match: PlaylistMatch):
@@ -972,6 +1085,65 @@ async def end_playlist_match(channel: discord.TextChannel, match: PlaylistMatch)
             embed.description = f"Match tied ({team1_wins}-{team2_wins})"
 
     await channel.send(embed=embed)
+
+    # Record playlist-specific stats for all players
+    await record_playlist_match_stats(match, guild)
+
+
+async def record_playlist_match_stats(match: PlaylistMatch, guild: discord.Guild):
+    """Record playlist-specific stats for all players in a match"""
+    import STATSRANKS
+
+    playlist_type = match.playlist_state.playlist_type
+    xp_config = STATSRANKS.get_xp_config()
+
+    # Count wins per team
+    team1_game_wins = match.games.count('TEAM1')
+    team2_game_wins = match.games.count('TEAM2')
+
+    # Determine series winner
+    if team1_game_wins > team2_game_wins:
+        series_winner = "TEAM1"
+    elif team2_game_wins > team1_game_wins:
+        series_winner = "TEAM2"
+    else:
+        series_winner = "TIE"
+
+    # Update Team 1 players
+    for user_id in match.team1:
+        update = {
+            "wins": team1_game_wins,
+            "losses": team2_game_wins,
+            "xp": (team1_game_wins * xp_config["game_win"]) + (team2_game_wins * xp_config["game_loss"])
+        }
+
+        if series_winner == "TEAM1":
+            update["series_wins"] = 1
+        elif series_winner == "TEAM2":
+            update["series_losses"] = 1
+
+        STATSRANKS.update_playlist_stats(user_id, playlist_type, update)
+
+    # Update Team 2 players
+    for user_id in match.team2:
+        update = {
+            "wins": team2_game_wins,
+            "losses": team1_game_wins,
+            "xp": (team2_game_wins * xp_config["game_win"]) + (team1_game_wins * xp_config["game_loss"])
+        }
+
+        if series_winner == "TEAM2":
+            update["series_wins"] = 1
+        elif series_winner == "TEAM1":
+            update["series_losses"] = 1
+
+        STATSRANKS.update_playlist_stats(user_id, playlist_type, update)
+
+    # Refresh ranks for all players (uses highest_rank)
+    all_players = match.team1 + match.team2
+    await STATSRANKS.refresh_playlist_ranks(guild, all_players, playlist_type, send_dm=True)
+
+    log_action(f"Recorded stats for {match.get_match_label()}: {len(all_players)} players")
 
 
 # Command helper functions
