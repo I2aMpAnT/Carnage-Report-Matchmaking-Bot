@@ -1,6 +1,6 @@
-# searchmatchmaking.py - Queue Management System
+# searchmatchmaking.py - MLG 4v4 Queue Management System
 
-MODULE_VERSION = "1.2.0"
+MODULE_VERSION = "1.3.0"
 
 import discord
 from discord.ui import View, Button
@@ -277,23 +277,20 @@ async def send_inactivity_prompt(guild: discord.Guild, user_id: int):
     # Create the confirmation view
     view = InactivityConfirmView(user_id)
 
-    # Create embed for the prompt
-    embed = discord.Embed(
-        title="⏰ Queue Inactivity Check",
-        description=f"You've been in the matchmaking queue for **1 hour**.\n\n"
-                   f"Would you like to remain in the queue?\n\n"
-                   f"**If you don't respond within {INACTIVITY_RESPONSE_MINUTES} minutes, you'll be automatically removed.**",
-        color=discord.Color.orange()
+    # Plain text DM message (no embed)
+    dm_text = (
+        f"⏰ **Queue Inactivity Check**\n\n"
+        f"You've been in the matchmaking queue for **1 hour**.\n\n"
+        f"Would you like to remain in the queue?\n\n"
+        f"**If you don't respond within {INACTIVITY_RESPONSE_MINUTES} minutes, you'll be automatically removed.**"
     )
-    embed.set_thumbnail(url=HEADER_IMAGE_URL)
-    embed.set_footer(text="Click a button below to respond")
 
     dm_message = None
     general_message = None
 
-    # Try to DM the user
+    # Try to DM the user (plain text only)
     try:
-        dm_message = await member.send(embed=embed, view=view)
+        dm_message = await member.send(content=dm_text, view=view)
         log_action(f"Sent inactivity DM to {member.display_name}")
     except discord.Forbidden:
         log_action(f"Could not DM {member.display_name} - DMs disabled")
@@ -818,15 +815,15 @@ async def create_queue_embed(channel: discord.TextChannel):
     """Create initial queue embed"""
     # Store channel for auto-updates
     queue_state.queue_channel = channel
-    
+
     embed = discord.Embed(
-        title="Matchmaking",
-        description="Click **Join Matchmaking** to start searching for a Match!",
+        title="MLG 4v4 Matchmaking",
+        description="Click **Join Matchmaking** to start searching for a Match!\n*Classic 4v4 with team selection vote*",
         color=discord.Color.blue()
     )
-    
+
     embed.add_field(
-        name=f"Players in Matchmaking (0/{MAX_QUEUE_SIZE})",
+        name=f"Players in Queue (0/{MAX_QUEUE_SIZE})",
         value="*No players yet*",
         inline=False
     )
@@ -907,13 +904,13 @@ async def update_queue_embed(channel: discord.TextChannel):
     
     # Create embed
     embed = discord.Embed(
-        title="Matchmaking",
-        description="Click **Join Matchmaking** to start searching for a Match!",
+        title="MLG 4v4 Matchmaking",
+        description="Click **Join Matchmaking** to start searching for a Match!\n*Classic 4v4 with team selection vote*",
         color=discord.Color.blue()
     )
-    
+
     embed.add_field(
-        name=f"Players in Matchmaking ({len(queue_state.queue)}/{MAX_QUEUE_SIZE})",
+        name=f"Players in Queue ({len(queue_state.queue)}/{MAX_QUEUE_SIZE})",
         value=player_mentions,
         inline=False
     )

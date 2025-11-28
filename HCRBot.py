@@ -4,8 +4,8 @@
 # ============================================
 # VERSION INFO
 # ============================================
-BOT_VERSION = "1.2.0"
-BOT_BUILD_DATE = "2025-11-27"
+BOT_VERSION = "1.3.0"
+BOT_BUILD_DATE = "2025-11-28"
 # ============================================
 
 import discord
@@ -18,7 +18,15 @@ load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 
 # Configuration - Channel IDs
+# MLG 4v4 (original queue)
 QUEUE_CHANNEL_ID = 1403855421625733151
+# Team Hardcore 4v4
+TEAM_HARDCORE_CHANNEL_ID = 1443783840169721988
+# Double Team 2v2
+DOUBLE_TEAM_CHANNEL_ID = 1443784213135626260
+# Head to Head 1v1
+HEAD_TO_HEAD_CHANNEL_ID = 1443784290230865990
+
 PREGAME_LOBBY_ID = 1442711504498221118
 POSTGAME_LOBBY_ID = 1442711633518039072
 RED_TEAM_VC_ID = 1442711726855553154
@@ -143,6 +151,11 @@ async def on_ready():
         print(f"  state_manager.py:    v{state_manager.MODULE_VERSION}")
     except:
         print(f"  state_manager.py:    (no version)")
+    try:
+        import playlists
+        print(f"  playlists.py:        v{playlists.MODULE_VERSION}")
+    except:
+        print(f"  playlists.py:        (no version)")
     print("-" * 30)
     print()
     
@@ -179,11 +192,11 @@ async def on_ready():
     except Exception as e:
         print(f'❌ Failed to sync commands: {e}')
     
-    # Initialize queue embed
+    # Initialize queue embed (MLG 4v4)
     channel = bot.get_channel(QUEUE_CHANNEL_ID)
     if channel:
         await create_queue_embed(channel)
-        print(f'✅ Queue embed created in {channel.name}')
+        print(f'✅ MLG 4v4 queue embed created in {channel.name}')
 
         # Start inactivity timer task
         from searchmatchmaking import queue_state, check_queue_inactivity
@@ -193,13 +206,34 @@ async def on_ready():
             print('✅ Queue inactivity timer started')
     else:
         print(f'⚠️ Could not find queue channel {QUEUE_CHANNEL_ID}')
+
+    # Initialize all other playlist embeds
+    try:
+        import playlists
+        await playlists.initialize_all_playlists(bot)
+        print('✅ All playlist embeds initialized')
+    except Exception as e:
+        print(f'⚠️ Failed to initialize playlists: {e}')
+        import traceback
+        traceback.print_exc()
     
     # Register persistent views for buttons to work after restart
     from searchmatchmaking import QueueView, PingJoinView
     from ingame import SeriesView
     bot.add_view(QueueView())
     bot.add_view(PingJoinView())
-    print('✅ Persistent views registered')
+
+    # Register playlist views for all playlist types
+    try:
+        from playlists import PlaylistQueueView, PlaylistPingJoinView, PlaylistMatchView, get_playlist_state, PlaylistType
+        for ptype in [PlaylistType.TEAM_HARDCORE, PlaylistType.DOUBLE_TEAM, PlaylistType.HEAD_TO_HEAD]:
+            ps = get_playlist_state(ptype)
+            bot.add_view(PlaylistQueueView(ps))
+            bot.add_view(PlaylistPingJoinView(ps))
+        print('✅ All persistent views registered')
+    except Exception as e:
+        print(f'⚠️ Playlist views not registered: {e}')
+        print('✅ Basic persistent views registered')
     
     # Restore saved state if exists
     try:
