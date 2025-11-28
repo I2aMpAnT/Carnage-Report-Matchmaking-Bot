@@ -17,6 +17,9 @@ HEADER_IMAGE_URL = "https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.c
 # General channel for announcements
 GENERAL_CHANNEL_ID = 1403855176460406805
 
+# Ping cooldown in minutes (per playlist)
+PING_COOLDOWN_MINUTES = 15
+
 # MLG Map/Gametype combinations (11 total for Team Hardcore)
 MLG_MAP_GAMETYPES = [
     ("Midship", "MLG CTF5"),
@@ -32,8 +35,8 @@ MLG_MAP_GAMETYPES = [
     ("Sanctuary", "MLG Team Slayer"),
 ]
 
-# Head to Head maps (weighted toward Lockout)
-HEAD_TO_HEAD_MAPS = ["Midship", "Lockout", "Lockout"]
+# Head to Head maps (equal chance)
+HEAD_TO_HEAD_MAPS = ["Midship", "Lockout", "Sanctuary"]
 
 # Playlist types
 class PlaylistType:
@@ -113,6 +116,8 @@ class PlaylistQueueState:
         self.inactivity_pending: dict = {}
         self.inactivity_timer_task: Optional[asyncio.Task] = None
         self.match_counter: int = 0
+        self.last_ping_time: Optional[datetime] = None  # Last time ping was used
+        self.ping_message: Optional[discord.Message] = None  # Ping message in general chat
 
     @property
     def max_players(self) -> int:
@@ -296,13 +301,14 @@ def save_match_to_history(match: PlaylistMatch, result: str):
 
 
 class PlaylistQueueView(View):
-    """View for playlist queue with join/leave buttons"""
+    """View for playlist queue with join/leave/ping buttons"""
     def __init__(self, playlist_state: PlaylistQueueState):
         super().__init__(timeout=None)
         self.playlist_state = playlist_state
         # Custom IDs must be unique per playlist
         self.join_btn.custom_id = f"join_{playlist_state.playlist_type}"
         self.leave_btn.custom_id = f"leave_{playlist_state.playlist_type}"
+        self.ping_btn.custom_id = f"ping_{playlist_state.playlist_type}"
 
     @discord.ui.button(label="Join Queue", style=discord.ButtonStyle.success)
     async def join_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -311,6 +317,10 @@ class PlaylistQueueView(View):
     @discord.ui.button(label="Leave Queue", style=discord.ButtonStyle.danger)
     async def leave_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.handle_leave(interaction)
+
+    @discord.ui.button(label="Ping", style=discord.ButtonStyle.secondary)
+    async def ping_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.handle_ping(interaction)
 
     async def handle_join(self, interaction: discord.Interaction):
         """Handle player joining queue"""
@@ -387,6 +397,181 @@ class PlaylistQueueView(View):
 
         await interaction.response.defer()
         await update_playlist_embed(interaction.channel, ps)
+
+    async def handle_ping(self, interaction: discord.Interaction):
+        """Handle ping button - send message to general chat"""
+        ps = self.playlist_state
+
+        # Check if queue is empty
+        if len(ps.queue) == 0:
+            await interaction.response.send_message("Queue is empty! Join first before pinging.", ephemeral=True)
+            return
+
+        # Check if queue is full
+        if len(ps.queue) >= ps.max_players:
+            await interaction.response.send_message("Queue is already full!", ephemeral=True)
+            return
+
+        # Check cooldown
+        if ps.last_ping_time:
+            elapsed = datetime.now() - ps.last_ping_time
+            remaining = timedelta(minutes=PING_COOLDOWN_MINUTES) - elapsed
+
+            if remaining.total_seconds() > 0:
+                mins = int(remaining.total_seconds() // 60)
+                secs = int(remaining.total_seconds() % 60)
+                await interaction.response.send_message(
+                    f"Ping is on cooldown! Try again in **{mins}m {secs}s**",
+                    ephemeral=True
+                )
+                return
+
+        await interaction.response.defer()
+
+        guild = interaction.guild
+        general_channel = guild.get_channel(GENERAL_CHANNEL_ID)
+
+        if not general_channel:
+            return
+
+        # Update cooldown
+        ps.last_ping_time = datetime.now()
+
+        # Delete old ping message if exists
+        if ps.ping_message:
+            try:
+                await ps.ping_message.delete()
+            except:
+                pass
+
+        # Create ping embed
+        current_count = len(ps.queue)
+        needed = ps.max_players - current_count
+
+        embed = discord.Embed(
+            title=f"{ps.name} - Players Needed!",
+            description=f"We have **{current_count}/{ps.max_players}** players searching.\nNeed **{needed}** more to start!",
+            color=discord.Color.blue()
+        )
+        embed.set_thumbnail(url=HEADER_IMAGE_URL)
+
+        # Create view with join button
+        view = PlaylistPingJoinView(ps)
+
+        # Send @here ping then delete it
+        here_msg = await general_channel.send("@here")
+        await asyncio.sleep(0.1)
+        try:
+            await here_msg.delete()
+        except:
+            pass
+
+        # Send the embed
+        ps.ping_message = await general_channel.send(embed=embed, view=view)
+
+        log_action(f"{interaction.user.display_name} pinged for {ps.name} ({current_count}/{ps.max_players})")
+
+
+class PlaylistPingJoinView(View):
+    """View for playlist ping message with join button"""
+    def __init__(self, playlist_state: PlaylistQueueState):
+        super().__init__(timeout=None)
+        self.playlist_state = playlist_state
+        self.join_btn.custom_id = f"ping_join_{playlist_state.playlist_type}"
+
+    @discord.ui.button(label="Join Queue", style=discord.ButtonStyle.success)
+    async def join_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Join queue from ping message"""
+        user_id = interaction.user.id
+        ps = self.playlist_state
+
+        if ps.paused:
+            await interaction.response.send_message(f"**{ps.name}** is currently paused.", ephemeral=True)
+            return
+
+        # Check if player has MMR
+        import STATSRANKS
+        player_stats = STATSRANKS.get_existing_player_stats(user_id)
+        if not player_stats or 'mmr' not in player_stats:
+            await interaction.response.send_message(
+                "You don't have an MMR rating yet!\nA staff member needs to set your MMR.",
+                ephemeral=True
+            )
+            return
+
+        if user_id in ps.queue:
+            await interaction.response.send_message("You're already in this queue!", ephemeral=True)
+            return
+
+        if len(ps.queue) >= ps.max_players:
+            await interaction.response.send_message("Queue is full!", ephemeral=True)
+            return
+
+        if ps.current_match:
+            await interaction.response.send_message("Match in progress!", ephemeral=True)
+            return
+
+        # Check if player is in another playlist queue
+        for other_ps in get_all_playlists():
+            if other_ps.playlist_type != ps.playlist_type and user_id in other_ps.queue:
+                await interaction.response.send_message(
+                    f"You're already in the **{other_ps.name}** queue!\nLeave that queue first.",
+                    ephemeral=True
+                )
+                return
+
+        # Add to queue
+        ps.queue.append(user_id)
+        ps.queue_join_times[user_id] = datetime.now()
+
+        log_action(f"{interaction.user.display_name} joined {ps.name} from ping ({len(ps.queue)}/{ps.max_players})")
+
+        await interaction.response.defer()
+
+        # Update queue embed
+        if ps.queue_channel:
+            await update_playlist_embed(ps.queue_channel, ps)
+
+        # Update or delete ping message
+        await update_playlist_ping_message(interaction.guild, ps)
+
+        # Check if queue is full
+        if len(ps.queue) >= ps.max_players:
+            if ps.queue_channel:
+                await start_playlist_match(ps.queue_channel, ps)
+
+
+async def update_playlist_ping_message(guild: discord.Guild, ps: PlaylistQueueState):
+    """Update or delete the ping message based on queue state"""
+    if not ps.ping_message:
+        return
+
+    current_count = len(ps.queue)
+
+    # Delete if queue is full or empty
+    if current_count >= ps.max_players or current_count == 0:
+        try:
+            await ps.ping_message.delete()
+            ps.ping_message = None
+            log_action(f"Deleted {ps.name} ping message - queue {'full' if current_count >= ps.max_players else 'empty'}")
+        except:
+            pass
+        return
+
+    # Update the message
+    needed = ps.max_players - current_count
+
+    embed = discord.Embed(
+        title=f"{ps.name} - Players Needed!",
+        description=f"We have **{current_count}/{ps.max_players}** players searching.\nNeed **{needed}** more to start!",
+        color=discord.Color.green()
+    )
+    embed.set_thumbnail(url=HEADER_IMAGE_URL)
+
+    try:
+        await ps.ping_message.edit(embed=embed)
+    except:
+        pass
 
 
 async def create_playlist_embed(channel: discord.TextChannel, playlist_state: PlaylistQueueState):
@@ -859,6 +1044,9 @@ async def initialize_all_playlists(bot):
 __all__ = [
     'PlaylistType',
     'PLAYLIST_CONFIG',
+    'PlaylistQueueView',
+    'PlaylistPingJoinView',
+    'PlaylistMatchView',
     'get_playlist_state',
     'get_playlist_by_channel',
     'get_all_playlists',

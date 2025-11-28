@@ -225,10 +225,11 @@ async def on_ready():
 
     # Register playlist views for all playlist types
     try:
-        from playlists import PlaylistQueueView, PlaylistMatchView, get_playlist_state, PlaylistType
+        from playlists import PlaylistQueueView, PlaylistPingJoinView, PlaylistMatchView, get_playlist_state, PlaylistType
         for ptype in [PlaylistType.TEAM_HARDCORE, PlaylistType.DOUBLE_TEAM, PlaylistType.HEAD_TO_HEAD]:
             ps = get_playlist_state(ptype)
             bot.add_view(PlaylistQueueView(ps))
+            bot.add_view(PlaylistPingJoinView(ps))
         print('✅ All persistent views registered')
     except Exception as e:
         print(f'⚠️ Playlist views not registered: {e}')
