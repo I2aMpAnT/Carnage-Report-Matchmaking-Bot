@@ -291,7 +291,10 @@ async def on_interaction(interaction: discord.Interaction):
         elif custom_id.startswith("inactivity_no_"):
             # User wants to leave queue
             if user_id in queue_state.queue:
-                await remove_inactive_user(interaction.guild, user_id, reason="chose to leave")
+                # Get guild - use interaction.guild if available, otherwise get from queue_channel (for DM buttons)
+                guild = interaction.guild or (queue_state.queue_channel.guild if queue_state.queue_channel else None)
+                if guild:
+                    await remove_inactive_user(guild, user_id, reason="chose to leave")
 
                 try:
                     await interaction.response.edit_message(

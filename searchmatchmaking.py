@@ -153,7 +153,10 @@ class InactivityConfirmView(View):
 
         # Remove from queue
         if self.user_id in queue_state.queue:
-            await remove_inactive_user(interaction.guild, self.user_id, reason="chose to leave")
+            # Get guild - use interaction.guild if available, otherwise get from queue_channel (for DM buttons)
+            guild = interaction.guild or (queue_state.queue_channel.guild if queue_state.queue_channel else None)
+            if guild:
+                await remove_inactive_user(guild, self.user_id, reason="chose to leave")
 
             try:
                 await interaction.response.edit_message(
