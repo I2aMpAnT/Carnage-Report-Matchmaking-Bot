@@ -7,6 +7,8 @@ Reads files from VPS directories:
 - /home/carnagereport/stats/private/ (private/ranked games)
 
 Converts XLSX files to gameshistory.json format for the website.
+
+!! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 """
 
 MODULE_VERSION = "1.0.0"
