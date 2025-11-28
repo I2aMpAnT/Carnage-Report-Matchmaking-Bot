@@ -1,4 +1,5 @@
 # searchmatchmaking.py - MLG 4v4 Queue Management System
+# !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
 MODULE_VERSION = "1.4.0"
 
