@@ -1,6 +1,6 @@
 # searchmatchmaking.py - Queue Management System
 
-MODULE_VERSION = "1.2.0"
+MODULE_VERSION = "1.2.1"
 
 import discord
 from discord.ui import View, Button
