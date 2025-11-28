@@ -21,8 +21,7 @@ import pandas as pd
 # VPS Stats directories
 STATS_DIRS = {
     "public": "/home/carnagereport/stats/public",
-    "private": "/home/carnagereport/stats/private",
-    "proper": "/home/carnagereport/stats/proper"
+    "private": "/home/carnagereport/stats/private"
 }
 
 # Output file
@@ -359,7 +358,6 @@ class StatsParserCommands(commands.Cog):
         app_commands.Choice(name="All directories", value="all"),
         app_commands.Choice(name="Public only", value="public"),
         app_commands.Choice(name="Private only", value="private"),
-        app_commands.Choice(name="Proper only", value="proper"),
     ])
     async def parsestats(
         self,
@@ -408,7 +406,6 @@ class StatsParserCommands(commands.Cog):
         app_commands.Choice(name="All directories", value="all"),
         app_commands.Choice(name="Public only", value="public"),
         app_commands.Choice(name="Private only", value="private"),
-        app_commands.Choice(name="Proper only", value="proper"),
     ])
     async def liststats(self, interaction: discord.Interaction, directory: str = "all"):
         """List available XLSX stats files"""
