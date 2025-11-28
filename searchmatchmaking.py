@@ -86,19 +86,18 @@ async def auto_update_queue_times():
 
 
 class InactivityConfirmView(View):
-    """View for inactivity confirmation with Yes/No buttons - uses dynamic custom_ids"""
+    """View for inactivity confirmation with Yes/No buttons - handled by on_interaction in HCRBot.py"""
     def __init__(self, user_id: int):
         super().__init__(timeout=INACTIVITY_RESPONSE_MINUTES * 60)  # 5 minute timeout
         self.user_id = user_id
-        self.responded = False
 
         # Add buttons with dynamic custom_ids (include user_id so each user has unique buttons)
+        # NOTE: Callbacks are handled by on_interaction in HCRBot.py to avoid duplicate handling
         yes_button = Button(
             label="Yes, Keep Me In Queue",
             style=discord.ButtonStyle.success,
             custom_id=f"inactivity_yes_{user_id}"
         )
-        yes_button.callback = self.stay_in_queue
         self.add_item(yes_button)
 
         no_button = Button(
@@ -106,76 +105,8 @@ class InactivityConfirmView(View):
             style=discord.ButtonStyle.danger,
             custom_id=f"inactivity_no_{user_id}"
         )
-        no_button.callback = self.leave_queue_btn
         self.add_item(no_button)
-
-    async def stay_in_queue(self, interaction: discord.Interaction):
-        """User wants to stay in queue"""
-        # Only the original user can respond
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message("This confirmation is not for you!", ephemeral=True)
-            return
-
-        self.responded = True
-
-        # Reset their join time to give them another hour
-        if self.user_id in queue_state.queue:
-            queue_state.queue_join_times[self.user_id] = datetime.now()
-            log_action(f"User {interaction.user.display_name} confirmed to stay in queue - timer reset")
-
-            # Clean up pending confirmation
-            await cleanup_inactivity_messages(self.user_id)
-
-            # Update the message to show confirmation
-            try:
-                await interaction.response.edit_message(
-                    content="✅ **You've been kept in the queue!** Your timer has been reset for another hour.",
-                    embed=None,
-                    view=None
-                )
-            except:
-                await interaction.response.send_message("✅ You've been kept in the queue!", ephemeral=True)
-
-            # Update queue embed
-            if queue_state.queue_channel:
-                await update_queue_embed(queue_state.queue_channel)
-        else:
-            await interaction.response.send_message("You're no longer in the queue.", ephemeral=True)
-
-    async def leave_queue_btn(self, interaction: discord.Interaction):
-        """User wants to leave queue"""
-        # Only the original user can respond
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message("This confirmation is not for you!", ephemeral=True)
-            return
-
-        self.responded = True
-
-        # Remove from queue
-        if self.user_id in queue_state.queue:
-            # Get guild - use interaction.guild if available, otherwise get from queue_channel (for DM buttons)
-            guild = interaction.guild or (queue_state.queue_channel.guild if queue_state.queue_channel else None)
-            if guild:
-                await remove_inactive_user(guild, self.user_id, reason="chose to leave")
-
-            try:
-                await interaction.response.edit_message(
-                    content="👋 **You've been removed from the queue.** Feel free to rejoin anytime!",
-                    embed=None,
-                    view=None
-                )
-            except:
-                await interaction.response.send_message("👋 You've been removed from the queue.", ephemeral=True)
-        else:
-            await interaction.response.send_message("You're no longer in the queue.", ephemeral=True)
-
-    async def on_timeout(self):
-        """Called when the view times out (no response in 5 minutes)"""
-        if not self.responded and self.user_id in queue_state.queue:
-            # Need to get guild from somewhere - use stored channel
-            if queue_state.queue_channel:
-                guild = queue_state.queue_channel.guild
-                await remove_inactive_user(guild, self.user_id, reason="did not respond to inactivity check")
+        # Note: Timeout handling is done by check_queue_inactivity background task
 
 
 async def remove_inactive_user(guild: discord.Guild, user_id: int, reason: str = "inactivity"):
