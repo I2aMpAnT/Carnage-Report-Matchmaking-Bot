@@ -14,6 +14,9 @@ import os
 # Header image for embeds
 HEADER_IMAGE_URL = "https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/MessagefromCarnageReportHEADER.png"
 
+# Matchmaking progress images (1-8 players) - using 8-player images temporarily for all queues
+MATCHMAKING_IMAGE_BASE = "https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/assets/matchmaking"
+
 # General channel for announcements
 GENERAL_CHANNEL_ID = 1403855176460406805
 
@@ -219,6 +222,28 @@ def select_random_map_gametype(playlist_type: str) -> Tuple[str, str]:
     elif playlist_type in [PlaylistType.TEAM_HARDCORE, PlaylistType.DOUBLE_TEAM]:
         return random.choice(MLG_MAP_GAMETYPES)
     return ("", "")
+
+
+def get_queue_progress_image(player_count: int, max_players: int = 8) -> str:
+    """Get the queue progress image URL for current player count.
+    Temporarily using 8-player images for all queues - scales smaller queues to 8."""
+    # Scale to 8-player images temporarily
+    if max_players == 8:
+        scaled_count = player_count
+    elif max_players == 4:
+        # 2v2: 1->2, 2->4, 3->6, 4->8
+        scaled_count = player_count * 2
+    elif max_players == 2:
+        # 1v1: 1->4, 2->8
+        scaled_count = player_count * 4
+    else:
+        scaled_count = player_count
+
+    if scaled_count < 1:
+        return f"{MATCHMAKING_IMAGE_BASE}/1outof8.png"
+    if scaled_count > 8:
+        scaled_count = 8
+    return f"{MATCHMAKING_IMAGE_BASE}/{scaled_count}outof8.png"
 
 
 def get_end_series_votes_needed(playlist_type: str) -> int:
@@ -614,6 +639,11 @@ async def create_playlist_embed(channel: discord.TextChannel, playlist_state: Pl
     if ps.paused:
         embed.add_field(name="Status", value="**PAUSED**", inline=False)
         embed.color = discord.Color.orange()
+
+    # Add queue progress image (temporarily using 8-player images scaled for all queues)
+    player_count = len(ps.queue)
+    if player_count > 0:
+        embed.set_image(url=get_queue_progress_image(player_count, ps.max_players))
 
     view = PlaylistQueueView(ps)
 
