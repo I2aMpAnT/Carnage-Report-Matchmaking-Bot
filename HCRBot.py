@@ -156,6 +156,11 @@ async def on_ready():
         print(f"  playlists.py:        v{playlists.MODULE_VERSION}")
     except:
         print(f"  playlists.py:        (no version)")
+    try:
+        import stats_parser
+        print(f"  stats_parser.py:     v{stats_parser.MODULE_VERSION}")
+    except:
+        print(f"  stats_parser.py:     (no version)")
     print("-" * 30)
     print()
     
@@ -184,6 +189,13 @@ async def on_ready():
         print('✅ Stats module loaded!')
     except Exception as e:
         print(f'⚠️ Stats module not loaded: {e}')
+
+    # Setup stats parser module (XLSX file parsing)
+    try:
+        await bot.load_extension('stats_parser')
+        print('✅ Stats parser module loaded!')
+    except Exception as e:
+        print(f'⚠️ Stats parser module not loaded: {e}')
     
     # Sync slash commands
     try:
