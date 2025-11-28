@@ -269,7 +269,7 @@ async def cleanup_inactivity_messages(user_id: int):
 
 
 async def send_inactivity_prompt(guild: discord.Guild, user_id: int):
-    """Send inactivity prompt to user via DM and general chat"""
+    """Send inactivity prompt to user via DM only"""
     member = guild.get_member(user_id)
     if not member:
         return
@@ -286,42 +286,29 @@ async def send_inactivity_prompt(guild: discord.Guild, user_id: int):
     )
 
     dm_message = None
-    general_message = None
+    dm_sent = False
 
     # Try to DM the user (plain text only)
     try:
         dm_message = await member.send(content=dm_text, view=view)
+        dm_sent = True
         log_action(f"Sent inactivity DM to {member.display_name}")
     except discord.Forbidden:
-        log_action(f"Could not DM {member.display_name} - DMs disabled")
+        log_action(f"Could not DM {member.display_name} - DMs disabled, removing from queue")
+        # If we can't DM them, remove them from queue
+        await remove_inactive_user(guild, user_id, reason="DMs disabled - could not send inactivity check")
+        return
     except Exception as e:
         log_action(f"Error sending inactivity DM to {member.display_name}: {e}")
+        return
 
-    # Also send a message in general chat with @mention
-    general_channel = guild.get_channel(GENERAL_CHANNEL_ID)
-    if general_channel:
-        try:
-            general_embed = discord.Embed(
-                title="⏰ Queue Inactivity Check",
-                description=f"{member.mention} has been in queue for **1 hour**.\n\n"
-                           f"Please respond within {INACTIVITY_RESPONSE_MINUTES} minutes or you'll be removed from the queue.",
-                color=discord.Color.orange()
-            )
-            general_message = await general_channel.send(
-                content=member.mention,
-                embed=general_embed,
-                view=InactivityConfirmView(user_id)  # Separate view instance for general chat
-            )
-            log_action(f"Sent inactivity ping in general for {member.display_name}")
-        except Exception as e:
-            log_action(f"Error sending inactivity message to general chat: {e}")
-
-    # Store the pending confirmation
-    queue_state.inactivity_pending[user_id] = {
-        "prompt_time": datetime.now(),
-        "dm_message": dm_message,
-        "general_message": general_message
-    }
+    # Store the pending confirmation (only if DM was sent successfully)
+    if dm_sent:
+        queue_state.inactivity_pending[user_id] = {
+            "prompt_time": datetime.now(),
+            "dm_message": dm_message,
+            "general_message": None
+        }
 
 
 async def check_queue_inactivity():
