@@ -726,7 +726,7 @@ async def start_playlist_match(channel: discord.TextChannel, playlist_state: Pla
         p2_name = player2.display_name if player2 else "Player 2"
 
         vc = await guild.create_voice_channel(
-            name=f"1v1: {p1_name} vs {p2_name}",
+            name=f"{p1_name} vs {p2_name}",
             category=category,
             user_limit=4
         )
