@@ -590,41 +590,95 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         else:
             await interaction.followup.send(f"✅ Pregame cancelled!", ephemeral=True)
     
-    @bot.tree.command(name="correctcurrent", description="[STAFF] Correct a game result in current match")
+    @bot.tree.command(name="correctcurrent", description="[STAFF] Correct a game result in a match")
     @has_staff_role()
-    async def correct_current(interaction: discord.Interaction, game_number: int, winner: str):
-        """Correct a game result"""
+    @app_commands.describe(
+        playlist="Which playlist's match to correct",
+        game_number="The game number to correct (1, 2, 3, etc.)",
+        winner="The correct winner (RED/BLUE or TEAM1/TEAM2 or P1/P2)"
+    )
+    @app_commands.choices(playlist=[
+        app_commands.Choice(name="MLG 4v4", value="mlg_4v4"),
+        app_commands.Choice(name="Team Hardcore", value="team_hardcore"),
+        app_commands.Choice(name="Double Team", value="double_team"),
+        app_commands.Choice(name="Head to Head", value="head_to_head"),
+    ])
+    async def correct_current(interaction: discord.Interaction, playlist: str, game_number: int, winner: str):
+        """Correct a game result in any playlist"""
         from searchmatchmaking import queue_state
         from ingame import show_series_embed
-        
-        if not queue_state.current_series:
-            await interaction.response.send_message("❌ No active match!", ephemeral=True)
-            return
-        
-        series = queue_state.current_series
-        
-        if game_number < 1 or game_number > len(series.games):
-            await interaction.response.send_message(
-                f"❌ Invalid game number! Must be between 1 and {len(series.games)}",
-                ephemeral=True
-            )
-            return
-        
-        winner_upper = winner.upper()
-        if winner_upper not in ['RED', 'BLUE']:
-            await interaction.response.send_message(
-                "❌ Winner must be 'RED' or 'BLUE'!",
-                ephemeral=True
-            )
-            return
-        
-        old_winner = series.games[game_number - 1]
-        series.games[game_number - 1] = winner_upper
-        
-        log_action(f"Admin {interaction.user.name} corrected Game {game_number} from {old_winner} to {winner_upper} in Match #{series.match_number}")
-        
-        await interaction.response.defer()
-        await show_series_embed(interaction.channel)
+
+        if playlist == "mlg_4v4":
+            # Original MLG 4v4 queue
+            if not queue_state.current_series:
+                await interaction.response.send_message("❌ No active MLG 4v4 match!", ephemeral=True)
+                return
+
+            series = queue_state.current_series
+
+            if game_number < 1 or game_number > len(series.games):
+                await interaction.response.send_message(
+                    f"❌ Invalid game number! Must be between 1 and {len(series.games)}",
+                    ephemeral=True
+                )
+                return
+
+            winner_upper = winner.upper()
+            if winner_upper not in ['RED', 'BLUE']:
+                await interaction.response.send_message(
+                    "❌ Winner must be 'RED' or 'BLUE'!",
+                    ephemeral=True
+                )
+                return
+
+            old_winner = series.games[game_number - 1]
+            series.games[game_number - 1] = winner_upper
+
+            log_action(f"Staff {interaction.user.name} corrected Game {game_number} from {old_winner} to {winner_upper} in MLG 4v4 Match #{series.match_number}")
+
+            await interaction.response.defer()
+            await show_series_embed(interaction.channel)
+        else:
+            # Other playlists
+            try:
+                import playlists
+                ps = playlists.get_playlist_state(playlist)
+
+                if not ps.current_match:
+                    await interaction.response.send_message(f"❌ No active {ps.name} match!", ephemeral=True)
+                    return
+
+                match = ps.current_match
+
+                if game_number < 1 or game_number > len(match.games):
+                    await interaction.response.send_message(
+                        f"❌ Invalid game number! Must be between 1 and {len(match.games)}",
+                        ephemeral=True
+                    )
+                    return
+
+                winner_upper = winner.upper()
+                # Accept multiple formats
+                if winner_upper in ['RED', 'TEAM1', 'P1', '1']:
+                    winner_upper = 'TEAM1'
+                elif winner_upper in ['BLUE', 'TEAM2', 'P2', '2']:
+                    winner_upper = 'TEAM2'
+                else:
+                    await interaction.response.send_message(
+                        "❌ Winner must be 'RED/BLUE', 'TEAM1/TEAM2', or 'P1/P2'!",
+                        ephemeral=True
+                    )
+                    return
+
+                old_winner = match.games[game_number - 1]
+                match.games[game_number - 1] = winner_upper
+
+                log_action(f"Staff {interaction.user.name} corrected Game {game_number} from {old_winner} to {winner_upper} in {match.get_match_label()}")
+
+                await interaction.response.defer()
+                await playlists.show_playlist_match_embed(interaction.channel, match)
+            except Exception as e:
+                await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
     
     @bot.tree.command(name="bannedroles", description="[ADMIN] Set roles that cannot queue (comma separated)")
     @has_admin_role()
