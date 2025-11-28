@@ -608,9 +608,9 @@ class QueueView(View):
             description=f"We have **{current_count}** players searching in Matchmaking, need **{needed}** more to start a Match!",
             color=discord.Color.blue()
         )
-        
-        # Set header as thumbnail for continuous look
-        main_embed.set_thumbnail(url=HEADER_IMAGE_URL)
+
+        # Set header at top using author
+        main_embed.set_author(name="Message From Carnage Report", icon_url=HEADER_IMAGE_URL)
         
         # Add queue progress image as main image
         main_embed.set_image(url=get_queue_progress_image(current_count))
@@ -792,7 +792,7 @@ async def update_ping_message(guild: discord.Guild):
         description=f"We have **{current_count}** players searching in Matchmaking, need **{needed}** more to start a Match!",
         color=discord.Color.green()
     )
-    main_embed.set_thumbnail(url=HEADER_IMAGE_URL)
+    main_embed.set_author(name="Message From Carnage Report", icon_url=HEADER_IMAGE_URL)
     main_embed.set_image(url=get_queue_progress_image(current_count))
     
     try:

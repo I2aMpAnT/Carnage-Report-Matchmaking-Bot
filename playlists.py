@@ -480,7 +480,7 @@ class PlaylistQueueView(View):
             description=f"We have **{current_count}/{ps.max_players}** players searching.\nNeed **{needed}** more to start!",
             color=discord.Color.blue()
         )
-        embed.set_thumbnail(url=HEADER_IMAGE_URL)
+        embed.set_author(name="Message From Carnage Report", icon_url=HEADER_IMAGE_URL)
 
         # Create view with join button
         view = PlaylistPingJoinView(ps)
@@ -584,7 +584,7 @@ async def update_playlist_ping_message(guild: discord.Guild, ps: PlaylistQueueSt
         description=f"We have **{current_count}/{ps.max_players}** players searching.\nNeed **{needed}** more to start!",
         color=discord.Color.green()
     )
-    embed.set_thumbnail(url=HEADER_IMAGE_URL)
+    embed.set_author(name="Message From Carnage Report", icon_url=HEADER_IMAGE_URL)
 
     try:
         await ps.ping_message.edit(embed=embed)
