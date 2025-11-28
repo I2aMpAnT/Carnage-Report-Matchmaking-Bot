@@ -1,6 +1,6 @@
 # commands.py - All Bot Commands
 
-MODULE_VERSION = "1.1.0"
+MODULE_VERSION = "1.3.0"
 
 import discord
 from discord import app_commands
@@ -1696,31 +1696,61 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
     
     @bot.tree.command(name='hideplayernames', description='[STAFF] Hide player names in queue (show as "Matched Player")')
     @has_staff_role()
-    async def hide_player_names(interaction: discord.Interaction):
+    @app_commands.describe(playlist="Which playlist to hide names in (default: MLG 4v4)")
+    @app_commands.choices(playlist=[
+        app_commands.Choice(name="MLG 4v4", value="mlg_4v4"),
+        app_commands.Choice(name="Team Hardcore", value="team_hardcore"),
+        app_commands.Choice(name="Double Team", value="double_team"),
+        app_commands.Choice(name="Head to Head", value="head_to_head"),
+    ])
+    async def hide_player_names(interaction: discord.Interaction, playlist: str = "mlg_4v4"):
         """Hide player names in the queue list"""
         from searchmatchmaking import queue_state, update_queue_embed
-        
-        queue_state.hide_player_names = True
-        
-        # Update the queue embed immediately
-        if queue_state.queue_channel:
-            await update_queue_embed(queue_state.queue_channel)
-        
-        await interaction.response.send_message("✅ Player names are now hidden. Queue shows 'Matched Player' instead.", ephemeral=True)
-    
+
+        if playlist == "mlg_4v4":
+            queue_state.hide_player_names = True
+            if queue_state.queue_channel:
+                await update_queue_embed(queue_state.queue_channel)
+            await interaction.response.send_message("✅ MLG 4v4: Player names are now hidden.", ephemeral=True)
+        else:
+            try:
+                import playlists
+                playlists.set_playlist_hidden(playlist, True)
+                ps = playlists.get_playlist_state(playlist)
+                if ps.queue_channel:
+                    await playlists.update_playlist_embed(ps.queue_channel, ps)
+                await interaction.response.send_message(f"✅ {ps.name}: Player names are now hidden.", ephemeral=True)
+            except Exception as e:
+                await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
+
     @bot.tree.command(name='showplayernames', description='[STAFF] Show real player names in queue')
     @has_staff_role()
-    async def show_player_names(interaction: discord.Interaction):
+    @app_commands.describe(playlist="Which playlist to show names in (default: MLG 4v4)")
+    @app_commands.choices(playlist=[
+        app_commands.Choice(name="MLG 4v4", value="mlg_4v4"),
+        app_commands.Choice(name="Team Hardcore", value="team_hardcore"),
+        app_commands.Choice(name="Double Team", value="double_team"),
+        app_commands.Choice(name="Head to Head", value="head_to_head"),
+    ])
+    async def show_player_names(interaction: discord.Interaction, playlist: str = "mlg_4v4"):
         """Show real player names in the queue list"""
         from searchmatchmaking import queue_state, update_queue_embed
-        
-        queue_state.hide_player_names = False
-        
-        # Update the queue embed immediately
-        if queue_state.queue_channel:
-            await update_queue_embed(queue_state.queue_channel)
-        
-        await interaction.response.send_message("✅ Player names are now visible in the queue.", ephemeral=True)
+
+        if playlist == "mlg_4v4":
+            queue_state.hide_player_names = False
+            if queue_state.queue_channel:
+                await update_queue_embed(queue_state.queue_channel)
+            await interaction.response.send_message("✅ MLG 4v4: Player names are now visible.", ephemeral=True)
+        else:
+            try:
+                import playlists
+                playlists.set_playlist_hidden(playlist, False)
+                ps = playlists.get_playlist_state(playlist)
+                if ps.queue_channel:
+                    await playlists.update_playlist_embed(ps.queue_channel, ps)
+                await interaction.response.send_message(f"✅ {ps.name}: Player names are now visible.", ephemeral=True)
+            except Exception as e:
+                await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
     
     @bot.tree.command(name='guest', description='[STAFF] Add a guest player attached to a host (MMR = half of host)')
     @app_commands.describe(
@@ -2051,42 +2081,163 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             ephemeral=True
         )
     
-    @bot.tree.command(name='pause', description='[STAFF] Pause matchmaking - prevents new players from joining')
+    @bot.tree.command(name='pause', description='[STAFF] Pause a matchmaking queue - prevents new players from joining')
     @has_staff_role()
-    async def pause_matchmaking(interaction: discord.Interaction):
-        """Pause matchmaking queue"""
+    @app_commands.describe(playlist="Which playlist to pause (default: all)")
+    @app_commands.choices(playlist=[
+        app_commands.Choice(name="All Playlists", value="all"),
+        app_commands.Choice(name="MLG 4v4", value="mlg_4v4"),
+        app_commands.Choice(name="Team Hardcore", value="team_hardcore"),
+        app_commands.Choice(name="Double Team", value="double_team"),
+        app_commands.Choice(name="Head to Head", value="head_to_head"),
+    ])
+    async def pause_matchmaking(interaction: discord.Interaction, playlist: str = "all"):
+        """Pause matchmaking queue(s)"""
         from searchmatchmaking import queue_state, log_action
-        
-        if queue_state.paused:
-            await interaction.response.send_message("⏸️ Matchmaking is already paused!", ephemeral=True)
-            return
-        
-        queue_state.paused = True
-        log_action(f"Matchmaking paused by {interaction.user.display_name}")
-        
-        await interaction.response.send_message(
-            "⏸️ **Matchmaking is now PAUSED**\n\nPlayers cannot join the queue until you use `/unpause`",
-            ephemeral=True
-        )
-    
-    @bot.tree.command(name='unpause', description='[STAFF] Unpause matchmaking - allows players to join again')
+
+        paused_list = []
+
+        if playlist == "all" or playlist == "mlg_4v4":
+            if not queue_state.paused:
+                queue_state.paused = True
+                paused_list.append("MLG 4v4")
+
+        # Pause other playlists
+        try:
+            import playlists
+            if playlist == "all":
+                for ptype in [playlists.PlaylistType.TEAM_HARDCORE, playlists.PlaylistType.DOUBLE_TEAM, playlists.PlaylistType.HEAD_TO_HEAD]:
+                    ps = playlists.get_playlist_state(ptype)
+                    if not ps.paused:
+                        ps.paused = True
+                        paused_list.append(ps.name)
+                        if ps.queue_channel:
+                            await playlists.update_playlist_embed(ps.queue_channel, ps)
+            elif playlist in [playlists.PlaylistType.TEAM_HARDCORE, playlists.PlaylistType.DOUBLE_TEAM, playlists.PlaylistType.HEAD_TO_HEAD]:
+                ps = playlists.get_playlist_state(playlist)
+                if not ps.paused:
+                    ps.paused = True
+                    paused_list.append(ps.name)
+                    if ps.queue_channel:
+                        await playlists.update_playlist_embed(ps.queue_channel, ps)
+        except Exception as e:
+            log_action(f"Error pausing playlists: {e}")
+
+        if paused_list:
+            log_action(f"Paused by {interaction.user.display_name}: {', '.join(paused_list)}")
+            await interaction.response.send_message(
+                f"⏸️ **PAUSED:** {', '.join(paused_list)}\n\nUse `/unpause` to resume.",
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message("⏸️ Selected queue(s) already paused!", ephemeral=True)
+
+    @bot.tree.command(name='unpause', description='[STAFF] Unpause a matchmaking queue - allows players to join again')
     @has_staff_role()
-    async def unpause_matchmaking(interaction: discord.Interaction):
-        """Unpause matchmaking queue"""
+    @app_commands.describe(playlist="Which playlist to unpause (default: all)")
+    @app_commands.choices(playlist=[
+        app_commands.Choice(name="All Playlists", value="all"),
+        app_commands.Choice(name="MLG 4v4", value="mlg_4v4"),
+        app_commands.Choice(name="Team Hardcore", value="team_hardcore"),
+        app_commands.Choice(name="Double Team", value="double_team"),
+        app_commands.Choice(name="Head to Head", value="head_to_head"),
+    ])
+    async def unpause_matchmaking(interaction: discord.Interaction, playlist: str = "all"):
+        """Unpause matchmaking queue(s)"""
         from searchmatchmaking import queue_state, log_action
-        
-        if not queue_state.paused:
-            await interaction.response.send_message("▶️ Matchmaking is not paused!", ephemeral=True)
-            return
-        
-        queue_state.paused = False
-        log_action(f"Matchmaking unpaused by {interaction.user.display_name}")
-        
-        await interaction.response.send_message(
-            "▶️ **Matchmaking is now RESUMED**\n\nPlayers can join the queue again!",
-            ephemeral=True
-        )
-    
+
+        unpaused_list = []
+
+        if playlist == "all" or playlist == "mlg_4v4":
+            if queue_state.paused:
+                queue_state.paused = False
+                unpaused_list.append("MLG 4v4")
+
+        # Unpause other playlists
+        try:
+            import playlists
+            if playlist == "all":
+                for ptype in [playlists.PlaylistType.TEAM_HARDCORE, playlists.PlaylistType.DOUBLE_TEAM, playlists.PlaylistType.HEAD_TO_HEAD]:
+                    ps = playlists.get_playlist_state(ptype)
+                    if ps.paused:
+                        ps.paused = False
+                        unpaused_list.append(ps.name)
+                        if ps.queue_channel:
+                            await playlists.update_playlist_embed(ps.queue_channel, ps)
+            elif playlist in [playlists.PlaylistType.TEAM_HARDCORE, playlists.PlaylistType.DOUBLE_TEAM, playlists.PlaylistType.HEAD_TO_HEAD]:
+                ps = playlists.get_playlist_state(playlist)
+                if ps.paused:
+                    ps.paused = False
+                    unpaused_list.append(ps.name)
+                    if ps.queue_channel:
+                        await playlists.update_playlist_embed(ps.queue_channel, ps)
+        except Exception as e:
+            log_action(f"Error unpausing playlists: {e}")
+
+        if unpaused_list:
+            log_action(f"Unpaused by {interaction.user.display_name}: {', '.join(unpaused_list)}")
+            await interaction.response.send_message(
+                f"▶️ **RESUMED:** {', '.join(unpaused_list)}\n\nPlayers can join again!",
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message("▶️ Selected queue(s) not paused!", ephemeral=True)
+
+    @bot.tree.command(name='clearqueue', description='[STAFF] Clear a matchmaking queue')
+    @has_staff_role()
+    @app_commands.describe(playlist="Which playlist queue to clear (default: all)")
+    @app_commands.choices(playlist=[
+        app_commands.Choice(name="All Playlists", value="all"),
+        app_commands.Choice(name="MLG 4v4", value="mlg_4v4"),
+        app_commands.Choice(name="Team Hardcore", value="team_hardcore"),
+        app_commands.Choice(name="Double Team", value="double_team"),
+        app_commands.Choice(name="Head to Head", value="head_to_head"),
+    ])
+    async def clear_queue(interaction: discord.Interaction, playlist: str = "all"):
+        """Clear a matchmaking queue"""
+        from searchmatchmaking import queue_state, update_queue_embed, log_action
+
+        cleared_info = []
+
+        if playlist == "all" or playlist == "mlg_4v4":
+            count = len(queue_state.queue)
+            if count > 0:
+                queue_state.queue.clear()
+                queue_state.queue_join_times.clear()
+                queue_state.guests.clear()
+                queue_state.recent_action = None
+                cleared_info.append(f"MLG 4v4: {count} players")
+                if queue_state.queue_channel:
+                    await update_queue_embed(queue_state.queue_channel)
+
+        # Clear other playlists
+        try:
+            import playlists
+            ptypes_to_clear = []
+            if playlist == "all":
+                ptypes_to_clear = [playlists.PlaylistType.TEAM_HARDCORE, playlists.PlaylistType.DOUBLE_TEAM, playlists.PlaylistType.HEAD_TO_HEAD]
+            elif playlist in [playlists.PlaylistType.TEAM_HARDCORE, playlists.PlaylistType.DOUBLE_TEAM, playlists.PlaylistType.HEAD_TO_HEAD]:
+                ptypes_to_clear = [playlist]
+
+            for ptype in ptypes_to_clear:
+                count = playlists.clear_playlist_queue(ptype)
+                if count > 0:
+                    ps = playlists.get_playlist_state(ptype)
+                    cleared_info.append(f"{ps.name}: {count} players")
+                    if ps.queue_channel:
+                        await playlists.update_playlist_embed(ps.queue_channel, ps)
+        except Exception as e:
+            log_action(f"Error clearing playlists: {e}")
+
+        if cleared_info:
+            log_action(f"Cleared by {interaction.user.display_name}: {', '.join(cleared_info)}")
+            await interaction.response.send_message(
+                f"✅ **Cleared:**\n" + "\n".join(f"• {info}" for info in cleared_info),
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message("❌ No players in the selected queue(s)!", ephemeral=True)
+
     @bot.tree.command(name='adminarrange', description='[STAFF] Manually set teams and start a match')
     @app_commands.describe(
         red1="Red Team Player 1",
