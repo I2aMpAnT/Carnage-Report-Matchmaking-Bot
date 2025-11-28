@@ -1086,6 +1086,65 @@ async def end_playlist_match(channel: discord.TextChannel, match: PlaylistMatch)
 
     await channel.send(embed=embed)
 
+    # Record playlist-specific stats for all players
+    await record_playlist_match_stats(match, guild)
+
+
+async def record_playlist_match_stats(match: PlaylistMatch, guild: discord.Guild):
+    """Record playlist-specific stats for all players in a match"""
+    import STATSRANKS
+
+    playlist_type = match.playlist_state.playlist_type
+    xp_config = STATSRANKS.get_xp_config()
+
+    # Count wins per team
+    team1_game_wins = match.games.count('TEAM1')
+    team2_game_wins = match.games.count('TEAM2')
+
+    # Determine series winner
+    if team1_game_wins > team2_game_wins:
+        series_winner = "TEAM1"
+    elif team2_game_wins > team1_game_wins:
+        series_winner = "TEAM2"
+    else:
+        series_winner = "TIE"
+
+    # Update Team 1 players
+    for user_id in match.team1:
+        update = {
+            "wins": team1_game_wins,
+            "losses": team2_game_wins,
+            "xp": (team1_game_wins * xp_config["game_win"]) + (team2_game_wins * xp_config["game_loss"])
+        }
+
+        if series_winner == "TEAM1":
+            update["series_wins"] = 1
+        elif series_winner == "TEAM2":
+            update["series_losses"] = 1
+
+        STATSRANKS.update_playlist_stats(user_id, playlist_type, update)
+
+    # Update Team 2 players
+    for user_id in match.team2:
+        update = {
+            "wins": team2_game_wins,
+            "losses": team1_game_wins,
+            "xp": (team2_game_wins * xp_config["game_win"]) + (team1_game_wins * xp_config["game_loss"])
+        }
+
+        if series_winner == "TEAM2":
+            update["series_wins"] = 1
+        elif series_winner == "TEAM1":
+            update["series_losses"] = 1
+
+        STATSRANKS.update_playlist_stats(user_id, playlist_type, update)
+
+    # Refresh ranks for all players (uses highest_rank)
+    all_players = match.team1 + match.team2
+    await STATSRANKS.refresh_playlist_ranks(guild, all_players, playlist_type, send_dm=True)
+
+    log_action(f"Recorded stats for {match.get_match_label()}: {len(all_players)} players")
+
 
 # Command helper functions
 def pause_playlist(playlist_type: str) -> bool:
