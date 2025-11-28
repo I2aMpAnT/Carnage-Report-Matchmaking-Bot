@@ -171,6 +171,7 @@ class PlaylistMatch:
         self.general_message: Optional[discord.Message] = None
 
         self.start_time = datetime.now()
+        self.end_series_votes: set = set()  # User IDs who voted to end
 
     def get_match_label(self) -> str:
         """Get display label for this match"""
@@ -218,6 +219,17 @@ def select_random_map_gametype(playlist_type: str) -> Tuple[str, str]:
     elif playlist_type in [PlaylistType.TEAM_HARDCORE, PlaylistType.DOUBLE_TEAM]:
         return random.choice(MLG_MAP_GAMETYPES)
     return ("", "")
+
+
+def get_end_series_votes_needed(playlist_type: str) -> int:
+    """Get number of votes needed to end series for a playlist type"""
+    if playlist_type == PlaylistType.HEAD_TO_HEAD:
+        return 1  # 1v1: either player can end
+    elif playlist_type == PlaylistType.DOUBLE_TEAM:
+        return 3  # 2v2: 3 of 4 players
+    elif playlist_type == PlaylistType.TEAM_HARDCORE:
+        return 5  # 4v4: 5 of 8 players
+    return 5  # Default
 
 
 async def balance_teams_by_mmr(players: List[int], team_size: int) -> Tuple[List[int], List[int]]:
@@ -759,13 +771,6 @@ async def show_playlist_match_embed(channel: discord.TextChannel, match: Playlis
         color=discord.Color.green()
     )
 
-    if match.map_name and match.gametype:
-        embed.add_field(
-            name="Map & Gametype",
-            value=f"**{match.map_name}** - {match.gametype}",
-            inline=False
-        )
-
     if ps.playlist_type == PlaylistType.HEAD_TO_HEAD:
         # 1v1 format
         player1 = guild.get_member(match.team1[0])
@@ -773,9 +778,12 @@ async def show_playlist_match_embed(channel: discord.TextChannel, match: Playlis
         p1_name = player1.display_name if player1 else "Player 1"
         p2_name = player2.display_name if player2 else "Player 2"
 
+        p1_wins = match.games.count('TEAM1')
+        p2_wins = match.games.count('TEAM2')
+
         embed.add_field(
             name="Match",
-            value=f"**{p1_name}** vs **{p2_name}**",
+            value=f"**{p1_name}** ({p1_wins}) vs **{p2_name}** ({p2_wins})",
             inline=False
         )
     else:
@@ -796,6 +804,45 @@ async def show_playlist_match_embed(channel: discord.TextChannel, match: Playlis
             value=team2_mentions or "TBD",
             inline=True
         )
+
+    # Show completed games
+    if match.games:
+        games_text = ""
+        for i, winner in enumerate(match.games, 1):
+            stats = match.game_stats.get(i, {})
+            map_name = stats.get("map", "")
+            if ps.playlist_type == PlaylistType.HEAD_TO_HEAD:
+                winner_label = "P1" if winner == "TEAM1" else "P2"
+            else:
+                winner_label = "🔴" if winner == "TEAM1" else "🔵"
+            if map_name:
+                games_text += f"Game {i}: {winner_label} - {map_name}\n"
+            else:
+                games_text += f"Game {i}: {winner_label}\n"
+        embed.add_field(
+            name="Completed Games",
+            value=games_text.strip(),
+            inline=False
+        )
+
+    # Show next map/gametype
+    if match.map_name and match.gametype:
+        embed.add_field(
+            name=f"Game {match.current_game} - Next Map",
+            value=f"**{match.map_name}** - {match.gametype}",
+            inline=False
+        )
+
+    # Show end series votes
+    votes_needed = get_end_series_votes_needed(ps.playlist_type)
+    current_votes = len(match.end_series_votes)
+    total_players = len(match.team1) + len(match.team2)
+
+    embed.add_field(
+        name=f"End Series Votes ({current_votes}/{votes_needed})",
+        value=f"{current_votes} vote{'s' if current_votes != 1 else ''} to end",
+        inline=False
+    )
 
     view = PlaylistMatchView(match)
 
@@ -853,13 +900,22 @@ class PlaylistMatchView(View):
             await interaction.response.send_message("Only players or staff can vote!", ephemeral=True)
             return
 
-        # Record game winner
+        # Record game winner with current map/gametype
         self.match.games.append(winner)
+        self.match.game_stats[len(self.match.games)] = {
+            "map": self.match.map_name,
+            "gametype": self.match.gametype
+        }
         self.match.current_game += 1
 
-        log_action(f"{self.match.get_match_label()} - Game {len(self.match.games)} won by {winner}")
+        log_action(f"{self.match.get_match_label()} - Game {len(self.match.games)} won by {winner} on {self.match.map_name}")
 
         await interaction.response.defer()
+
+        # Select NEW random map/gametype for next game
+        new_map, new_gametype = select_random_map_gametype(self.match.playlist_state.playlist_type)
+        self.match.map_name = new_map
+        self.match.gametype = new_gametype
 
         # Update buttons
         if self.match.playlist_state.playlist_type == PlaylistType.HEAD_TO_HEAD:
@@ -872,18 +928,45 @@ class PlaylistMatchView(View):
         await show_playlist_match_embed(interaction.channel, self.match)
 
     async def end_match(self, interaction: discord.Interaction):
-        """End the match"""
+        """Vote to end the series"""
         # Check permissions
         user_roles = [role.name for role in interaction.user.roles]
         is_staff = any(role in ["Overlord", "Staff", "Server Tech Support"] for role in user_roles)
         all_players = self.match.team1 + self.match.team2
 
         if not is_staff and interaction.user.id not in all_players:
-            await interaction.response.send_message("Only players or staff can end the match!", ephemeral=True)
+            await interaction.response.send_message("Only players or staff can vote to end!", ephemeral=True)
             return
 
+        # Toggle vote
+        user_id = interaction.user.id
+        if user_id in self.match.end_series_votes:
+            self.match.end_series_votes.remove(user_id)
+            await interaction.response.defer()
+            await show_playlist_match_embed(interaction.channel, self.match)
+            return
+        else:
+            self.match.end_series_votes.add(user_id)
+
         await interaction.response.defer()
-        await end_playlist_match(interaction.channel, self.match)
+
+        # Check if enough votes to end
+        votes_needed = get_end_series_votes_needed(self.match.playlist_state.playlist_type)
+        current_votes = len(self.match.end_series_votes)
+
+        # Staff can force end with 2 votes
+        staff_votes = 0
+        for uid in self.match.end_series_votes:
+            member = interaction.guild.get_member(uid)
+            if member:
+                member_roles = [role.name for role in member.roles]
+                if any(role in ["Overlord", "Staff", "Server Tech Support"] for role in member_roles):
+                    staff_votes += 1
+
+        if current_votes >= votes_needed or staff_votes >= 2:
+            await end_playlist_match(interaction.channel, self.match)
+        else:
+            await show_playlist_match_embed(interaction.channel, self.match)
 
 
 async def end_playlist_match(channel: discord.TextChannel, match: PlaylistMatch):
