@@ -357,16 +357,6 @@ class PlaylistQueueView(View):
             await interaction.response.send_message("Match in progress!", ephemeral=True)
             return
 
-        # Check if player is in another playlist queue
-        for other_ps in get_all_playlists():
-            if other_ps.playlist_type != ps.playlist_type and user_id in other_ps.queue:
-                await interaction.response.send_message(
-                    f"You're already in the **{other_ps.name}** queue!\n"
-                    f"Leave that queue first to join this one.",
-                    ephemeral=True
-                )
-                return
-
         # Add to queue
         ps.queue.append(user_id)
         ps.queue_join_times[user_id] = datetime.now()
@@ -510,15 +500,6 @@ class PlaylistPingJoinView(View):
         if ps.current_match:
             await interaction.response.send_message("Match in progress!", ephemeral=True)
             return
-
-        # Check if player is in another playlist queue
-        for other_ps in get_all_playlists():
-            if other_ps.playlist_type != ps.playlist_type and user_id in other_ps.queue:
-                await interaction.response.send_message(
-                    f"You're already in the **{other_ps.name}** queue!\nLeave that queue first.",
-                    ephemeral=True
-                )
-                return
 
         # Add to queue
         ps.queue.append(user_id)
