@@ -1,7 +1,7 @@
 # playlists.py - Multi-Playlist Queue System
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.0.1"
+MODULE_VERSION = "1.0.2"
 
 import discord
 from discord.ui import View, Button
@@ -259,48 +259,49 @@ def get_end_series_votes_needed(playlist_type: str) -> int:
 
 
 async def balance_teams_by_mmr(players: List[int], team_size: int) -> Tuple[List[int], List[int]]:
-    """Balance players into two teams based on MMR"""
+    """Balance players into two teams based on MMR using exhaustive search"""
+    from itertools import combinations
+
     # Get all player MMRs
     player_mmrs = {}
     for uid in players:
         player_mmrs[uid] = await get_player_mmr(uid)
 
-    # Sort by MMR (highest first)
-    sorted_players = sorted(players, key=lambda x: player_mmrs[x], reverse=True)
+    total_mmr = sum(player_mmrs.values())
+    target_mmr = total_mmr / 2  # Ideal team MMR is half the total
 
-    # Snake draft for balance
-    team1 = []
-    team2 = []
+    best_team1 = None
+    best_team2 = None
+    best_diff = float('inf')
 
-    for i, player in enumerate(sorted_players):
-        if i % 2 == 0:
-            if len(team1) < team_size:
-                team1.append(player)
-            else:
-                team2.append(player)
-        else:
-            if len(team2) < team_size:
-                team2.append(player)
-            else:
-                team1.append(player)
+    # Try all possible team combinations and find the one closest to balanced
+    # For 8 players choosing 4, there are only 70 combinations
+    # For 4 players choosing 2, there are only 6 combinations
+    for team1_combo in combinations(players, team_size):
+        team1 = list(team1_combo)
+        team2 = [p for p in players if p not in team1]
 
-    # Try swapping to optimize
-    best_diff = abs(sum(player_mmrs[u] for u in team1) - sum(player_mmrs[u] for u in team2))
-    best_team1 = team1[:]
-    best_team2 = team2[:]
+        team1_mmr = sum(player_mmrs[uid] for uid in team1)
+        team2_mmr = sum(player_mmrs[uid] for uid in team2)
+        diff = abs(team1_mmr - team2_mmr)
 
-    for t1_player in team1:
-        for t2_player in team2:
-            test_team1 = [p if p != t1_player else t2_player for p in team1]
-            test_team2 = [p if p != t2_player else t1_player for p in team2]
+        if diff < best_diff:
+            best_diff = diff
+            best_team1 = team1[:]
+            best_team2 = team2[:]
 
-            diff = abs(sum(player_mmrs[u] for u in test_team1) - sum(player_mmrs[u] for u in test_team2))
-            if diff < best_diff:
-                best_diff = diff
-                best_team1 = test_team1[:]
-                best_team2 = test_team2[:]
+            # Perfect balance found, stop searching
+            if diff == 0:
+                break
 
-    log_action(f"Balanced teams - MMR diff: {best_diff}")
+    # Sort teams by average MMR (higher avg team first for consistency)
+    team1_avg = sum(player_mmrs[uid] for uid in best_team1) / len(best_team1)
+    team2_avg = sum(player_mmrs[uid] for uid in best_team2) / len(best_team2)
+
+    if team2_avg > team1_avg:
+        best_team1, best_team2 = best_team2, best_team1
+
+    log_action(f"Balanced teams - MMR diff: {best_diff} (checked all {len(list(combinations(players, team_size)))} combinations)")
     return best_team1, best_team2
 
 
