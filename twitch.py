@@ -3,7 +3,7 @@ twitch.py - Twitch Integration Module
 Manages player Twitch links and multi-stream URLs
 """
 
-MODULE_VERSION = "1.1.0"
+MODULE_VERSION = "1.2.0"
 
 import discord
 from discord import app_commands
@@ -26,6 +26,9 @@ PLAYERS_BACKUP = "players.json.bak"
 
 # Multi-stream base URLs
 MULTITWITCH_BASE = "https://multitwitch.tv/"
+
+# Header image for embeds
+HEADER_IMAGE_URL = "https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/H2CRFinal.png"
 
 # Twitch parsing regex
 TWITCH_URL_RE = re.compile(r"(?:https?://)?(?:www\.)?twitch\.tv/([^/?\s@]+)", re.IGNORECASE)
@@ -298,7 +301,10 @@ def build_match_embed_with_twitch(
         )
     
     embed.set_footer(text="Match in progress - Click player names to view streams")
-    
+
+    # Add header image
+    embed.set_image(url=HEADER_IMAGE_URL)
+
     # Get Twitch names for multistream buttons
     red_twitch = get_team_twitch_names(red_team)
     blue_twitch = get_team_twitch_names(blue_team)

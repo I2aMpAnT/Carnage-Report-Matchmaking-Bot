@@ -1,6 +1,6 @@
 # ingame.py - In-Game Series Management and Voting
 
-MODULE_VERSION = "1.1.0"
+MODULE_VERSION = "1.2.0"
 
 import discord
 from discord.ui import View, Button
@@ -12,6 +12,9 @@ BLUE_TEAM_EMOJI_ID = None
 ADMIN_ROLES = []
 GENERAL_CHANNEL_ID = 1403855176460406805
 QUEUE_CHANNEL_ID = None
+
+# Header image for embeds
+HEADER_IMAGE_URL = "https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/H2CRFinal.png"
 
 def log_action(message: str):
     """Log actions"""
@@ -74,11 +77,12 @@ async def update_general_chat_embed(guild: discord.Guild, series):
             inline=True
         )
         embed.add_field(
-            name=f"<:blueteam:{BLUE_TEAM_EMOJI_ID}> Blue Team - {blue_wins}", 
-            value=blue_mentions, 
+            name=f"<:blueteam:{BLUE_TEAM_EMOJI_ID}> Blue Team - {blue_wins}",
+            value=blue_mentions,
             inline=True
         )
         embed.set_footer(text="Match in progress - voting in matchmaking channel")
+        embed.set_image(url=HEADER_IMAGE_URL)
         view = None
     
     # Check if test mode
