@@ -5,7 +5,7 @@
 # ============================================
 # VERSION INFO
 # ============================================
-BOT_VERSION = "1.4.0"
+BOT_VERSION = "1.5.0"
 BOT_BUILD_DATE = "2025-11-29"
 # ============================================
 
@@ -356,18 +356,110 @@ async def on_interaction(interaction: discord.Interaction):
 
 @bot.event
 async def on_message(message: discord.Message):
-    """Handle messages - keep match embed at bottom of general chat"""
+    """Handle messages - keep queue embeds and match embeds at bottom of their channels"""
     # Ignore bot messages
     if message.author.bot:
         return
 
-    # Check if message is in general chat
+    # List of all queue channel IDs
+    QUEUE_CHANNELS = [
+        QUEUE_CHANNEL_ID,           # MLG 4v4
+        TEAM_HARDCORE_CHANNEL_ID,   # Team Hardcore
+        DOUBLE_TEAM_CHANNEL_ID,     # Double Team
+        HEAD_TO_HEAD_CHANNEL_ID,    # Head to Head
+    ]
+
     GENERAL_CHANNEL_ID = 1403855176460406805
-    if message.channel.id != GENERAL_CHANNEL_ID:
+
+    # Handle queue channels - keep queue embed at bottom
+    if message.channel.id in QUEUE_CHANNELS:
+        await repost_queue_embed_if_needed(message)
         return
 
-    # Check if there's an active series with a general_message
-    from searchmatchmaking import queue_state
+    # Handle general chat - keep match embed at bottom during active series
+    if message.channel.id == GENERAL_CHANNEL_ID:
+        await repost_match_embed_if_needed(message)
+        return
+
+
+async def repost_queue_embed_if_needed(message: discord.Message):
+    """Repost queue embed to keep it at the bottom of the channel"""
+    from searchmatchmaking import queue_state, update_queue_embed, log_action
+
+    channel = message.channel
+
+    # Check if this is the MLG 4v4 queue channel
+    if channel.id == QUEUE_CHANNEL_ID:
+        # Check if queue is active (has players or no match in progress)
+        if queue_state.current_series:
+            return  # Don't mess with embeds during active series
+
+        try:
+            # Find the queue embed message
+            queue_message = None
+            async for msg in channel.history(limit=20):
+                if msg.author.bot and msg.embeds:
+                    title = msg.embeds[0].title or ""
+                    if "Matchmaking" in title and "MLG" in title:
+                        queue_message = msg
+                        break
+
+            if queue_message:
+                # Delete and repost
+                try:
+                    await queue_message.delete()
+                except:
+                    pass
+
+                # Repost the queue embed
+                await update_queue_embed(channel)
+                log_action(f"Reposted MLG queue embed (triggered by {message.author.display_name})")
+
+        except Exception as e:
+            print(f"Error reposting MLG queue embed: {e}")
+        return
+
+    # Handle other playlist channels
+    try:
+        from playlists import get_playlist_by_channel, update_playlist_embed
+
+        playlist_state = get_playlist_by_channel(channel.id)
+        if not playlist_state:
+            return
+
+        # Don't repost during active match
+        if playlist_state.current_match:
+            return
+
+        # Find the playlist queue embed
+        queue_message = None
+        async for msg in channel.history(limit=20):
+            if msg.author.bot and msg.embeds:
+                title = msg.embeds[0].title or ""
+                if playlist_state.name in title and "Matchmaking" in title:
+                    queue_message = msg
+                    break
+
+        if queue_message:
+            # Delete and repost
+            try:
+                await queue_message.delete()
+            except:
+                pass
+
+            # Repost the queue embed
+            await update_playlist_embed(channel, playlist_state)
+            from searchmatchmaking import log_action
+            log_action(f"Reposted {playlist_state.name} queue embed (triggered by {message.author.display_name})")
+
+    except Exception as e:
+        print(f"Error reposting playlist queue embed: {e}")
+
+
+async def repost_match_embed_if_needed(message: discord.Message):
+    """Repost match embed to keep it at the bottom of general chat during active series"""
+    from searchmatchmaking import queue_state, log_action
+
     if not queue_state.current_series:
         return
 
@@ -391,9 +483,8 @@ async def on_message(message: discord.Message):
 
         # Repost the embed
         await update_general_chat_embed(message.guild, series)
-
-        from searchmatchmaking import log_action
         log_action(f"Reposted match embed to bottom (triggered by {message.author.display_name})")
+
     except Exception as e:
         print(f"Error reposting match embed: {e}")
 

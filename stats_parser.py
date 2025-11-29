@@ -11,7 +11,7 @@ Converts XLSX files to gameshistory.json format for the website.
 !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 """
 
-MODULE_VERSION = "1.0.0"
+MODULE_VERSION = "1.1.0"
 
 import os
 import re
@@ -325,6 +325,329 @@ def push_gameshistory_to_github() -> bool:
         return False
 
 
+# ============================================
+# SERIES MATCHING FUNCTIONS
+# ============================================
+
+PENDING_SERIES_FILE = "pending_series.json"
+
+
+def load_pending_series() -> List[Dict]:
+    """Load pending series awaiting stats matching"""
+    if os.path.exists(PENDING_SERIES_FILE):
+        try:
+            with open(PENDING_SERIES_FILE, 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"⚠️ Error loading pending series: {e}")
+    return []
+
+
+def save_pending_series(pending: List[Dict]):
+    """Save pending series list"""
+    with open(PENDING_SERIES_FILE, 'w') as f:
+        json.dump(pending, f, indent=2)
+
+
+def game_time_in_series_window(game_start_time: str, series_start: str, series_end: str) -> bool:
+    """Check if a game's start time falls within the series time window"""
+    try:
+        # Parse series times
+        series_start_dt = datetime.fromisoformat(series_start)
+        series_end_dt = datetime.fromisoformat(series_end)
+
+        # Try to parse game time (multiple formats)
+        game_dt = None
+        for fmt in ['%m/%d/%Y %I:%M %p', '%m/%d/%Y %H:%M', '%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S']:
+            try:
+                game_dt = datetime.strptime(game_start_time, fmt)
+                break
+            except ValueError:
+                continue
+
+        if game_dt is None:
+            return False
+
+        # Check if game is within window (with some buffer for lag)
+        buffer_minutes = 5  # 5 minute buffer
+        from datetime import timedelta
+        window_start = series_start_dt - timedelta(minutes=buffer_minutes)
+        window_end = series_end_dt + timedelta(minutes=buffer_minutes)
+
+        return window_start <= game_dt <= window_end
+
+    except Exception as e:
+        print(f"Error checking game time: {e}")
+        return False
+
+
+def players_match_series(game_players: List[str], series_red: List[int], series_blue: List[int],
+                          player_name_cache: Dict[int, str] = None) -> bool:
+    """Check if game players match the series teams.
+    Uses player names from the game and matches against known gamertags."""
+    if player_name_cache is None:
+        player_name_cache = {}
+
+    # Normalize game player names
+    game_player_names = set(name.lower().strip() for name in game_players if name)
+
+    # Get known gamertags for series players
+    all_series_players = series_red + series_blue
+
+    # Try to load gamertag mapping from rankstats.json
+    gamertags_file = "rankstats.json"
+    if os.path.exists(gamertags_file):
+        try:
+            with open(gamertags_file, 'r') as f:
+                rank_data = json.load(f)
+
+            # Build set of known gamertags for series players
+            series_gamertags = set()
+            for uid in all_series_players:
+                uid_str = str(uid)
+                if uid_str in rank_data:
+                    player_data = rank_data[uid_str]
+                    if 'gamertag' in player_data:
+                        series_gamertags.add(player_data['gamertag'].lower().strip())
+
+            # Check for overlap - at least half the players should match
+            matches = game_player_names.intersection(series_gamertags)
+            threshold = len(all_series_players) // 2
+            return len(matches) >= threshold
+
+        except Exception as e:
+            print(f"Error loading gamertags: {e}")
+
+    # If no gamertag mapping, we can't match by player names
+    return False
+
+
+def determine_game_winner(game_data: Dict, series_red: List[int], series_blue: List[int]) -> Optional[str]:
+    """Determine which team won a game based on player scores/teams"""
+    players = game_data.get('players', [])
+
+    if not players:
+        return None
+
+    # Group players by team from the game
+    red_score = 0
+    blue_score = 0
+
+    for player in players:
+        team = str(player.get('team', '')).lower()
+        score = player.get('score', 0)
+
+        if team == 'red':
+            red_score += score
+        elif team == 'blue':
+            blue_score += score
+
+    # Determine winner based on score
+    if red_score > blue_score:
+        return 'RED'
+    elif blue_score > red_score:
+        return 'BLUE'
+
+    return None
+
+
+def match_games_to_series(games: List[Dict]) -> Dict[str, List[Dict]]:
+    """Match parsed games to pending series.
+
+    Returns a dict mapping series_number to list of matched games.
+    """
+    pending = load_pending_series()
+    matches = {}
+
+    for series in pending:
+        series_num = series.get('series_number', '')
+        series_start = series.get('start_time')
+        series_end = series.get('end_time')
+        series_red = series.get('red_team', [])
+        series_blue = series.get('blue_team', [])
+
+        if not series_start or not series_end:
+            continue
+
+        matched_games = []
+        for game in games:
+            details = game.get('details', {})
+            game_start = details.get('Start Time', '')
+            game_players = [p.get('name', '') for p in game.get('players', [])]
+
+            # Check time window
+            if not game_time_in_series_window(game_start, series_start, series_end):
+                continue
+
+            # Check player match
+            if not players_match_series(game_players, series_red, series_blue):
+                continue
+
+            # Determine winner
+            winner = determine_game_winner(game, series_red, series_blue)
+
+            matched_games.append({
+                'game': game,
+                'winner': winner,
+                'map': details.get('Map Name', ''),
+                'gametype': details.get('Variant Name', ''),
+            })
+
+        if matched_games:
+            # Sort by start time
+            matched_games.sort(key=lambda g: g['game'].get('details', {}).get('Start Time', ''))
+            matches[series_num] = matched_games
+
+    return matches
+
+
+async def update_series_results(bot, series_data: Dict, matched_games: List[Dict]):
+    """Update a series' results embed with matched game data"""
+    from ingame import RED_TEAM_EMOJI_ID, BLUE_TEAM_EMOJI_ID
+
+    results_channel_id = series_data.get('results_channel_id')
+    results_message_id = series_data.get('results_message_id')
+
+    if not results_channel_id or not results_message_id:
+        print(f"⚠️ No results message stored for series {series_data.get('series_number')}")
+        return False
+
+    channel = bot.get_channel(results_channel_id)
+    if not channel:
+        print(f"⚠️ Could not find results channel {results_channel_id}")
+        return False
+
+    try:
+        message = await channel.fetch_message(results_message_id)
+    except Exception as e:
+        print(f"⚠️ Could not fetch results message: {e}")
+        return False
+
+    # Count wins
+    red_wins = sum(1 for g in matched_games if g['winner'] == 'RED')
+    blue_wins = sum(1 for g in matched_games if g['winner'] == 'BLUE')
+
+    # Determine winner
+    if red_wins > blue_wins:
+        winner = 'RED'
+        embed_color = discord.Color.red()
+    elif blue_wins > red_wins:
+        winner = 'BLUE'
+        embed_color = discord.Color.blue()
+    else:
+        winner = 'TIE'
+        embed_color = discord.Color.greyple()
+
+    match_number = series_data.get('match_number', '?')
+
+    embed = discord.Embed(
+        title=f"Match #{match_number} Results - {winner} WINS!",
+        description=f"*Updated from parsed game stats*",
+        color=embed_color
+    )
+
+    # Add team fields
+    red_team = series_data.get('red_team', [])
+    blue_team = series_data.get('blue_team', [])
+
+    red_mentions = "\n".join([f"<@{uid}>" for uid in red_team])
+    blue_mentions = "\n".join([f"<@{uid}>" for uid in blue_team])
+
+    embed.add_field(
+        name=f"<:redteam:{RED_TEAM_EMOJI_ID}> Red Team - {red_wins}",
+        value=red_mentions or "Unknown",
+        inline=True
+    )
+    embed.add_field(
+        name=f"<:blueteam:{BLUE_TEAM_EMOJI_ID}> Blue Team - {blue_wins}",
+        value=blue_mentions or "Unknown",
+        inline=True
+    )
+
+    embed.add_field(name="Final Score", value=f"Red **{red_wins}** - **{blue_wins}** Blue", inline=False)
+
+    # Game results
+    results_text = ""
+    for i, game_match in enumerate(matched_games, 1):
+        game_winner = game_match['winner']
+        map_name = game_match['map']
+        gametype = game_match['gametype']
+
+        if game_winner == 'RED':
+            emoji = f"<:redteam:{RED_TEAM_EMOJI_ID}>"
+        elif game_winner == 'BLUE':
+            emoji = f"<:blueteam:{BLUE_TEAM_EMOJI_ID}>"
+        else:
+            emoji = "❓"
+
+        if map_name and gametype:
+            results_text += f"{emoji} Game {i} - {map_name} - {gametype}\n"
+        elif map_name:
+            results_text += f"{emoji} Game {i} - {map_name}\n"
+        else:
+            results_text += f"{emoji} Game {i}\n"
+
+    if results_text:
+        embed.add_field(name="Game Results", value=results_text.strip(), inline=False)
+
+    embed.set_footer(text=f"Stats parsed at {datetime.now().strftime('%H:%M')}")
+
+    # Update the message
+    try:
+        await message.edit(embed=embed)
+        print(f"✅ Updated results for series {series_data.get('series_number')}")
+        return True
+    except Exception as e:
+        print(f"❌ Failed to update results message: {e}")
+        return False
+
+
+async def process_stats_and_update_results(bot, games: List[Dict] = None):
+    """Main function to match parsed games to series and update results.
+
+    Call this after parsing stats to automatically update results embeds.
+    """
+    if games is None:
+        games = load_existing_games()
+
+    if not games:
+        print("No parsed games to match")
+        return
+
+    matches = match_games_to_series(games)
+
+    if not matches:
+        print("No games matched to pending series")
+        return
+
+    pending = load_pending_series()
+    updated_series = []
+
+    for series in pending:
+        series_num = series.get('series_number', '')
+        if series_num in matches:
+            matched_games = matches[series_num]
+            success = await update_series_results(bot, series, matched_games)
+            if success:
+                updated_series.append(series_num)
+                # Update series data with game results for future reference
+                series['games'] = [g['winner'] for g in matched_games if g['winner']]
+                series['game_stats'] = {
+                    str(i): {'map': g['map'], 'gametype': g['gametype']}
+                    for i, g in enumerate(matched_games, 1)
+                }
+                series['stats_matched'] = True
+
+    # Save updated pending series
+    save_pending_series(pending)
+
+    # Clean up old/matched series after some time (keep for 24 hours)
+    # For now, just mark them as matched
+
+    print(f"✅ Updated results for {len(updated_series)} series")
+    return updated_series
+
+
 # Discord Bot Integration
 import discord
 from discord import app_commands
@@ -388,18 +711,55 @@ class StatsParserCommands(commands.Cog):
             github_success = push_gameshistory_to_github()
             github_status = "✅ Pushed to GitHub" if github_success else "⚠️ GitHub push failed"
 
+            # Auto-match games to pending series and update results
+            updated_series = []
+            if new_count > 0:
+                try:
+                    updated_series = await process_stats_and_update_results(self.bot) or []
+                except Exception as e:
+                    print(f"Error updating series results: {e}")
+
+            series_status = f"✅ Updated {len(updated_series)} series results" if updated_series else "ℹ️ No matching series found"
+
             await interaction.followup.send(
                 f"📊 **Stats Parsing Complete**\n"
                 f"• New games parsed: **{new_count}**\n"
                 f"• Total games: **{total_count}**\n"
-                f"• {github_status}",
+                f"• {github_status}\n"
+                f"• {series_status}",
                 ephemeral=True
             )
-            print(f"[STATS PARSER] {interaction.user.name} parsed stats: {new_count} new, {total_count} total")
+            print(f"[STATS PARSER] {interaction.user.name} parsed stats: {new_count} new, {total_count} total, {len(updated_series)} series updated")
 
         except Exception as e:
             await interaction.followup.send(f"❌ Error parsing stats: {e}", ephemeral=True)
             print(f"[STATS PARSER] Error: {e}")
+
+    @app_commands.command(name="matchstats", description="[ADMIN] Match parsed stats to pending series")
+    @has_admin_role()
+    async def matchstats(self, interaction: discord.Interaction):
+        """Manually trigger matching of parsed stats to pending series"""
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            updated_series = await process_stats_and_update_results(self.bot) or []
+
+            if updated_series:
+                await interaction.followup.send(
+                    f"✅ **Updated {len(updated_series)} series results:**\n" +
+                    "\n".join([f"• {s}" for s in updated_series]),
+                    ephemeral=True
+                )
+            else:
+                await interaction.followup.send(
+                    "ℹ️ No pending series matched to parsed games.\n"
+                    "Make sure games have been parsed and series are awaiting stats.",
+                    ephemeral=True
+                )
+
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error matching stats: {e}", ephemeral=True)
+            print(f"[STATS PARSER] Match error: {e}")
 
     @app_commands.command(name="liststats", description="[ADMIN] List available XLSX stats files")
     @has_admin_role()
