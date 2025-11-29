@@ -1,7 +1,7 @@
 # pregame.py - Pregame Lobby and Team Selection
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.2.0"
+MODULE_VERSION = "1.2.2"
 
 import discord
 from discord.ui import View, Button, Select
@@ -43,7 +43,11 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
     import asyncio
     
     log_action(f"Starting pregame phase (test_mode={test_mode})")
-    
+
+    # Reset ping cooldown so players can ping again for new matches
+    queue_state.last_ping_time = None
+    log_action("Reset ping cooldown for new match")
+
     # Use test players if provided, otherwise use queue
     players = test_players if test_players else queue_state.queue[:]
     
@@ -472,55 +476,75 @@ class TeamSelectionView(View):
     async def update_embed_with_votes(self, interaction: discord.Interaction, votes_mismatch: bool = False):
         """Update the embed to show current votes"""
         from searchmatchmaking import get_queue_progress_image
-        
+
+        # Calculate majority threshold
+        majority_needed = (len(self.players) // 2) + 1  # 5 for 8 players
+
         embed = discord.Embed(
             title=f"Pregame Lobby - {self.match_label}",
-            description="Select your preferred team selection method:",
+            description=f"Select your preferred team selection method:\n**{majority_needed} votes needed** for majority!",
             color=discord.Color.gold()
         )
-        
+
         embed.set_image(url=get_queue_progress_image(8))
-        
+
         player_count = f"{len(self.players)}/8 players"
         if self.test_mode:
             player_count += " (TEST MODE)"
-        
+
         player_list = "\n".join([f"<@{uid}>" for uid in self.players])
         embed.add_field(name=f"Players ({player_count})", value=player_list, inline=False)
-        
-        # Show votes
+
+        # Show votes with counts
         if self.votes:
-            vote_text = "\n".join([f"<@{uid}>: **{vote}**" for uid, vote in self.votes.items()])
-            if votes_mismatch:
+            # Count votes per option
+            vote_counts = {}
+            for vote in self.votes.values():
+                vote_counts[vote] = vote_counts.get(vote, 0) + 1
+
+            # Format vote summary
+            option_labels = {"balanced": "Balanced (MMR)", "captains": "Captains Pick", "players_pick": "Players Pick"}
+            vote_summary = []
+            for option in ["balanced", "captains", "players_pick"]:
+                count = vote_counts.get(option, 0)
+                if count > 0:
+                    label = option_labels.get(option, option)
+                    vote_summary.append(f"**{label}**: {count}/{majority_needed}")
+
+            # Individual votes
+            vote_text = "\n".join([f"<@{uid}>: {vote}" for uid, vote in self.votes.items()])
+
+            if self.test_mode and votes_mismatch:
                 embed.add_field(name=f"⚠️ Votes Don't Match ({len(self.votes)}/{len(self.testers)})", value=vote_text + "\n\n*Change your vote to match!*", inline=False)
             else:
-                embed.add_field(name=f"Votes ({len(self.votes)}/{len(self.testers)})", value=vote_text, inline=False)
-        
+                embed.add_field(name=f"Vote Counts ({len(self.votes)} votes)", value="\n".join(vote_summary) if vote_summary else "No votes yet", inline=False)
+                embed.add_field(name="Individual Votes", value=vote_text, inline=False)
+
         try:
             await self.pregame_message.edit(embed=embed, view=self)
         except:
             pass
     
     async def handle_vote(self, interaction: discord.Interaction, method: str):
-        """Handle team selection vote"""
+        """Handle team selection vote - requires majority (5+ of 8 players)"""
         from searchmatchmaking import queue_state
-        
+
         # In test mode, only testers can vote and both must agree
         if self.test_mode and self.testers:
             if interaction.user.id not in self.testers:
                 await interaction.response.send_message("❌ Only testers can vote!", ephemeral=True)
                 return
-            
+
             # Record/update vote (allows changing vote)
             self.votes[interaction.user.id] = method
-            
+
             # Check if all testers voted
             if len(self.votes) < len(self.testers):
                 # Not all testers have voted yet - update embed to show votes
                 await interaction.response.defer()
                 await self.update_embed_with_votes(interaction)
                 return
-            
+
             # All testers voted - check if they agree
             vote_values = list(self.votes.values())
             if len(set(vote_values)) > 1:
@@ -529,13 +553,40 @@ class TeamSelectionView(View):
                 await interaction.response.defer()
                 await self.update_embed_with_votes(interaction, votes_mismatch=True)
                 return
-            
+
             # All testers agree - proceed
             await interaction.response.defer()
         else:
-            # Normal mode - any player can pick immediately
+            # Normal mode - require majority vote (5+ of 8 players)
+            if interaction.user.id not in self.players:
+                await interaction.response.send_message("❌ Only players in this match can vote!", ephemeral=True)
+                return
+
+            # Record/update vote (allows changing vote)
+            self.votes[interaction.user.id] = method
             await interaction.response.defer()
-        
+
+            # Count votes for each option
+            vote_counts = {}
+            for vote in self.votes.values():
+                vote_counts[vote] = vote_counts.get(vote, 0) + 1
+
+            # Check if any option has majority (5+ of 8)
+            majority_needed = (len(self.players) // 2) + 1  # 5 for 8 players
+            winning_method = None
+            for option, count in vote_counts.items():
+                if count >= majority_needed:
+                    winning_method = option
+                    break
+
+            if not winning_method:
+                # No majority yet - update embed to show votes
+                await self.update_embed_with_votes(interaction)
+                return
+
+            # Found majority - use the winning method
+            method = winning_method
+
         # Delete the pregame embed
         try:
             if self.pregame_message:
@@ -555,9 +606,10 @@ class TeamSelectionView(View):
             await self.start_players_pick(interaction)
     
     async def create_balanced_teams(self, interaction: discord.Interaction):
-        """Create balanced teams using MMR - keeps guests with their hosts"""
+        """Create balanced teams using MMR - keeps guests with their hosts via exhaustive search"""
         from searchmatchmaking import queue_state
-        
+        from itertools import combinations
+
         # Get all MMRs
         player_mmrs = {}
         for user_id in self.players:
@@ -566,11 +618,11 @@ class TeamSelectionView(View):
                 player_mmrs[user_id] = queue_state.guests[user_id]["mmr"]
             else:
                 player_mmrs[user_id] = await get_player_mmr(user_id)
-        
+
         # Identify host-guest pairs (treat as single unit for balancing)
         pairs = []  # [(host_id, guest_id, combined_mmr)]
         paired_players = set()
-        
+
         for guest_id, guest_info in queue_state.guests.items():
             if guest_id in self.players:
                 host_id = guest_info["host_id"]
@@ -579,105 +631,87 @@ class TeamSelectionView(View):
                     pairs.append((host_id, guest_id, combined_mmr))
                     paired_players.add(host_id)
                     paired_players.add(guest_id)
-        
+
         # Get solo players (not in a pair)
         solo_players = [uid for uid in self.players if uid not in paired_players]
-        
-        # Create items to balance: pairs count as single unit, solos are individual
+
+        # Create balance items: pairs count as single unit, solos are individual
         balance_items = []
         for host_id, guest_id, combined_mmr in pairs:
             balance_items.append({
                 "type": "pair",
                 "ids": [host_id, guest_id],
-                "mmr": combined_mmr
+                "mmr": combined_mmr,
+                "count": 2  # Takes 2 team slots
             })
         for uid in solo_players:
             balance_items.append({
                 "type": "solo",
                 "ids": [uid],
-                "mmr": player_mmrs[uid]
+                "mmr": player_mmrs[uid],
+                "count": 1  # Takes 1 team slot
             })
-        
-        # Sort by MMR (high to low)
-        balance_items.sort(key=lambda x: x["mmr"], reverse=True)
-        
-        # Snake draft for balance items
-        red_items = []
-        blue_items = []
-        
-        for i, item in enumerate(balance_items):
-            if i % 2 == 0:
-                red_items.append(item)
-            else:
-                blue_items.append(item)
-        
-        # Flatten to team lists
-        red_team = []
-        blue_team = []
-        for item in red_items:
-            red_team.extend(item["ids"])
-        for item in blue_items:
-            blue_team.extend(item["ids"])
-        
-        # Calculate current diff
-        red_mmr = sum(player_mmrs[uid] for uid in red_team)
-        blue_mmr = sum(player_mmrs[uid] for uid in blue_team)
-        best_diff = abs(red_mmr - blue_mmr)
-        best_red = red_team[:]
-        best_blue = blue_team[:]
-        
-        # Try swapping solo players only (never break up pairs)
-        red_solos = [uid for uid in red_team if uid not in paired_players]
-        blue_solos = [uid for uid in blue_team if uid not in paired_players]
-        
-        for r_uid in red_solos:
-            for b_uid in blue_solos:
-                test_red = red_team[:]
-                test_blue = blue_team[:]
-                
-                # Swap
-                r_idx = test_red.index(r_uid)
-                b_idx = test_blue.index(b_uid)
-                test_red[r_idx] = b_uid
-                test_blue[b_idx] = r_uid
-                
-                diff = abs(sum(player_mmrs[uid] for uid in test_red) - sum(player_mmrs[uid] for uid in test_blue))
-                
-                if diff < best_diff:
-                    best_diff = diff
-                    best_red = test_red[:]
-                    best_blue = test_blue[:]
-        
-        # Also try swapping pairs between teams if there are multiple pairs
-        if len(pairs) >= 2:
-            red_pairs = [(h, g) for h, g, _ in pairs if h in best_red]
-            blue_pairs = [(h, g) for h, g, _ in pairs if h in best_blue]
-            
-            for rp in red_pairs:
-                for bp in blue_pairs:
-                    test_red = best_red[:]
-                    test_blue = best_blue[:]
-                    
-                    # Remove red pair from red, add to blue
-                    test_red.remove(rp[0])
-                    test_red.remove(rp[1])
-                    test_blue.append(rp[0])
-                    test_blue.append(rp[1])
-                    
-                    # Remove blue pair from blue, add to red
-                    test_blue.remove(bp[0])
-                    test_blue.remove(bp[1])
-                    test_red.append(bp[0])
-                    test_red.append(bp[1])
-                    
-                    diff = abs(sum(player_mmrs[uid] for uid in test_red) - sum(player_mmrs[uid] for uid in test_blue))
-                    
+
+        # Exhaustive search: try all valid team combinations
+        # A valid combination has exactly 4 players on each team
+        # Pairs must stay together (both on same team)
+        best_diff = float('inf')
+        best_red = []
+        best_blue = []
+        combinations_checked = 0
+
+        def try_all_assignments(items, red_items, blue_items, red_count, blue_count):
+            """Recursively try all valid assignments of items to teams"""
+            nonlocal best_diff, best_red, best_blue, combinations_checked
+
+            # Base case: all items assigned
+            if not items:
+                if red_count == 4 and blue_count == 4:
+                    combinations_checked += 1
+                    # Calculate teams
+                    red_team = []
+                    blue_team = []
+                    for item in red_items:
+                        red_team.extend(item["ids"])
+                    for item in blue_items:
+                        blue_team.extend(item["ids"])
+
+                    red_mmr = sum(player_mmrs[uid] for uid in red_team)
+                    blue_mmr = sum(player_mmrs[uid] for uid in blue_team)
+                    diff = abs(red_mmr - blue_mmr)
+
                     if diff < best_diff:
                         best_diff = diff
-                        best_red = test_red[:]
-                        best_blue = test_blue[:]
-        
-        log_action(f"Balanced teams created - MMR diff: {best_diff}")
+                        best_red = red_team[:]
+                        best_blue = blue_team[:]
+                return
+
+            # Get next item to assign
+            item = items[0]
+            remaining = items[1:]
+            item_count = item["count"]
+
+            # Try adding to red team (if room)
+            if red_count + item_count <= 4:
+                try_all_assignments(remaining, red_items + [item], blue_items,
+                                    red_count + item_count, blue_count)
+
+            # Try adding to blue team (if room)
+            if blue_count + item_count <= 4:
+                try_all_assignments(remaining, red_items, blue_items + [item],
+                                    red_count, blue_count + item_count)
+
+        # Run exhaustive search
+        try_all_assignments(balance_items, [], [], 0, 0)
+
+        # Sort teams so higher MMR team is red (for consistency)
+        if best_red and best_blue:
+            red_avg = sum(player_mmrs[uid] for uid in best_red) / len(best_red)
+            blue_avg = sum(player_mmrs[uid] for uid in best_blue) / len(best_blue)
+            if blue_avg > red_avg:
+                best_red, best_blue = best_blue, best_red
+
+        log_action(f"Balanced teams created - MMR diff: {best_diff} (checked {combinations_checked} valid combinations)")
         await finalize_teams(interaction.channel, best_red, best_blue, test_mode=self.test_mode)
     
     async def start_captains_draft(self, interaction: discord.Interaction):

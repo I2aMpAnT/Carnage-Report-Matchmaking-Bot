@@ -1,7 +1,7 @@
 # searchmatchmaking.py - MLG 4v4 Queue Management System
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.4.0"
+MODULE_VERSION = "1.4.1"
 
 import discord
 from discord.ui import View, Button
@@ -9,8 +9,8 @@ from typing import List, Optional
 from datetime import datetime, timedelta
 import asyncio
 
-# Header image for embeds and DMs
-HEADER_IMAGE_URL = "https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/MessagefromCarnageReportHEADER.png"
+# Header image for embeds and DMs (clean logo without text)
+HEADER_IMAGE_URL = "https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/H2CRFinal.png"
 
 # Matchmaking progress images (1-8 players)
 MATCHMAKING_IMAGE_BASE = "https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/assets/matchmaking"

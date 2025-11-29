@@ -1,7 +1,7 @@
 # commands.py - All Bot Commands
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.4.0"
+MODULE_VERSION = "1.4.1"
 
 import discord
 from discord import app_commands
@@ -10,6 +10,8 @@ import random
 from datetime import datetime
 import json
 import os
+
+from itertools import combinations
 
 # Admin role configuration (highest level - can manage staff roles)
 ADMIN_ROLES = ["Overlord"]
@@ -32,6 +34,42 @@ def load_command_permissions():
 
 # Load permissions on module import
 load_command_permissions()
+
+
+def find_optimal_teams(player_ids: list, player_mmrs: dict) -> tuple:
+    """Find the optimal team split using exhaustive search.
+    Returns (red_team, blue_team, mmr_diff)"""
+    best_diff = float('inf')
+    best_team1 = None
+    best_team2 = None
+
+    # Try all possible 4-player combinations for team 1
+    for team1_combo in combinations(player_ids, 4):
+        team1 = list(team1_combo)
+        team2 = [p for p in player_ids if p not in team1]
+
+        team1_mmr = sum(player_mmrs[uid] for uid in team1)
+        team2_mmr = sum(player_mmrs[uid] for uid in team2)
+        diff = abs(team1_mmr - team2_mmr)
+
+        if diff < best_diff:
+            best_diff = diff
+            best_team1 = team1[:]
+            best_team2 = team2[:]
+
+            # Perfect balance found
+            if diff == 0:
+                break
+
+    # Sort teams so higher MMR team is red
+    team1_avg = sum(player_mmrs[uid] for uid in best_team1) / 4
+    team2_avg = sum(player_mmrs[uid] for uid in best_team2) / 4
+
+    if team2_avg > team1_avg:
+        best_team1, best_team2 = best_team2, best_team1
+
+    return best_team1, best_team2, best_diff
+
 
 def has_admin_role():
     """Check if user has admin role (Overlord only)"""
@@ -977,20 +1015,18 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         random_players = random.sample(all_members, 8)
         player_ids = [m.id for m in random_players]
         
-        # Get MMRs and balance teams
+        # Get MMRs and find optimal balanced teams
         player_mmrs = {}
         for user_id in player_ids:
             mmr = await get_player_mmr(user_id)
             player_mmrs[user_id] = mmr
-        
-        # Simple balance: sort by MMR and alternate
-        sorted_players = sorted(player_ids, key=lambda x: player_mmrs[x], reverse=True)
-        red_team = [sorted_players[i] for i in range(0, 8, 2)]
-        blue_team = [sorted_players[i] for i in range(1, 8, 2)]
-        
+
+        # Use exhaustive search for optimal balance
+        red_team, blue_team, best_diff = find_optimal_teams(player_ids, player_mmrs)
+
         red_avg = int(sum(player_mmrs[uid] for uid in red_team) / len(red_team))
         blue_avg = int(sum(player_mmrs[uid] for uid in blue_team) / len(blue_team))
-        
+
         # Build all valid map/gametype combinations
         MAP_GAMETYPES = {
             "Midship": ["MLG CTF5", "MLG Team Slayer", "MLG Oddball", "MLG Bomb"],
@@ -1606,45 +1642,14 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         random_players = random.sample(all_members, 8)
         player_ids = [m.id for m in random_players]
         
-        # Get MMRs and balance teams
+        # Get MMRs and find optimal balanced teams
         player_mmrs = {}
         for user_id in player_ids:
             player_mmrs[user_id] = await get_player_mmr(user_id)
-        
-        # Sort by MMR and snake draft
-        sorted_players = sorted(player_mmrs.items(), key=lambda x: x[1], reverse=True)
-        red_team = []
-        blue_team = []
-        
-        for i, (user_id, mmr) in enumerate(sorted_players):
-            if i % 2 == 0:
-                red_team.append(user_id)
-            else:
-                blue_team.append(user_id)
-        
-        # Optimize balance
-        red_mmr = sum(player_mmrs[uid] for uid in red_team)
-        blue_mmr = sum(player_mmrs[uid] for uid in blue_team)
-        
-        best_diff = abs(red_mmr - blue_mmr)
-        best_red = red_team[:]
-        best_blue = blue_team[:]
-        
-        for i in range(len(red_team)):
-            for j in range(len(blue_team)):
-                test_red = red_team[:]
-                test_blue = blue_team[:]
-                test_red[i], test_blue[j] = test_blue[j], test_red[i]
-                
-                test_red_mmr = sum(player_mmrs[uid] for uid in test_red)
-                test_blue_mmr = sum(player_mmrs[uid] for uid in test_blue)
-                diff = abs(test_red_mmr - test_blue_mmr)
-                
-                if diff < best_diff:
-                    best_diff = diff
-                    best_red = test_red
-                    best_blue = test_blue
-        
+
+        # Use exhaustive search for optimal balance
+        best_red, best_blue, best_diff = find_optimal_teams(player_ids, player_mmrs)
+
         # FIRST: Move tester to pregame lobby
         pregame_vc = guild.get_channel(PREGAME_LOBBY_ID)
         tester = interaction.user
@@ -1694,45 +1699,14 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         random_players = random.sample(all_members, 8)
         player_ids = [m.id for m in random_players]
         
-        # Get MMRs and balance teams
+        # Get MMRs and find optimal balanced teams
         player_mmrs = {}
         for user_id in player_ids:
             player_mmrs[user_id] = await get_player_mmr(user_id)
-        
-        # Sort by MMR and snake draft
-        sorted_players = sorted(player_mmrs.items(), key=lambda x: x[1], reverse=True)
-        red_team = []
-        blue_team = []
-        
-        for i, (user_id, mmr) in enumerate(sorted_players):
-            if i % 2 == 0:
-                red_team.append(user_id)
-            else:
-                blue_team.append(user_id)
-        
-        # Optimize balance
-        red_mmr = sum(player_mmrs[uid] for uid in red_team)
-        blue_mmr = sum(player_mmrs[uid] for uid in blue_team)
-        
-        best_diff = abs(red_mmr - blue_mmr)
-        best_red = red_team[:]
-        best_blue = blue_team[:]
-        
-        for i in range(len(red_team)):
-            for j in range(len(blue_team)):
-                test_red = red_team[:]
-                test_blue = blue_team[:]
-                test_red[i], test_blue[j] = test_blue[j], test_red[i]
-                
-                test_red_mmr = sum(player_mmrs[uid] for uid in test_red)
-                test_blue_mmr = sum(player_mmrs[uid] for uid in test_blue)
-                diff = abs(test_red_mmr - test_blue_mmr)
-                
-                if diff < best_diff:
-                    best_diff = diff
-                    best_red = test_red
-                    best_blue = test_blue
-        
+
+        # Use exhaustive search for optimal balance
+        best_red, best_blue, best_diff = find_optimal_teams(player_ids, player_mmrs)
+
         # FIRST: Move tester to pregame lobby
         pregame_vc = guild.get_channel(PREGAME_LOBBY_ID)
         tester = interaction.user
