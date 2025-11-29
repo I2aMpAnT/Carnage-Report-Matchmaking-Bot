@@ -1,1 +1,188 @@
-{"total_ranked_matches": 0, "matches": []}
+{
+  "total_ranked_matches": 1,
+  "games": [
+    {
+      "type": "GAME",
+      "match_type": "RANKED",
+      "series_label": "Series 1",
+      "match_id": 1,
+      "game_number": 1,
+      "winner": "RED",
+      "loser": "BLUE",
+      "map": "Midship",
+      "gametype": "MLG CTF",
+      "score": "2-1",
+      "time": "15:03",
+      "teams_at_game": {
+        "red": ["EpiiiC", "KidMode", "2D", "Tetracide"],
+        "blue": ["getitoutdaFLUD", "roasted", "Ralph Port", "Rocky"]
+      }
+    },
+    {
+      "type": "GAME",
+      "match_type": "RANKED",
+      "series_label": "Series 1",
+      "match_id": 1,
+      "game_number": 2,
+      "winner": "BLUE",
+      "loser": "RED",
+      "map": "Beaver Creek",
+      "gametype": "MLG Team Slayer",
+      "score": "33-19",
+      "time": "3:34",
+      "teams_at_game": {
+        "red": ["EpiiiC", "KidMode", "2D", "Tetracide"],
+        "blue": ["getitoutdaFLUD", "roasted", "Ralph Port", "Rocky"]
+      }
+    },
+    {
+      "type": "GAME",
+      "match_type": "RANKED",
+      "series_label": "Series 1",
+      "match_id": 1,
+      "game_number": 3,
+      "winner": "BLUE",
+      "loser": "RED",
+      "map": "Lockout",
+      "gametype": "MLG Oddball",
+      "score": "2:42 - 2:16",
+      "time": "15:00",
+      "teams_at_game": {
+        "red": ["EpiiiC", "KidMode", "2D", "Tetracide"],
+        "blue": ["getitoutdaFLUD", "roasted", "Ralph Port", "Rocky"]
+      }
+    },
+    {
+      "type": "GAME",
+      "match_type": "RANKED",
+      "series_label": "Series 1",
+      "match_id": 1,
+      "game_number": 4,
+      "winner": "RED",
+      "loser": "BLUE",
+      "map": "Warlock",
+      "gametype": "MLG Team Slayer",
+      "score": "50-32",
+      "time": "4:39",
+      "teams_at_game": {
+        "red": ["EpiiiC", "KidMode", "2D", "Tetracide"],
+        "blue": ["getitoutdaFLUD", "roasted", "Ralph Port", "Rocky"]
+      }
+    },
+    {
+      "type": "GAME",
+      "match_type": "RANKED",
+      "series_label": "Series 1",
+      "match_id": 1,
+      "game_number": 5,
+      "winner": "RED",
+      "loser": "BLUE",
+      "map": "Sanctuary",
+      "gametype": "MLG CTF",
+      "score": "1-0",
+      "time": "15:01",
+      "teams_at_game": {
+        "red": ["Tetracide", "KidMode", "2D", "EpiiiC"],
+        "blue": ["getitoutdaFLUD", "roasted", "Ralph Port", "Rocky"]
+      }
+    },
+    {
+      "type": "GAME",
+      "match_type": "RANKED",
+      "series_label": "Series 1",
+      "match_id": 1,
+      "game_number": 6,
+      "winner": "RED",
+      "loser": "BLUE",
+      "map": "Midship",
+      "gametype": "MLG Assault",
+      "score": "1-0",
+      "time": "15:05",
+      "teams_at_game": {
+        "red": ["2D", "Tetracide", "KidMode", "EpiiiC"],
+        "blue": ["getitoutdaFLUD", "roasted", "Ralph Port", "Rocky"]
+      }
+    }
+  ],
+  "matches": [
+    {
+      "type": "SERIES",
+      "match_type": "RANKED",
+      "series_label": "Series 1",
+      "match_id": 1,
+      "timestamp": "2025-11-29T00:00:00",
+      "timestamp_display": "2025-11-29 00:00:00",
+      "winner": "RED",
+      "final_score": {
+        "red": 4,
+        "blue": 2
+      },
+      "teams_final": {
+        "red": {
+          "players": ["EpiiiC", "KidMode", "2D", "Tetracide"]
+        },
+        "blue": {
+          "players": ["getitoutdaFLUD", "roasted", "Ralph Port", "Rocky"]
+        }
+      },
+      "games": [
+        {
+          "game_number": 1,
+          "winner": "RED",
+          "loser": "BLUE",
+          "map": "Midship",
+          "gametype": "MLG CTF",
+          "score": "2-1",
+          "time": "15:03"
+        },
+        {
+          "game_number": 2,
+          "winner": "BLUE",
+          "loser": "RED",
+          "map": "Beaver Creek",
+          "gametype": "MLG Team Slayer",
+          "score": "33-19",
+          "time": "3:34"
+        },
+        {
+          "game_number": 3,
+          "winner": "BLUE",
+          "loser": "RED",
+          "map": "Lockout",
+          "gametype": "MLG Oddball",
+          "score": "2:42 - 2:16",
+          "time": "15:00"
+        },
+        {
+          "game_number": 4,
+          "winner": "RED",
+          "loser": "BLUE",
+          "map": "Warlock",
+          "gametype": "MLG Team Slayer",
+          "score": "50-32",
+          "time": "4:39"
+        },
+        {
+          "game_number": 5,
+          "winner": "RED",
+          "loser": "BLUE",
+          "map": "Sanctuary",
+          "gametype": "MLG CTF",
+          "score": "1-0",
+          "time": "15:01"
+        },
+        {
+          "game_number": 6,
+          "winner": "RED",
+          "loser": "BLUE",
+          "map": "Midship",
+          "gametype": "MLG Assault",
+          "score": "1-0",
+          "time": "15:05"
+        }
+      ],
+      "total_games_played": 6,
+      "stats_recorded": true
+    }
+  ]
+}
