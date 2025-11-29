@@ -1,7 +1,7 @@
 # playlists.py - Multi-Playlist Queue System
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.0.2"
+MODULE_VERSION = "1.1.0"
 
 import discord
 from discord.ui import View, Button
@@ -157,8 +157,8 @@ class PlaylistMatch:
         playlist_state.match_counter += 1
         self.match_number = playlist_state.match_counter
 
-        self.games: List[str] = []  # 'TEAM1' or 'TEAM2'
-        self.game_stats: Dict[int, dict] = {}
+        self.games: List[str] = []  # 'TEAM1' or 'TEAM2' - populated from parsed stats
+        self.game_stats: Dict[int, dict] = {}  # game_number -> {"map": str, "gametype": str, "parsed_stats": dict}
         self.current_game = 1
 
         # Selected map/gametype for auto-queue playlists
@@ -174,7 +174,14 @@ class PlaylistMatch:
         self.match_message: Optional[discord.Message] = None
         self.general_message: Optional[discord.Message] = None
 
+        # Time window for stats matching
         self.start_time = datetime.now()
+        self.end_time: Optional[datetime] = None
+
+        # Results message for updating after stats parse
+        self.results_message: Optional[discord.Message] = None
+        self.results_channel_id: Optional[int] = None
+
         self.end_series_votes: set = set()  # User IDs who voted to end
 
     def get_match_label(self) -> str:
@@ -803,7 +810,7 @@ async def show_playlist_match_embed(channel: discord.TextChannel, match: Playlis
 
     embed = discord.Embed(
         title=f"{match.get_match_label()} - In Progress",
-        description=f"**{ps.name}**",
+        description=f"**{ps.name}**\n*Game winners will be determined from parsed stats*",
         color=discord.Color.green()
     )
 
@@ -841,17 +848,20 @@ async def show_playlist_match_embed(channel: discord.TextChannel, match: Playlis
             inline=True
         )
 
-    # Show completed games
+    # Show completed games (populated from parsed stats)
     if match.games:
         games_text = ""
         for i, winner in enumerate(match.games, 1):
             stats = match.game_stats.get(i, {})
             map_name = stats.get("map", "")
+            gametype = stats.get("gametype", "")
             if ps.playlist_type == PlaylistType.HEAD_TO_HEAD:
                 winner_label = "P1" if winner == "TEAM1" else "P2"
             else:
                 winner_label = "🔴" if winner == "TEAM1" else "🔵"
-            if map_name:
+            if map_name and gametype:
+                games_text += f"Game {i}: {winner_label} - {map_name} - {gametype}\n"
+            elif map_name:
                 games_text += f"Game {i}: {winner_label} - {map_name}\n"
             else:
                 games_text += f"Game {i}: {winner_label}\n"
@@ -861,22 +871,13 @@ async def show_playlist_match_embed(channel: discord.TextChannel, match: Playlis
             inline=False
         )
 
-    # Show next map/gametype
-    if match.map_name and match.gametype:
-        embed.add_field(
-            name=f"Game {match.current_game} - Next Map",
-            value=f"**{match.map_name}** - {match.gametype}",
-            inline=False
-        )
-
     # Show end series votes
     votes_needed = get_end_series_votes_needed(ps.playlist_type)
     current_votes = len(match.end_series_votes)
-    total_players = len(match.team1) + len(match.team2)
 
     embed.add_field(
         name=f"End Series Votes ({current_votes}/{votes_needed})",
-        value=f"{current_votes} vote{'s' if current_votes != 1 else ''} to end",
+        value=f"{current_votes} vote{'s' if current_votes != 1 else ''} - Click End Match when your games are done",
         inline=False
     )
 
@@ -894,74 +895,18 @@ async def show_playlist_match_embed(channel: discord.TextChannel, match: Playlis
 
 
 class PlaylistMatchView(View):
-    """View for active playlist match with voting buttons"""
+    """View for active playlist match - only END SERIES button"""
     def __init__(self, match: PlaylistMatch):
         super().__init__(timeout=None)
         self.match = match
 
-        # Customize based on playlist type
-        if match.playlist_state.playlist_type == PlaylistType.HEAD_TO_HEAD:
-            self.team1_btn.label = "Player 1 Wins"
-            self.team2_btn.label = "Player 2 Wins"
-        else:
-            self.team1_btn.label = f"Red Team Wins Game {match.current_game}"
-            self.team2_btn.label = f"Blue Team Wins Game {match.current_game}"
-
-        # Set unique custom IDs
+        # Set unique custom ID for end button
         ptype = match.playlist_state.playlist_type
-        self.team1_btn.custom_id = f"vote_team1_{ptype}_{match.match_number}"
-        self.team2_btn.custom_id = f"vote_team2_{ptype}_{match.match_number}"
         self.end_btn.custom_id = f"end_match_{ptype}_{match.match_number}"
 
-    @discord.ui.button(label="Red Team Wins", style=discord.ButtonStyle.danger, row=0)
-    async def team1_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.process_vote(interaction, 'TEAM1')
-
-    @discord.ui.button(label="Blue Team Wins", style=discord.ButtonStyle.primary, row=1)
-    async def team2_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.process_vote(interaction, 'TEAM2')
-
-    @discord.ui.button(label="End Match", style=discord.ButtonStyle.secondary, row=2)
+    @discord.ui.button(label="End Match", style=discord.ButtonStyle.secondary, row=0)
     async def end_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.end_match(interaction)
-
-    async def process_vote(self, interaction: discord.Interaction, winner: str):
-        """Process game winner vote"""
-        # Check if user is a player or staff
-        all_players = self.match.team1 + self.match.team2
-        user_roles = [role.name for role in interaction.user.roles]
-        is_staff = any(role in ["Overlord", "Staff", "Server Tech Support"] for role in user_roles)
-
-        if not is_staff and interaction.user.id not in all_players:
-            await interaction.response.send_message("Only players or staff can vote!", ephemeral=True)
-            return
-
-        # Record game winner with current map/gametype
-        self.match.games.append(winner)
-        self.match.game_stats[len(self.match.games)] = {
-            "map": self.match.map_name,
-            "gametype": self.match.gametype
-        }
-        self.match.current_game += 1
-
-        log_action(f"{self.match.get_match_label()} - Game {len(self.match.games)} won by {winner} on {self.match.map_name}")
-
-        await interaction.response.defer()
-
-        # Select NEW random map/gametype for next game
-        new_map, new_gametype = select_random_map_gametype(self.match.playlist_state.playlist_type)
-        self.match.map_name = new_map
-        self.match.gametype = new_gametype
-
-        # Update buttons
-        if self.match.playlist_state.playlist_type == PlaylistType.HEAD_TO_HEAD:
-            self.team1_btn.label = "Player 1 Wins"
-            self.team2_btn.label = "Player 2 Wins"
-        else:
-            self.team1_btn.label = f"Red Team Wins Game {self.match.current_game}"
-            self.team2_btn.label = f"Blue Team Wins Game {self.match.current_game}"
-
-        await show_playlist_match_embed(interaction.channel, self.match)
 
     async def end_match(self, interaction: discord.Interaction):
         """Vote to end the series"""
