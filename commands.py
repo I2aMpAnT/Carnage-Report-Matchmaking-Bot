@@ -1,7 +1,7 @@
 # commands.py - All Bot Commands
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.4.1"
+MODULE_VERSION = "1.4.2"
 
 import discord
 from discord import app_commands
@@ -2592,49 +2592,71 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
     
     class AddGameModal(discord.ui.Modal, title="Add Game Result"):
         """Modal for adding a game to a manual match"""
-        
+
         def __init__(self, match_data: dict, game_number: int):
             super().__init__()
             self.match_data = match_data
             self.game_number = game_number
-        
+
         winner = discord.ui.TextInput(
             label="Winner (RED or BLUE)",
             placeholder="RED or BLUE",
             max_length=4,
             required=True
         )
-        
+
         map_name = discord.ui.TextInput(
             label="Map",
             placeholder="e.g., Lockout, Midship, Sanctuary",
             max_length=50,
             required=True
         )
-        
+
         gametype = discord.ui.TextInput(
             label="Gametype",
             placeholder="e.g., TS, CTF, Ball, KOTH",
             max_length=50,
             required=True
         )
-        
+
+        stats_file = discord.ui.TextInput(
+            label="Stats File (optional)",
+            placeholder="YYYYMMDD_HHMMSS (e.g., 20251128_210553)",
+            max_length=15,
+            required=False
+        )
+
         async def on_submit(self, interaction: discord.Interaction):
+            import re
             winner_input = self.winner.value.strip().upper()
-            
+
             if winner_input not in ['RED', 'BLUE']:
                 await interaction.response.send_message(
                     "❌ Winner must be RED or BLUE!",
                     ephemeral=True
                 )
                 return
-            
+
+            # Validate stats_file format if provided
+            stats_file_value = self.stats_file.value.strip() if self.stats_file.value else None
+            if stats_file_value and not re.match(r'^\d{8}_\d{6}$', stats_file_value):
+                await interaction.response.send_message(
+                    f"❌ Invalid stats file format: `{stats_file_value}`\n"
+                    f"Expected: `YYYYMMDD_HHMMSS` (e.g. `20251128_210553`)",
+                    ephemeral=True
+                )
+                return
+
             # Add game to match data
-            self.match_data["games"].append({
+            game_data = {
                 "winner": winner_input,
                 "map": self.map_name.value.strip(),
                 "gametype": self.gametype.value.strip()
-            })
+            }
+            if stats_file_value:
+                game_data["stats_file"] = stats_file_value
+
+            self.match_data["games"].append(game_data)
             
             game_count = len(self.match_data["games"])
             red_wins = sum(1 for g in self.match_data["games"] if g["winner"] == "RED")
@@ -2644,7 +2666,8 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             games_summary = ""
             for i, game in enumerate(self.match_data["games"], 1):
                 emoji = "🔴" if game["winner"] == "RED" else "🔵"
-                games_summary += f"{emoji} Game {i}: {game['winner']} - {game['map']} - {game['gametype']}\n"
+                stats_info = f" 📊`{game['stats_file']}`" if game.get('stats_file') else ""
+                games_summary += f"{emoji} Game {i}: {game['winner']} - {game['map']} - {game['gametype']}{stats_info}\n"
             
             await interaction.response.send_message(
                 f"✅ **Game {game_count} Added!**\n\n"

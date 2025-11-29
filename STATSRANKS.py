@@ -7,7 +7,7 @@ Import this module in bot.py with:
     await bot.load_extension('STATSRANKS')
 """
 
-MODULE_VERSION = "1.2.0"
+MODULE_VERSION = "1.2.1"
 
 import discord
 from discord import app_commands
@@ -433,32 +433,42 @@ async def update_player_rank_role(guild: discord.Guild, user_id: int, new_level:
     else:
         print(f"⚠️ Role '{new_role_name}' not found in guild")
 
-def add_game_stats(match_number: int, game_number: int, map_name: str, gametype: str) -> bool:
-    """Add game stats to gamestats.json with timestamp"""
+def add_game_stats(match_number: int, game_number: int, map_name: str, gametype: str, stats_file: str = None, playlist: str = None) -> bool:
+    """Add game stats to gamestats.json with timestamp, optional stats file link, and playlist"""
     # Validate map and gametype combination
     if map_name not in MAP_GAMETYPES:
         return False
-    
+
     if gametype not in MAP_GAMETYPES[map_name]:
         return False
-    
+
     # Load existing stats
     stats = load_json_file(GAMESTATS_FILE)
-    
+
     # Create match key
     match_key = f"match_{match_number}"
     if match_key not in stats:
         stats[match_key] = {}
-    
+
     # Add game data with date timestamp
     game_key = f"game_{game_number}"
-    stats[match_key][game_key] = {
+    game_data = {
         "map": map_name,
         "gametype": gametype,
         "timestamp": datetime.now().isoformat(),
         "date": datetime.now().strftime("%Y-%m-%d")  # For rank resets
     }
-    
+
+    # Add stats file reference if provided (format: YYYYMMDD_HHMMSS)
+    if stats_file:
+        game_data["stats_file"] = stats_file
+
+    # Add playlist if provided (for ranked tracking)
+    if playlist:
+        game_data["playlist"] = playlist
+
+    stats[match_key][game_key] = game_data
+
     # Save
     save_json_file(GAMESTATS_FILE, stats)
     return True
@@ -639,7 +649,9 @@ class StatsCommands(commands.Cog):
         match_number="Match number",
         game_number="Game number within the match",
         map_name="Map that was played",
-        gametype="Gametype that was played"
+        gametype="Gametype that was played",
+        playlist="Optional: Playlist this game was played in (for ranked tracking)",
+        stats_file="Optional: XLSX stats file timestamp (format: YYYYMMDD_HHMMSS, e.g. 20251128_210553)"
     )
     @app_commands.choices(
         map_name=[
@@ -655,6 +667,13 @@ class StatsCommands(commands.Cog):
             app_commands.Choice(name="MLG Team Slayer", value="MLG Team Slayer"),
             app_commands.Choice(name="MLG Oddball", value="MLG Oddball"),
             app_commands.Choice(name="MLG Bomb", value="MLG Bomb"),
+        ],
+        playlist=[
+            app_commands.Choice(name="MLG 4v4", value="mlg_4v4"),
+            app_commands.Choice(name="Team Hardcore", value="team_hardcore"),
+            app_commands.Choice(name="Double Team", value="double_team"),
+            app_commands.Choice(name="Head to Head", value="head_to_head"),
+            app_commands.Choice(name="Unranked/Custom", value="unranked"),
         ]
     )
     async def addgamestats(
@@ -663,9 +682,11 @@ class StatsCommands(commands.Cog):
         match_number: int,
         game_number: int,
         map_name: str,
-        gametype: str
+        gametype: str,
+        playlist: str = None,
+        stats_file: str = None
     ):
-        """Add game statistics"""
+        """Add game statistics with optional playlist and XLSX stats file link"""
         # Validate combination
         if gametype not in MAP_GAMETYPES.get(map_name, []):
             await interaction.response.send_message(
@@ -674,19 +695,44 @@ class StatsCommands(commands.Cog):
                 ephemeral=True
             )
             return
-        
+
+        # Validate stats_file format if provided (YYYYMMDD_HHMMSS)
+        if stats_file:
+            import re
+            if not re.match(r'^\d{8}_\d{6}$', stats_file):
+                await interaction.response.send_message(
+                    f"❌ Invalid stats file format: `{stats_file}`\n\n"
+                    f"Expected format: `YYYYMMDD_HHMMSS` (e.g. `20251128_210553`)",
+                    ephemeral=True
+                )
+                return
+
         # Add to stats
-        success = add_game_stats(match_number, game_number, map_name, gametype)
-        
+        success = add_game_stats(match_number, game_number, map_name, gametype, stats_file, playlist)
+
         if success:
+            playlist_labels = {
+                "mlg_4v4": "MLG 4v4",
+                "team_hardcore": "Team Hardcore",
+                "double_team": "Double Team",
+                "head_to_head": "Head to Head",
+                "unranked": "Unranked/Custom"
+            }
+            playlist_msg = f"\n**Playlist:** {playlist_labels.get(playlist, playlist)}" if playlist else ""
+            stats_msg = f"\n**Stats File:** {stats_file}" if stats_file else ""
             await interaction.response.send_message(
                 f"✅ Game stats added!\n"
                 f"**Match #{match_number}** - Game {game_number}\n"
                 f"**Map:** {map_name}\n"
-                f"**Gametype:** {gametype}",
+                f"**Gametype:** {gametype}{playlist_msg}{stats_msg}",
                 ephemeral=True
             )
-            print(f"[STATS] Game stats added: Match {match_number}, Game {game_number}, {map_name}, {gametype}")
+            log_msg = f"[STATS] Game stats added: Match {match_number}, Game {game_number}, {map_name}, {gametype}"
+            if playlist:
+                log_msg += f", playlist={playlist}"
+            if stats_file:
+                log_msg += f", stats_file={stats_file}"
+            print(log_msg)
         else:
             await interaction.response.send_message(
                 "❌ Failed to add game stats!",
