@@ -1,6 +1,7 @@
 # commands.py - All Bot Commands
+# !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.3.0"
+MODULE_VERSION = "1.4.0"
 
 import discord
 from discord import app_commands
@@ -428,34 +429,42 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             else:
                 log_action(f"Admin {interaction.user.name} cancelled {match_type}{match_number} - no games played")
             
-            # Move players to postgame
+            # Move ALL people (players and spectators) from team VCs to postgame
             postgame_vc = interaction.guild.get_channel(POSTGAME_LOBBY_ID)
+
+            # Get team VCs and move everyone out before deleting
+            red_vc = interaction.guild.get_channel(series.red_vc_id) if series.red_vc_id else None
+            blue_vc = interaction.guild.get_channel(series.blue_vc_id) if series.blue_vc_id else None
+
             if postgame_vc:
-                all_players = series.red_team + series.blue_team
-                for user_id in all_players:
-                    member = interaction.guild.get_member(user_id)
-                    if member and member.voice:
+                # Move everyone from Red VC
+                if red_vc:
+                    for member in list(red_vc.members):
                         try:
                             await member.move_to(postgame_vc)
                         except:
                             pass
-            
-            # Delete VCs
-            if series.red_vc_id:
-                red_vc = interaction.guild.get_channel(series.red_vc_id)
-                if red_vc:
-                    try:
-                        await red_vc.delete(reason="Match cancelled")
-                    except:
-                        pass
-            
-            if series.blue_vc_id:
-                blue_vc = interaction.guild.get_channel(series.blue_vc_id)
+
+                # Move everyone from Blue VC
                 if blue_vc:
-                    try:
-                        await blue_vc.delete(reason="Match cancelled")
-                    except:
-                        pass
+                    for member in list(blue_vc.members):
+                        try:
+                            await member.move_to(postgame_vc)
+                        except:
+                            pass
+
+            # Delete VCs after moving everyone
+            if red_vc:
+                try:
+                    await red_vc.delete(reason="Match cancelled")
+                except:
+                    pass
+
+            if blue_vc:
+                try:
+                    await blue_vc.delete(reason="Match cancelled")
+                except:
+                    pass
             
             # Delete general chat embed
             try:
@@ -531,34 +540,42 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             else:
                 log_action(f"Staff {interaction.user.name} cancelled {match_type}{match_num} - no games played")
             
-            # Move players to postgame
+            # Move ALL people (players and spectators) from team VCs to postgame
             postgame_vc = interaction.guild.get_channel(POSTGAME_LOBBY_ID)
+
+            # Get team VCs and move everyone out before deleting
+            red_vc = interaction.guild.get_channel(series.red_vc_id) if series.red_vc_id else None
+            blue_vc = interaction.guild.get_channel(series.blue_vc_id) if series.blue_vc_id else None
+
             if postgame_vc:
-                all_players = series.red_team + series.blue_team
-                for user_id in all_players:
-                    member = interaction.guild.get_member(user_id)
-                    if member and member.voice:
+                # Move everyone from Red VC
+                if red_vc:
+                    for member in list(red_vc.members):
                         try:
                             await member.move_to(postgame_vc)
                         except:
                             pass
-            
-            # Delete VCs
-            if series.red_vc_id:
-                red_vc = interaction.guild.get_channel(series.red_vc_id)
-                if red_vc:
-                    try:
-                        await red_vc.delete(reason="Match cancelled")
-                    except:
-                        pass
-            
-            if series.blue_vc_id:
-                blue_vc = interaction.guild.get_channel(series.blue_vc_id)
+
+                # Move everyone from Blue VC
                 if blue_vc:
-                    try:
-                        await blue_vc.delete(reason="Match cancelled")
-                    except:
-                        pass
+                    for member in list(blue_vc.members):
+                        try:
+                            await member.move_to(postgame_vc)
+                        except:
+                            pass
+
+            # Delete VCs after moving everyone
+            if red_vc:
+                try:
+                    await red_vc.delete(reason="Match cancelled")
+                except:
+                    pass
+
+            if blue_vc:
+                try:
+                    await blue_vc.delete(reason="Match cancelled")
+                except:
+                    pass
             
             # Delete general chat embed
             try:
@@ -589,7 +606,85 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             await interaction.followup.send(f"✅ Match cancelled!", ephemeral=True)
         else:
             await interaction.followup.send(f"✅ Pregame cancelled!", ephemeral=True)
-    
+
+    @bot.tree.command(name="deletematch", description="[ADMIN] Delete a match record from history")
+    @has_admin_role()
+    @app_commands.describe(
+        match_number="The match number to delete",
+        test_mode="Delete from test match history instead of ranked"
+    )
+    async def delete_match(interaction: discord.Interaction, match_number: int, test_mode: bool = False):
+        """Delete a match record from history"""
+        await interaction.response.defer(ephemeral=True)
+
+        import os
+
+        # Determine which history file to use
+        if test_mode:
+            history_file = 'testmatchhistory.json'
+            match_type = "Test"
+        else:
+            history_file = 'matchhistory.json'
+            match_type = "Match #"
+
+        # Check if file exists
+        if not os.path.exists(history_file):
+            await interaction.followup.send(f"❌ No match history file found: {history_file}", ephemeral=True)
+            return
+
+        # Load history
+        try:
+            with open(history_file, 'r') as f:
+                history = json.load(f)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error reading history file: {e}", ephemeral=True)
+            return
+
+        # Find and remove the match
+        matches = history.get("matches", [])
+        original_count = len(matches)
+
+        # Filter out the match with the given match_id
+        history["matches"] = [m for m in matches if m.get("match_id") != match_number]
+
+        if len(history["matches"]) == original_count:
+            await interaction.followup.send(f"❌ {match_type}{match_number} not found in history!", ephemeral=True)
+            return
+
+        # Update counter
+        if test_mode:
+            history["total_test_matches"] = max(0, history.get("total_test_matches", 1) - 1)
+        else:
+            history["total_ranked_matches"] = max(0, history.get("total_ranked_matches", 1) - 1)
+
+        # Save updated history
+        try:
+            with open(history_file, 'w') as f:
+                json.dump(history, f, indent=2)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error saving history file: {e}", ephemeral=True)
+            return
+
+        # Push to GitHub
+        try:
+            import github_webhook
+            if test_mode:
+                github_webhook.update_testmatchhistory_on_github()
+            else:
+                github_webhook.update_matchhistory_on_github()
+            github_status = "✅ Pushed to GitHub"
+        except Exception as e:
+            github_status = f"⚠️ GitHub push failed: {e}"
+
+        log_action(f"Admin {interaction.user.name} deleted {match_type}{match_number} from history")
+
+        await interaction.followup.send(
+            f"✅ **{match_type}{match_number} deleted from history**\n"
+            f"• Remaining matches: {len(history['matches'])}\n"
+            f"• {github_status}",
+            ephemeral=True
+        )
+
     @bot.tree.command(name="correctcurrent", description="[STAFF] Correct a game result in a match")
     @has_staff_role()
     @app_commands.describe(

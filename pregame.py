@@ -1,6 +1,7 @@
 # pregame.py - Pregame Lobby and Team Selection
+# !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.1.0"
+MODULE_VERSION = "1.2.0"
 
 import discord
 from discord.ui import View, Button, Select
@@ -107,29 +108,33 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
             else:
                 players_not_in_voice.append(user_id)
     
-    # Show team selection embed with 8/8 image
+    # Show waiting embed - team selection appears once all players join voice
     embed = discord.Embed(
         title=f"Pregame Lobby - {match_label}",
-        description="Select your preferred team selection method:",
+        description="⏳ **Waiting for all players to join the Pregame Lobby voice channel...**\n\nTeam selection will begin once everyone is in voice!",
         color=discord.Color.gold()
     )
-    
+
     # Add 8/8 image
     embed.set_image(url=get_queue_progress_image(8))
-    
+
     # Show player count
     player_count = f"{len(players)}/8 players"
     if test_mode:
-        player_count += " (TEST MODE - Both testers must vote same)"
-    
+        player_count += " (TEST MODE)"
+
     player_list = "\n".join([f"<@{uid}>" for uid in players])
     embed.add_field(name=f"Players ({player_count})", value=player_list, inline=False)
-    
-    # Notify players not in voice with timer warning (only for real matches)
+
+    # Show who's in voice and who's not
+    if players_in_voice:
+        in_voice_list = ", ".join([f"<@{uid}>" for uid in players_in_voice])
+        embed.add_field(name="✅ In Pregame Lobby", value=in_voice_list, inline=False)
+
     if players_not_in_voice and not test_mode:
         not_in_voice_list = ", ".join([f"<@{uid}>" for uid in players_not_in_voice])
         embed.add_field(
-            name="⚠️ Not in Voice - 60 seconds to join!",
+            name="⚠️ Not in Voice - 5 minutes to join!",
             value=f"{not_in_voice_list}\nJoin the Pregame Lobby or be replaced!",
             inline=False
         )
@@ -143,19 +148,224 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
                 value=f"{not_in_voice_list}\nPlease join the Pregame Lobby!",
                 inline=False
             )
-    
-    # Get testers list for voting requirement (already fetched above)
-    view = TeamSelectionView(players, test_mode=test_mode, testers=testers, pregame_vc_id=pregame_vc.id, match_label=match_label)
-    pregame_message = await target_channel.send(embed=embed, view=view)
-    
-    # Store message reference for deletion later
+
+    # Send waiting embed (no buttons yet)
+    pregame_message = await target_channel.send(embed=embed)
+    queue_state.pregame_message = pregame_message
+
+    # Start task to wait for all players and then show team selection
+    asyncio.create_task(wait_for_players_and_show_selection(
+        target_channel, pregame_message, players, pregame_vc.id,
+        test_mode=test_mode, testers=testers, match_label=match_label
+    ))
+
+
+async def wait_for_players_and_show_selection(
+    channel: discord.TextChannel,
+    pregame_message: discord.Message,
+    players: List[int],
+    pregame_vc_id: int,
+    test_mode: bool = False,
+    testers: List[int] = None,
+    match_label: str = "Match"
+):
+    """Wait for all players to join pregame VC, then show team selection"""
+    import asyncio
+    from searchmatchmaking import queue_state, get_queue_progress_image
+
+    guild = channel.guild
+    testers = testers or []
+    timeout_seconds = 300  # 5 minutes
+
+    # In test mode, only wait for testers (not filler players)
+    players_to_wait_for = [uid for uid in players if uid in testers] if test_mode else players[:]
+
+    start_time = asyncio.get_event_loop().time()
+
+    while True:
+        # Check if pregame was cancelled
+        if not hasattr(queue_state, 'pregame_vc_id') or queue_state.pregame_vc_id != pregame_vc_id:
+            return  # Pregame was cancelled
+
+        pregame_vc = guild.get_channel(pregame_vc_id)
+        if not pregame_vc:
+            return  # VC was deleted
+
+        # Check who's in voice now
+        members_in_vc = [m.id for m in pregame_vc.members if not m.bot]
+        players_in_voice = [uid for uid in players_to_wait_for if uid in members_in_vc]
+        players_not_in_voice = [uid for uid in players_to_wait_for if uid not in members_in_vc]
+
+        elapsed = asyncio.get_event_loop().time() - start_time
+        time_remaining = max(0, timeout_seconds - int(elapsed))
+        minutes_left = time_remaining // 60
+        seconds_left = time_remaining % 60
+
+        # Update embed to show current status
+        embed = discord.Embed(
+            title=f"Pregame Lobby - {match_label}",
+            description="⏳ **Waiting for all players to join the Pregame Lobby voice channel...**\n\nTeam selection will begin once everyone is in voice!",
+            color=discord.Color.gold()
+        )
+        embed.set_image(url=get_queue_progress_image(8))
+
+        player_count = f"{len(players)}/8 players"
+        if test_mode:
+            player_count += " (TEST MODE)"
+        player_list = "\n".join([f"<@{uid}>" for uid in players])
+        embed.add_field(name=f"Players ({player_count})", value=player_list, inline=False)
+
+        if players_in_voice:
+            in_voice_list = ", ".join([f"<@{uid}>" for uid in players_in_voice])
+            embed.add_field(name=f"✅ In Pregame Lobby ({len(players_in_voice)}/{len(players_to_wait_for)})", value=in_voice_list, inline=False)
+
+        if players_not_in_voice:
+            not_in_voice_list = ", ".join([f"<@{uid}>" for uid in players_not_in_voice])
+            embed.add_field(
+                name=f"⚠️ Not in Voice - {minutes_left}m {seconds_left}s remaining!",
+                value=f"{not_in_voice_list}\nJoin the Pregame Lobby or be replaced!",
+                inline=False
+            )
+
+        try:
+            await pregame_message.edit(embed=embed)
+        except:
+            pass
+
+        # Check if all players are in voice
+        if len(players_not_in_voice) == 0:
+            log_action(f"All players in pregame voice - showing team selection")
+            await show_team_selection(channel, pregame_message, players, pregame_vc_id, test_mode, testers, match_label)
+            return
+
+        # Check timeout
+        if elapsed >= timeout_seconds:
+            log_action(f"Pregame timeout - {len(players_not_in_voice)} players missing")
+            # Handle no-shows: replace with people from pregame VC or proceed anyway
+            await handle_pregame_timeout(channel, pregame_message, players, players_not_in_voice, pregame_vc_id, test_mode, testers, match_label)
+            return
+
+        # Wait 5 seconds before checking again
+        await asyncio.sleep(5)
+
+
+async def show_team_selection(
+    channel: discord.TextChannel,
+    pregame_message: discord.Message,
+    players: List[int],
+    pregame_vc_id: int,
+    test_mode: bool,
+    testers: List[int],
+    match_label: str
+):
+    """Show team selection buttons once all players are in voice"""
+    from searchmatchmaking import queue_state, get_queue_progress_image
+
+    embed = discord.Embed(
+        title=f"Pregame Lobby - {match_label}",
+        description="✅ **All players are in voice!**\n\nSelect your preferred team selection method:",
+        color=discord.Color.green()
+    )
+    embed.set_image(url=get_queue_progress_image(8))
+
+    player_count = f"{len(players)}/8 players"
+    if test_mode:
+        player_count += " (TEST MODE - Both testers must vote same)"
+    player_list = "\n".join([f"<@{uid}>" for uid in players])
+    embed.add_field(name=f"Players ({player_count})", value=player_list, inline=False)
+
+    view = TeamSelectionView(players, test_mode=test_mode, testers=testers, pregame_vc_id=pregame_vc_id, match_label=match_label)
     view.pregame_message = pregame_message
     queue_state.pregame_message = pregame_message
-    
-    # Start no-show timer for real matches only
-    if not test_mode and players_not_in_voice:
-        import asyncio
-        asyncio.create_task(check_no_shows(target_channel, view, players_not_in_voice, pregame_vc.id, 60))
+
+    try:
+        await pregame_message.edit(embed=embed, view=view)
+    except:
+        # If edit fails, send new message
+        new_message = await channel.send(embed=embed, view=view)
+        view.pregame_message = new_message
+        queue_state.pregame_message = new_message
+
+
+async def handle_pregame_timeout(
+    channel: discord.TextChannel,
+    pregame_message: discord.Message,
+    players: List[int],
+    no_show_players: List[int],
+    pregame_vc_id: int,
+    test_mode: bool,
+    testers: List[int],
+    match_label: str
+):
+    """Handle timeout - replace no-shows if possible, then proceed to team selection"""
+    from searchmatchmaking import queue_state, get_queue_progress_image
+
+    guild = channel.guild
+    pregame_vc = guild.get_channel(pregame_vc_id)
+
+    if not pregame_vc:
+        return
+
+    # Find replacement players from the pregame VC who weren't in the original 8
+    current_vc_members = [m.id for m in pregame_vc.members if not m.bot]
+    original_players = set(players)
+    potential_replacements = [uid for uid in current_vc_members if uid not in original_players]
+
+    replacements_made = []
+    updated_players = players[:]
+
+    for no_show_id in no_show_players:
+        if potential_replacements:
+            replacement_id = potential_replacements.pop(0)
+
+            # Replace in player list
+            idx = updated_players.index(no_show_id)
+            updated_players[idx] = replacement_id
+
+            no_show_member = guild.get_member(no_show_id)
+            replacement_member = guild.get_member(replacement_id)
+
+            no_show_name = no_show_member.display_name if no_show_member else str(no_show_id)
+            replacement_name = replacement_member.display_name if replacement_member else str(replacement_id)
+
+            replacements_made.append(f"<@{no_show_id}> → <@{replacement_id}>")
+            log_action(f"Replaced no-show {no_show_name} with {replacement_name}")
+
+    # Show team selection with updated player list
+    embed = discord.Embed(
+        title=f"Pregame Lobby - {match_label}",
+        description="⏰ **Time's up!** Proceeding to team selection.\n\nSelect your preferred team selection method:",
+        color=discord.Color.orange()
+    )
+    embed.set_image(url=get_queue_progress_image(8))
+
+    player_count = f"{len(updated_players)}/8 players"
+    if test_mode:
+        player_count += " (TEST MODE)"
+    player_list = "\n".join([f"<@{uid}>" for uid in updated_players])
+    embed.add_field(name=f"Players ({player_count})", value=player_list, inline=False)
+
+    if replacements_made:
+        embed.add_field(name="🔄 Replacements Made", value="\n".join(replacements_made), inline=False)
+
+    remaining_no_shows = [uid for uid in no_show_players if uid in updated_players]
+    if remaining_no_shows:
+        embed.add_field(
+            name="⚠️ Still Missing (no replacements available)",
+            value=", ".join([f"<@{uid}>" for uid in remaining_no_shows]),
+            inline=False
+        )
+
+    view = TeamSelectionView(updated_players, test_mode=test_mode, testers=testers, pregame_vc_id=pregame_vc_id, match_label=match_label)
+    view.pregame_message = pregame_message
+    queue_state.pregame_message = pregame_message
+
+    try:
+        await pregame_message.edit(embed=embed, view=view)
+    except:
+        new_message = await channel.send(embed=embed, view=view)
+        view.pregame_message = new_message
+        queue_state.pregame_message = new_message
 
 
 async def check_no_shows(channel: discord.TextChannel, view, no_show_players: List[int], pregame_vc_id: int, timeout_seconds: int):
@@ -670,25 +880,26 @@ async def finalize_teams(channel: discord.TextChannel, red_team: List[int], blue
         position=999  # Position at bottom
     )
     
-    # Set permissions: All users muted by default but can unmute
+    # Set permissions: Non-players can connect and speak (can self-mute/unmute)
+    # Team members get explicit speak permission
     everyone_role = guild.default_role
-    await red_vc.set_permissions(everyone_role, 
+    await red_vc.set_permissions(everyone_role,
                                    connect=True,
-                                   speak=False,
+                                   speak=True,  # Allow spectators to unmute themselves
                                    mute_members=False,
                                    use_voice_activation=True)
-    await blue_vc.set_permissions(everyone_role, 
+    await blue_vc.set_permissions(everyone_role,
                                     connect=True,
-                                    speak=False,
+                                    speak=True,  # Allow spectators to unmute themselves
                                     mute_members=False,
                                     use_voice_activation=True)
-    
-    # Give team members speak permissions
+
+    # Give team members explicit speak permissions (ensures they can always talk)
     for user_id in red_team:
         member = guild.get_member(user_id)
         if member:
             await red_vc.set_permissions(member, speak=True, mute_members=False)
-    
+
     for user_id in blue_team:
         member = guild.get_member(user_id)
         if member:
