@@ -1,7 +1,7 @@
 # pregame.py - Pregame Lobby and Team Selection
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.2.2"
+MODULE_VERSION = "1.2.3"
 
 import discord
 from discord.ui import View, Button, Select
@@ -527,7 +527,7 @@ class TeamSelectionView(View):
     
     async def handle_vote(self, interaction: discord.Interaction, method: str):
         """Handle team selection vote - requires majority (5+ of 8 players)"""
-        from searchmatchmaking import queue_state
+        from searchmatchmaking import queue_state, log_action
 
         # In test mode, only testers can vote and both must agree
         if self.test_mode and self.testers:
@@ -536,7 +536,12 @@ class TeamSelectionView(View):
                 return
 
             # Record/update vote (allows changing vote)
+            old_vote = self.votes.get(interaction.user.id)
             self.votes[interaction.user.id] = method
+            if old_vote:
+                log_action(f"[VOTE] {interaction.user.display_name} changed vote from {old_vote} to {method} (test mode)")
+            else:
+                log_action(f"[VOTE] {interaction.user.display_name} voted for {method} (test mode)")
 
             # Check if all testers voted
             if len(self.votes) < len(self.testers):
@@ -555,6 +560,7 @@ class TeamSelectionView(View):
                 return
 
             # All testers agree - proceed
+            log_action(f"[VOTE] Test mode - testers agreed on {method}")
             await interaction.response.defer()
         else:
             # Normal mode - require majority vote (5+ of 8 players)
@@ -563,13 +569,22 @@ class TeamSelectionView(View):
                 return
 
             # Record/update vote (allows changing vote)
+            old_vote = self.votes.get(interaction.user.id)
             self.votes[interaction.user.id] = method
+            if old_vote:
+                log_action(f"[VOTE] {interaction.user.display_name} changed vote from {old_vote} to {method}")
+            else:
+                log_action(f"[VOTE] {interaction.user.display_name} voted for {method}")
             await interaction.response.defer()
 
             # Count votes for each option
             vote_counts = {}
             for vote in self.votes.values():
                 vote_counts[vote] = vote_counts.get(vote, 0) + 1
+
+            # Log current vote counts
+            counts_str = ", ".join([f"{k}: {v}" for k, v in vote_counts.items()])
+            log_action(f"[VOTE] Current counts ({len(self.votes)}/8 voted): {counts_str}")
 
             # Check if any option has majority (5+ of 8)
             majority_needed = (len(self.players) // 2) + 1  # 5 for 8 players
@@ -585,6 +600,7 @@ class TeamSelectionView(View):
                 return
 
             # Found majority - use the winning method
+            log_action(f"[VOTE] MAJORITY REACHED: {winning_method} with {vote_counts[winning_method]}/{majority_needed} votes")
             method = winning_method
 
         # Delete the pregame embed
