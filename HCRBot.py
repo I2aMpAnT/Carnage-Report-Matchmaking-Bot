@@ -1,11 +1,12 @@
 # HCRBot.py - Main Bot Entry Point
 # Halo 2 Carnage Report Matchmaking Bot
+# !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
 # ============================================
 # VERSION INFO
 # ============================================
-BOT_VERSION = "1.3.0"
-BOT_BUILD_DATE = "2025-11-28"
+BOT_VERSION = "1.4.0"
+BOT_BUILD_DATE = "2025-11-29"
 # ============================================
 
 import discord
@@ -352,6 +353,49 @@ async def on_interaction(interaction: discord.Interaction):
                     await interaction.response.send_message("👋 You've been removed from the queue.", ephemeral=True)
             else:
                 await interaction.response.send_message("You're no longer in the queue.", ephemeral=True)
+
+@bot.event
+async def on_message(message: discord.Message):
+    """Handle messages - keep match embed at bottom of general chat"""
+    # Ignore bot messages
+    if message.author.bot:
+        return
+
+    # Check if message is in general chat
+    GENERAL_CHANNEL_ID = 1403855176460406805
+    if message.channel.id != GENERAL_CHANNEL_ID:
+        return
+
+    # Check if there's an active series with a general_message
+    from searchmatchmaking import queue_state
+    if not queue_state.current_series:
+        return
+
+    series = queue_state.current_series
+    if not hasattr(series, 'general_message') or not series.general_message:
+        return
+
+    # Repost the match embed to keep it at the bottom
+    try:
+        from ingame import update_general_chat_embed
+
+        # Delete the old message
+        old_message = series.general_message
+        try:
+            await old_message.delete()
+        except:
+            pass
+
+        # Clear the reference so update_general_chat_embed creates a new one
+        series.general_message = None
+
+        # Repost the embed
+        await update_general_chat_embed(message.guild, series)
+
+        from searchmatchmaking import log_action
+        log_action(f"Reposted match embed to bottom (triggered by {message.author.display_name})")
+    except Exception as e:
+        print(f"Error reposting match embed: {e}")
 
 # Run bot - works both when imported and when run directly
 if not TOKEN:
