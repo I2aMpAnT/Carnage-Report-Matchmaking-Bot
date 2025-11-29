@@ -1,7 +1,7 @@
 # pregame.py - Pregame Lobby and Team Selection
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.2.2"
+MODULE_VERSION = "1.3.0"
 
 import discord
 from discord.ui import View, Button, Select
@@ -913,32 +913,7 @@ async def finalize_teams(channel: discord.TextChannel, red_team: List[int], blue
         user_limit=None,
         position=999  # Position at bottom
     )
-    
-    # Set permissions: Non-players can connect and speak (can self-mute/unmute)
-    # Team members get explicit speak permission
-    everyone_role = guild.default_role
-    await red_vc.set_permissions(everyone_role,
-                                   connect=True,
-                                   speak=True,  # Allow spectators to unmute themselves
-                                   mute_members=False,
-                                   use_voice_activation=True)
-    await blue_vc.set_permissions(everyone_role,
-                                    connect=True,
-                                    speak=True,  # Allow spectators to unmute themselves
-                                    mute_members=False,
-                                    use_voice_activation=True)
 
-    # Give team members explicit speak permissions (ensures they can always talk)
-    for user_id in red_team:
-        member = guild.get_member(user_id)
-        if member:
-            await red_vc.set_permissions(member, speak=True, mute_members=False)
-
-    for user_id in blue_team:
-        member = guild.get_member(user_id)
-        if member:
-            await blue_vc.set_permissions(member, speak=True, mute_members=False)
-    
     # Move players from pregame (or any voice channel) to their team channels
     # In test mode, only move testers (they're the only real players in voice)
     # In real mode, move all players who are in voice
