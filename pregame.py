@@ -1,7 +1,7 @@
 # pregame.py - Pregame Lobby and Team Selection
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.2.0"
+MODULE_VERSION = "1.2.1"
 
 import discord
 from discord.ui import View, Button, Select
@@ -43,7 +43,11 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
     import asyncio
     
     log_action(f"Starting pregame phase (test_mode={test_mode})")
-    
+
+    # Reset ping cooldown so players can ping again for new matches
+    queue_state.last_ping_time = None
+    log_action("Reset ping cooldown for new match")
+
     # Use test players if provided, otherwise use queue
     players = test_players if test_players else queue_state.queue[:]
     

@@ -1,6 +1,7 @@
 # playlists.py - Multi-Playlist Queue System
+# !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.0.0"
+MODULE_VERSION = "1.0.1"
 
 import discord
 from discord.ui import View, Button
@@ -672,6 +673,10 @@ async def start_playlist_match(channel: discord.TextChannel, playlist_state: Pla
     """Start a match when queue is full"""
     ps = playlist_state
     players = ps.queue[:]
+
+    # Reset ping cooldown so players can ping again for new matches
+    ps.last_ping_time = None
+    log_action(f"Reset ping cooldown for {ps.name}")
 
     log_action(f"Starting {ps.name} match with {len(players)} players")
 
