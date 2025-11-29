@@ -1,7 +1,7 @@
 # playlists.py - Multi-Playlist Queue System
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.0.3"
+MODULE_VERSION = "1.0.4"
 
 import discord
 from discord.ui import View, Button
@@ -99,11 +99,11 @@ MATCH_HISTORY_FILE = "match_history.json"
 
 
 def log_action(message: str):
-    """Log actions to log.txt"""
+    """Log actions to log.txt and console with timestamp"""
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     with open('log.txt', 'a') as f:
         f.write(f"[{timestamp}] {message}\n")
-    print(f"[LOG] {message}")
+    print(f"[LOG] [{timestamp}] {message}")
 
 
 class PlaylistQueueState:

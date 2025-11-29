@@ -47,6 +47,7 @@ def save_state():
             "red_vc_id": series.red_vc_id,
             "blue_vc_id": series.blue_vc_id,
             "swap_history": getattr(series, 'swap_history', []),
+            "game_stats": getattr(series, 'game_stats', {}),
             "series_message_id": series.series_message.id if series.series_message else None,
             "series_message_channel_id": series.series_message.channel.id if series.series_message else None,
             "general_message_id": series.general_message.id if hasattr(series, 'general_message') and series.general_message else None
@@ -120,6 +121,7 @@ async def restore_state(bot) -> bool:
             series.red_vc_id = series_data["red_vc_id"]
             series.blue_vc_id = series_data["blue_vc_id"]
             series.swap_history = series_data.get("swap_history", [])
+            series.game_stats = series_data.get("game_stats", {})  # Map/gametype tracking
             series.votes = {}
             series.end_series_votes = set()
             series.series_message = None

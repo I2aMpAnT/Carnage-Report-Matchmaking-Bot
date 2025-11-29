@@ -1,7 +1,7 @@
 # searchmatchmaking.py - MLG 4v4 Queue Management System
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.4.1"
+MODULE_VERSION = "1.4.2"
 
 import discord
 from discord.ui import View, Button
@@ -63,11 +63,11 @@ INACTIVITY_CHECK_MINUTES = 60  # Time before prompting user (1 hour)
 INACTIVITY_RESPONSE_MINUTES = 5  # Time user has to respond
 
 def log_action(message: str):
-    """Log actions to log.txt"""
+    """Log actions to log.txt and console with timestamp"""
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     with open('log.txt', 'a') as f:
         f.write(f"[{timestamp}] {message}\n")
-    print(f"[LOG] {message}")
+    print(f"[LOG] [{timestamp}] {message}")
 
 async def auto_update_queue_times():
     """Background task to update queue times every 10 seconds"""
