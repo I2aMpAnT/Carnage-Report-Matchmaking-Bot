@@ -1,7 +1,7 @@
 # pregame.py - Pregame Lobby and Team Selection
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.2.3"
+MODULE_VERSION = "1.2.4"
 
 import discord
 from discord.ui import View, Button, Select
@@ -79,7 +79,14 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
         user_limit=10
     )
     log_action(f"Created Pregame Lobby VC: {pregame_vc.id}")
-    
+
+    # Set permissions: everyone can connect and speak (can self-unmute)
+    everyone_role = guild.default_role
+    await pregame_vc.set_permissions(everyone_role,
+                                     connect=True,
+                                     speak=True,
+                                     use_voice_activation=True)
+
     # Store the pregame VC ID for cleanup later
     queue_state.pregame_vc_id = pregame_vc.id
     

@@ -1,7 +1,7 @@
 # playlists.py - Multi-Playlist Queue System
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.0.2"
+MODULE_VERSION = "1.0.3"
 
 import discord
 from discord.ui import View, Button
@@ -738,6 +738,19 @@ async def start_playlist_match(channel: discord.TextChannel, playlist_state: Pla
         )
         match.shared_vc_id = vc.id
 
+        # Set permissions: everyone can connect and speak (can self-unmute)
+        everyone_role = guild.default_role
+        await vc.set_permissions(everyone_role,
+                                 connect=True,
+                                 speak=True,
+                                 use_voice_activation=True)
+
+        # Give players explicit speak permissions
+        for uid in players:
+            member = guild.get_member(uid)
+            if member:
+                await vc.set_permissions(member, speak=True)
+
         # Move players
         for uid in players:
             member = guild.get_member(uid)
@@ -765,6 +778,27 @@ async def start_playlist_match(channel: discord.TextChannel, playlist_state: Pla
             category=category,
             user_limit=ps.team_size + 2
         )
+
+        # Set permissions: everyone can connect and speak (can self-unmute)
+        everyone_role = guild.default_role
+        await team1_vc.set_permissions(everyone_role,
+                                       connect=True,
+                                       speak=True,
+                                       use_voice_activation=True)
+        await team2_vc.set_permissions(everyone_role,
+                                       connect=True,
+                                       speak=True,
+                                       use_voice_activation=True)
+
+        # Give team members explicit speak permissions
+        for uid in team1:
+            member = guild.get_member(uid)
+            if member:
+                await team1_vc.set_permissions(member, speak=True)
+        for uid in team2:
+            member = guild.get_member(uid)
+            if member:
+                await team2_vc.set_permissions(member, speak=True)
 
         match.team1_vc_id = team1_vc.id
         match.team2_vc_id = team2_vc.id
