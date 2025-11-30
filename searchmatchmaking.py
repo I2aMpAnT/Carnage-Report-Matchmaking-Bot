@@ -1,7 +1,7 @@
 # searchmatchmaking.py - MLG 4v4 Queue Management System
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.4.5"
+MODULE_VERSION = "1.4.6"
 
 import discord
 from discord.ui import View, Button
@@ -793,44 +793,46 @@ async def create_queue_embed(channel: discord.TextChannel):
     queue_state.queue_channel = channel
 
     players_needed = MAX_QUEUE_SIZE
-    embed = discord.Embed(
+
+    # Header embed with banner image
+    header_embed = discord.Embed(color=discord.Color.blue())
+    header_embed.set_image(url="https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/MessagefromCarnagereport.png")
+
+    # Main embed with queue info and progress image
+    main_embed = discord.Embed(
         title="MLG 4v4 Matchmaking",
         description=f"We have **0** players searching **MLG 4v4**, we need **{players_needed}** more for a game!\n\nClick **Join Matchmaking** to queue up!",
         color=discord.Color.blue()
     )
-
-    # Set header thumbnail (small image on side)
-    embed.set_thumbnail(url="https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/MessagefromCarnagereport.png")
-    # Set progress image (large image at bottom)
-    embed.set_image(url=get_queue_progress_image(0))
-
-    embed.add_field(
+    main_embed.add_field(
         name=f"Players in Queue (0/{MAX_QUEUE_SIZE})",
         value="*No players yet*",
         inline=False
     )
+    main_embed.set_image(url=get_queue_progress_image(0))
 
     view = QueueView()
-    
+
     # Try to find existing queue message
     async for message in channel.history(limit=50):
         if message.author.bot and message.embeds:
-            if "Matchmaking" in message.embeds[0].title:
-                try:
-                    await message.edit(embed=embed, view=view)
-                    
-                    # Start auto-update task if not already running
-                    if queue_state.auto_update_task is None or queue_state.auto_update_task.done():
-                        queue_state.auto_update_task = asyncio.create_task(auto_update_queue_times())
-                        log_action("Started queue auto-update task")
-                    
-                    return
-                except:
-                    pass
-    
+            for emb in message.embeds:
+                if emb.title and "Matchmaking" in emb.title:
+                    try:
+                        await message.edit(embeds=[header_embed, main_embed], view=view)
+
+                        # Start auto-update task if not already running
+                        if queue_state.auto_update_task is None or queue_state.auto_update_task.done():
+                            queue_state.auto_update_task = asyncio.create_task(auto_update_queue_times())
+                            log_action("Started queue auto-update task")
+
+                        return
+                    except:
+                        pass
+
     # Create new message if not found
-    await channel.send(embed=embed, view=view)
-    
+    await channel.send(embeds=[header_embed, main_embed], view=view)
+
     # Start auto-update task if not already running
     if queue_state.auto_update_task is None or queue_state.auto_update_task.done():
         queue_state.auto_update_task = asyncio.create_task(auto_update_queue_times())
@@ -884,22 +886,21 @@ async def update_queue_embed(channel: discord.TextChannel):
     else:
         player_mentions = "*No players yet*"
     
-    # Create embed
+    # Create embeds
     player_count = len(queue_state.queue)
     players_needed = MAX_QUEUE_SIZE - player_count
 
-    embed = discord.Embed(
+    # Header embed with banner image
+    header_embed = discord.Embed(color=discord.Color.blue())
+    header_embed.set_image(url="https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/MessagefromCarnagereport.png")
+
+    # Main embed with queue info and progress image
+    main_embed = discord.Embed(
         title="MLG 4v4 Matchmaking",
         description=f"We have **{player_count}** players searching **MLG 4v4**, we need **{players_needed}** more for a game!\n\nClick **Join Matchmaking** to queue up!",
         color=discord.Color.blue()
     )
-
-    # Set header thumbnail (small image on side)
-    embed.set_thumbnail(url="https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/MessagefromCarnagereport.png")
-    # Set progress image (large image at bottom)
-    embed.set_image(url=get_queue_progress_image(player_count))
-
-    embed.add_field(
+    main_embed.add_field(
         name=f"Players in Queue ({player_count}/{MAX_QUEUE_SIZE})",
         value=player_mentions,
         inline=False
@@ -911,29 +912,33 @@ async def update_queue_embed(channel: discord.TextChannel):
         if action['type'] == 'leave':
             time_str = action.get('time_in_queue', '')
             if time_str:
-                embed.add_field(
+                main_embed.add_field(
                     name="Recent Activity",
                     value=f"**{action['name']}** left matchmaking (was in queue {time_str})",
                     inline=False
                 )
             else:
-                embed.add_field(
+                main_embed.add_field(
                     name="Recent Activity",
                     value=f"**{action['name']}** left matchmaking",
                     inline=False
                 )
-    
+
+    # Progress image at the bottom
+    main_embed.set_image(url=get_queue_progress_image(player_count))
+
     view = QueueView()
-    
+
     # Find and update existing message
     async for message in channel.history(limit=50):
         if message.author.bot and message.embeds:
-            if "Matchmaking" in message.embeds[0].title:
-                try:
-                    await message.edit(embed=embed, view=view)
-                    return
-                except:
-                    pass
-    
+            for emb in message.embeds:
+                if emb.title and "Matchmaking" in emb.title:
+                    try:
+                        await message.edit(embeds=[header_embed, main_embed], view=view)
+                        return
+                    except:
+                        pass
+
     # Create new if not found
-    await channel.send(embed=embed, view=view)
+    await channel.send(embeds=[header_embed, main_embed], view=view)
