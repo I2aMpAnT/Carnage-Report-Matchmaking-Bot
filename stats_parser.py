@@ -708,13 +708,14 @@ async def sync_discord_ranks_for_all_players(bot) -> int:
             if highest is None or highest < 1:
                 highest = STATSRANKS.calculate_highest_rank(player_stats)
 
-            # Only update Discord role if:
-            # 1. They don't have a rank yet, OR
-            # 2. The new rank is DIFFERENT from current
-            if current_rank is None or highest != current_rank:
-                await STATSRANKS.update_player_rank_role(guild, user_id, highest, send_dm=False)
-                updated_count += 1
-                print(f"  Updated {member.display_name}: Level {current_rank} → Level {highest}")
+            # Skip if already correct rank
+            if current_rank == highest:
+                continue
+
+            # Update to correct rank (only if different)
+            await STATSRANKS.update_player_rank_role(guild, user_id, highest, send_dm=False)
+            updated_count += 1
+            print(f"  Updated {member.display_name}: Level {current_rank} → Level {highest}")
 
         except Exception as e:
             print(f"⚠️ Error syncing rank for user {user_id_str}: {e}")
