@@ -870,8 +870,8 @@ class StatsCommands(commands.Cog):
 
         import github_webhook
 
-        # Pull latest stats from GitHub (source of truth)
-        github_stats = github_webhook.pull_rankstats_from_github()
+        # Pull latest stats from GitHub (source of truth) - use async version
+        github_stats = await github_webhook.async_pull_rankstats_from_github()
 
         user_id_str = str(interaction.user.id)
 
@@ -926,8 +926,8 @@ class StatsCommands(commands.Cog):
 
         guild = interaction.guild
 
-        # Pull latest stats from GitHub (source of truth)
-        stats = github_webhook.pull_rankstats_from_github()
+        # Pull latest stats from GitHub (source of truth) - use async version
+        stats = await github_webhook.async_pull_rankstats_from_github()
 
         if not stats:
             await interaction.followup.send(
@@ -1006,8 +1006,8 @@ class StatsCommands(commands.Cog):
 
         guild = interaction.guild
 
-        # Pull latest stats from GitHub (source of truth)
-        stats = github_webhook.pull_rankstats_from_github()
+        # Pull latest stats from GitHub (source of truth) - use async version
+        stats = await github_webhook.async_pull_rankstats_from_github()
 
         if not stats:
             await interaction.followup.send(
