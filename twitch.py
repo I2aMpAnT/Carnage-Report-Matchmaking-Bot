@@ -3,7 +3,7 @@ twitch.py - Twitch Integration Module
 Manages player Twitch links and multi-stream URLs
 """
 
-MODULE_VERSION = "1.2.2"
+MODULE_VERSION = "1.2.3"
 
 import discord
 from discord import app_commands
@@ -164,22 +164,22 @@ def get_team_twitch_names(team_user_ids: List[int]) -> List[str]:
     """Get Twitch names for a list of user IDs"""
     players = load_players()
     names = []
-    
+
     for user_id in team_user_ids:
         player_data = players.get(str(user_id))
-        if player_data:
+        if player_data and 'twitch_name' in player_data:
             names.append(player_data["twitch_name"])
-    
+
     return names
 
 def get_player_display_name(user_id: int, guild: discord.Guild) -> str:
     """Get display name - Twitch display_name if set, otherwise twitch_name, otherwise Discord name"""
     players = load_players()
     player_data = players.get(str(user_id))
-    
-    if player_data:
+
+    if player_data and 'twitch_name' in player_data:
         return player_data.get("display_name", player_data["twitch_name"])
-    
+
     # Fallback to Discord display name
     member = guild.get_member(user_id)
     if member:
@@ -190,16 +190,16 @@ def get_player_as_link(user_id: int, guild: discord.Guild) -> str:
     """Get player as a clickable Twitch link (Discord name displayed) or just Discord name if no Twitch"""
     players = load_players()
     player_data = players.get(str(user_id))
-    
+
     # Get Discord display name
     member = guild.get_member(user_id)
     discord_name = member.display_name if member else str(user_id)
-    
-    if player_data:
+
+    if player_data and 'twitch_url' in player_data:
         # Use Discord name but link to Twitch
         url = player_data["twitch_url"]
         return f"[{discord_name}]({url})"
-    
+
     # No Twitch linked - just show Discord name (no link)
     return discord_name
 
@@ -369,9 +369,9 @@ def setup_twitch_commands(bot: commands.Bot):
     async def my_twitch(interaction: discord.Interaction):
         """Check your linked Twitch"""
         data = get_player_twitch(interaction.user.id)
-        if data:
+        if data and 'twitch_name' in data:
             await interaction.response.send_message(
-                f"Your Twitch: **{data['twitch_name']}**\n{data['twitch_url']}",
+                f"Your Twitch: **{data['twitch_name']}**\n{data.get('twitch_url', '')}",
                 ephemeral=True
             )
         else:
@@ -385,9 +385,9 @@ def setup_twitch_commands(bot: commands.Bot):
     async def check_twitch(interaction: discord.Interaction, user: discord.Member):
         """Check someone's linked Twitch"""
         data = get_player_twitch(user.id)
-        if data:
+        if data and 'twitch_name' in data:
             await interaction.response.send_message(
-                f"{user.display_name}'s Twitch: **{data['twitch_name']}**\n{data['twitch_url']}",
+                f"{user.display_name}'s Twitch: **{data['twitch_name']}**\n{data.get('twitch_url', '')}",
                 ephemeral=True
             )
         else:
