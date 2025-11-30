@@ -1,3 +1,4 @@
+# commands.py - All Bot Commands
 !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 MODULE_VERSION = "1.4.1"
 
@@ -48,9 +49,9 @@ if team2_avg > team1_avg:
 
 return best_team1, best_team2, best_diff
 
-def has_admin_role(): """Check if user has admin role (Overlord only)""" async def predicate(interaction: discord.Interaction): user_roles = [role.name for role in interaction.user.roles] if any(role in ADMIN_ROLES for role in user_roles): return True await interaction.response.send_message("❌ You need Overlord role!", ephemeral=True) return False return app_commands.check(predicate)
+def has_admin_role(): """Check if user has admin role (Overlord only)""" async def predicate(interaction: discord.Interaction): user_roles = [role.name for role in interaction.user.roles] if any(role in ADMIN_ROLES for role in user_roles): return True await interaction.response.send_message("? You need Overlord role!", ephemeral=True) return False return app_commands.check(predicate)
 
-def has_staff_role(): """Check if user has staff role""" async def predicate(interaction: discord.Interaction): user_roles = [role.name for role in interaction.user.roles] if any(role in STAFF_ROLES for role in user_roles): return True await interaction.response.send_message("❌ You need Overlord, Staff, or Server Tech Support role!", ephemeral=True) return False return app_commands.check(predicate)
+def has_staff_role(): """Check if user has staff role""" async def predicate(interaction: discord.Interaction): user_roles = [role.name for role in interaction.user.roles] if any(role in STAFF_ROLES for role in user_roles): return True await interaction.response.send_message("? You need Overlord, Staff, or Server Tech Support role!", ephemeral=True) return False return app_commands.check(predicate)
 
 def check_command_permission(command_name: str): """Dynamic permission check based on COMMAND_PERMISSIONS overrides""" async def predicate(interaction: discord.Interaction): global COMMAND_PERMISSIONS
 
@@ -69,12 +70,12 @@ def check_command_permission(command_name: str): """Dynamic permission check bas
     elif permission_level == "staff":
         if any(role in STAFF_ROLES for role in user_roles):
             return True
-        await interaction.response.send_message("❌ You need Overlord, Staff, or Server Tech Support role!", ephemeral=True)
+        await interaction.response.send_message("? You need Overlord, Staff, or Server Tech Support role!", ephemeral=True)
         return False
     elif permission_level == "admin":
         if any(role in ADMIN_ROLES for role in user_roles):
             return True
-        await interaction.response.send_message("❌ You need Overlord role!", ephemeral=True)
+        await interaction.response.send_message("? You need Overlord role!", ephemeral=True)
         return False
     
     return True
@@ -98,13 +99,13 @@ async def add_staff_role(interaction: discord.Interaction, role: discord.Role):
     """Add a role to staff roles"""
     global STAFF_ROLES
     if role.name in STAFF_ROLES:
-        await interaction.response.send_message(f"❌ **{role.name}** is already a staff role!", ephemeral=True)
+        await interaction.response.send_message(f"? **{role.name}** is already a staff role!", ephemeral=True)
         return
     
     STAFF_ROLES.append(role.name)
     log_action(f"Admin {interaction.user.name} added {role.name} to staff roles")
     await interaction.response.send_message(
-        f"✅ Added **{role.name}** to staff roles!\n"
+        f"? Added **{role.name}** to staff roles!\n"
         f"Current staff roles: {', '.join(STAFF_ROLES)}",
         ephemeral=True
     )
@@ -116,17 +117,17 @@ async def remove_staff_role(interaction: discord.Interaction, role: discord.Role
     """Remove a role from staff roles"""
     global STAFF_ROLES
     if role.name not in STAFF_ROLES:
-        await interaction.response.send_message(f"❌ **{role.name}** is not a staff role!", ephemeral=True)
+        await interaction.response.send_message(f"? **{role.name}** is not a staff role!", ephemeral=True)
         return
     
     if role.name == "Overlord":
-        await interaction.response.send_message("❌ Cannot remove Overlord from staff roles!", ephemeral=True)
+        await interaction.response.send_message("? Cannot remove Overlord from staff roles!", ephemeral=True)
         return
     
     STAFF_ROLES.remove(role.name)
     log_action(f"Admin {interaction.user.name} removed {role.name} from staff roles")
     await interaction.response.send_message(
-        f"✅ Removed **{role.name}** from staff roles!\n"
+        f"? Removed **{role.name}** from staff roles!\n"
         f"Current staff roles: {', '.join(STAFF_ROLES)}",
         ephemeral=True
     )
@@ -136,7 +137,7 @@ async def remove_staff_role(interaction: discord.Interaction, role: discord.Role
 async def list_staff_roles(interaction: discord.Interaction):
     """List all staff roles"""
     await interaction.response.send_message(
-        f"📋 **Current Staff Roles:**\n{', '.join(STAFF_ROLES)}",
+        f"?? **Current Staff Roles:**\n{', '.join(STAFF_ROLES)}",
         ephemeral=True
     )
 
@@ -176,7 +177,7 @@ async def role_rule_change(interaction: discord.Interaction, command_name: str, 
     
     if command_name not in valid_commands:
         await interaction.response.send_message(
-            f"❌ Unknown command: `{command_name}`\n"
+            f"? Unknown command: `{command_name}`\n"
             f"Valid commands: {', '.join(valid_commands[:10])}... (use /listrolerules to see all)",
             ephemeral=True
         )
@@ -184,7 +185,7 @@ async def role_rule_change(interaction: discord.Interaction, command_name: str, 
     
     if command_name in protected_commands:
         await interaction.response.send_message(
-            f"❌ Cannot change permissions for `{command_name}` - it's a protected admin command!",
+            f"? Cannot change permissions for `{command_name}` - it's a protected admin command!",
             ephemeral=True
         )
         return
@@ -208,8 +209,8 @@ async def role_rule_change(interaction: discord.Interaction, command_name: str, 
     
     log_action(f"Admin {interaction.user.name} changed /{command_name} permission to {permission_level}")
     await interaction.response.send_message(
-        f"✅ Changed `/{command_name}` permission to: **{level_display[permission_level]}**\n"
-        f"⚠️ Note: Bot restart required to fully apply changes.",
+        f"? Changed `/{command_name}` permission to: **{level_display[permission_level]}**\n"
+        f"WARNING Note: Bot restart required to fully apply changes.",
         ephemeral=True
     )
 
@@ -231,24 +232,24 @@ async def list_role_rules(interaction: discord.Interaction):
     
     if not COMMAND_PERMISSIONS:
         await interaction.response.send_message(
-            "📋 **Command Permission Overrides:**\nNo custom overrides set. All commands use default permissions.",
+            "?? **Command Permission Overrides:**\nNo custom overrides set. All commands use default permissions.",
             ephemeral=True
         )
         return
     
     level_display = {
-        "admin": "🔴 Admin",
-        "staff": "🟡 Staff", 
-        "all": "🟢 Everyone"
+        "admin": "?? Admin",
+        "staff": "?? Staff", 
+        "all": "?? Everyone"
     }
     
     rules_text = "\n".join([
-        f"`/{cmd}` → {level_display.get(level, level)}"
+        f"`/{cmd}` ? {level_display.get(level, level)}"
         for cmd, level in sorted(COMMAND_PERMISSIONS.items())
     ])
     
     await interaction.response.send_message(
-        f"📋 **Command Permission Overrides:**\n{rules_text}",
+        f"?? **Command Permission Overrides:**\n{rules_text}",
         ephemeral=True
     )
 
@@ -260,11 +261,11 @@ async def add_player(interaction: discord.Interaction, user: discord.User):
     from pregame import start_pregame
     
     if user.id in queue_state.queue:
-        await interaction.response.send_message("❌ Player already in queue!", ephemeral=True)
+        await interaction.response.send_message("? Player already in queue!", ephemeral=True)
         return
     
     if len(queue_state.queue) >= MAX_QUEUE_SIZE:
-        await interaction.response.send_message("❌ Queue is full!", ephemeral=True)
+        await interaction.response.send_message("? Queue is full!", ephemeral=True)
         return
     
     queue_state.queue.append(user.id)
@@ -280,10 +281,10 @@ async def add_player(interaction: discord.Interaction, user: discord.User):
     
     # Check if queue is now full
     if len(queue_state.queue) == MAX_QUEUE_SIZE:
-        await interaction.response.send_message(f"✅ Added {user.display_name} - Queue full! Starting pregame...", ephemeral=True)
+        await interaction.response.send_message(f"? Added {user.display_name} - Queue full! Starting pregame...", ephemeral=True)
         await start_pregame(channel if channel else interaction.channel)
     else:
-        await interaction.response.send_message(f"✅ Added {user.display_name} to queue ({len(queue_state.queue)}/{MAX_QUEUE_SIZE})", ephemeral=True)
+        await interaction.response.send_message(f"? Added {user.display_name} to queue ({len(queue_state.queue)}/{MAX_QUEUE_SIZE})", ephemeral=True)
 
 @bot.tree.command(name="removeplayer", description="[STAFF] Remove a player from current matchmaking")
 @has_staff_role()
@@ -293,14 +294,14 @@ async def remove_player(interaction: discord.Interaction, user: discord.User):
     from ingame import show_series_embed
     
     if not queue_state.current_series:
-        await interaction.response.send_message("❌ No active match!", ephemeral=True)
+        await interaction.response.send_message("? No active match!", ephemeral=True)
         return
     
     series = queue_state.current_series
     all_players = series.red_team + series.blue_team
     
     if user.id not in all_players:
-        await interaction.response.send_message("❌ Player not in current match!", ephemeral=True)
+        await interaction.response.send_message("? Player not in current match!", ephemeral=True)
         return
     
     if user.id in series.red_team:
@@ -344,7 +345,7 @@ async def reset_queue(interaction: discord.Interaction):
         await update_queue_embed(channel)
     
     # Send confirmation (not defer - that would leave "thinking")
-    await interaction.response.send_message("✅ Queue reset!", ephemeral=True)
+    await interaction.response.send_message("? Queue reset!", ephemeral=True)
 
 @bot.tree.command(name="cancelmatch", description="[STAFF] Cancel a match by number (completed games stay recorded)")
 @has_staff_role()
@@ -362,7 +363,7 @@ async def cancel_queue(interaction: discord.Interaction, match_number: int, test
     has_pregame = hasattr(queue_state, 'pregame_vc_id') and queue_state.pregame_vc_id
     
     if not has_series and not has_pregame:
-        await interaction.response.send_message("❌ No active match!", ephemeral=True)
+        await interaction.response.send_message("? No active match!", ephemeral=True)
         return
     
     # If we have a series, verify the match number and type
@@ -375,7 +376,7 @@ async def cancel_queue(interaction: discord.Interaction, match_number: int, test
             current_type = "Test" if current_is_test else "Match #"
             requested_type = "Test" if test_mode else "Match #"
             await interaction.response.send_message(
-                f"❌ Match mismatch!\n"
+                f"? Match mismatch!\n"
                 f"You specified: **{requested_type}{match_number}**\n"
                 f"Current active match: **{current_type}{current_match_num}**",
                 ephemeral=True
@@ -476,7 +477,7 @@ async def cancel_queue(interaction: discord.Interaction, match_number: int, test
     if channel:
         await update_queue_embed(channel)
     
-    await interaction.followup.send(f"✅ {match_type}{match_number} has been cancelled!", ephemeral=True)
+    await interaction.followup.send(f"? {match_type}{match_number} has been cancelled!", ephemeral=True)
 
 @bot.tree.command(name="cancelcurrent", description="[STAFF] Cancel the current active match (any type)")
 @has_staff_role()
@@ -490,7 +491,7 @@ async def cancel_current(interaction: discord.Interaction):
     has_pregame = hasattr(queue_state, 'pregame_vc_id') and queue_state.pregame_vc_id
     
     if not has_series and not has_pregame:
-        await interaction.response.send_message("❌ No active match or pregame!", ephemeral=True)
+        await interaction.response.send_message("? No active match or pregame!", ephemeral=True)
         return
     
     await interaction.response.defer()
@@ -589,9 +590,9 @@ async def cancel_current(interaction: discord.Interaction):
     
     if has_series:
         match_type = "Test" if queue_state.current_series is None and has_series else "Match"
-        await interaction.followup.send(f"✅ Match cancelled!", ephemeral=True)
+        await interaction.followup.send(f"? Match cancelled!", ephemeral=True)
     else:
-        await interaction.followup.send(f"✅ Pregame cancelled!", ephemeral=True)
+        await interaction.followup.send(f"? Pregame cancelled!", ephemeral=True)
 
 @bot.tree.command(name="deletematch", description="[ADMIN] Delete a match record from history")
 @has_admin_role()
@@ -615,7 +616,7 @@ async def delete_match(interaction: discord.Interaction, match_number: int, test
 
     # Check if file exists
     if not os.path.exists(history_file):
-        await interaction.followup.send(f"❌ No match history file found: {history_file}", ephemeral=True)
+        await interaction.followup.send(f"? No match history file found: {history_file}", ephemeral=True)
         return
 
     # Load history
@@ -623,7 +624,7 @@ async def delete_match(interaction: discord.Interaction, match_number: int, test
         with open(history_file, 'r') as f:
             history = json.load(f)
     except Exception as e:
-        await interaction.followup.send(f"❌ Error reading history file: {e}", ephemeral=True)
+        await interaction.followup.send(f"? Error reading history file: {e}", ephemeral=True)
         return
 
     # Find and remove the match
@@ -634,7 +635,7 @@ async def delete_match(interaction: discord.Interaction, match_number: int, test
     history["matches"] = [m for m in matches if m.get("match_id") != match_number]
 
     if len(history["matches"]) == original_count:
-        await interaction.followup.send(f"❌ {match_type}{match_number} not found in history!", ephemeral=True)
+        await interaction.followup.send(f"? {match_type}{match_number} not found in history!", ephemeral=True)
         return
 
     # Update counter
@@ -648,7 +649,7 @@ async def delete_match(interaction: discord.Interaction, match_number: int, test
         with open(history_file, 'w') as f:
             json.dump(history, f, indent=2)
     except Exception as e:
-        await interaction.followup.send(f"❌ Error saving history file: {e}", ephemeral=True)
+        await interaction.followup.send(f"? Error saving history file: {e}", ephemeral=True)
         return
 
     # Push to GitHub
@@ -658,14 +659,14 @@ async def delete_match(interaction: discord.Interaction, match_number: int, test
             github_webhook.update_testmatchhistory_on_github()
         else:
             github_webhook.update_matchhistory_on_github()
-        github_status = "✅ Pushed to GitHub"
+        github_status = "? Pushed to GitHub"
     except Exception as e:
-        github_status = f"⚠️ GitHub push failed: {e}"
+        github_status = f"?? GitHub push failed: {e}"
 
     log_action(f"Admin {interaction.user.name} deleted {match_type}{match_number} from history")
 
     await interaction.followup.send(
-        f"✅ **{match_type}{match_number} deleted from history**\n"
+        f"? **{match_type}{match_number} deleted from history**\n"
         f"• Remaining matches: {len(history['matches'])}\n"
         f"• {github_status}",
         ephemeral=True
@@ -692,14 +693,14 @@ async def correct_current(interaction: discord.Interaction, playlist: str, game_
     if playlist == "mlg_4v4":
         # Original MLG 4v4 queue
         if not queue_state.current_series:
-            await interaction.response.send_message("❌ No active MLG 4v4 match!", ephemeral=True)
+            await interaction.response.send_message("? No active MLG 4v4 match!", ephemeral=True)
             return
 
         series = queue_state.current_series
 
         if game_number < 1 or game_number > len(series.games):
             await interaction.response.send_message(
-                f"❌ Invalid game number! Must be between 1 and {len(series.games)}",
+                f"? Invalid game number! Must be between 1 and {len(series.games)}",
                 ephemeral=True
             )
             return
@@ -707,7 +708,7 @@ async def correct_current(interaction: discord.Interaction, playlist: str, game_
         winner_upper = winner.upper()
         if winner_upper not in ['RED', 'BLUE']:
             await interaction.response.send_message(
-                "❌ Winner must be 'RED' or 'BLUE'!",
+                "? Winner must be 'RED' or 'BLUE'!",
                 ephemeral=True
             )
             return
@@ -726,14 +727,14 @@ async def correct_current(interaction: discord.Interaction, playlist: str, game_
             ps = playlists.get_playlist_state(playlist)
 
             if not ps.current_match:
-                await interaction.response.send_message(f"❌ No active {ps.name} match!", ephemeral=True)
+                await interaction.response.send_message(f"? No active {ps.name} match!", ephemeral=True)
                 return
 
             match = ps.current_match
 
             if game_number < 1 or game_number > len(match.games):
                 await interaction.response.send_message(
-                    f"❌ Invalid game number! Must be between 1 and {len(match.games)}",
+                    f"? Invalid game number! Must be between 1 and {len(match.games)}",
                     ephemeral=True
                 )
                 return
@@ -746,7 +747,7 @@ async def correct_current(interaction: discord.Interaction, playlist: str, game_
                 winner_upper = 'TEAM2'
             else:
                 await interaction.response.send_message(
-                    "❌ Winner must be 'RED/BLUE', 'TEAM1/TEAM2', or 'P1/P2'!",
+                    "? Winner must be 'RED/BLUE', 'TEAM1/TEAM2', or 'P1/P2'!",
                     ephemeral=True
                 )
                 return
@@ -759,7 +760,7 @@ async def correct_current(interaction: discord.Interaction, playlist: str, game_
             await interaction.response.defer()
             await playlists.show_playlist_match_embed(interaction.channel, match)
         except Exception as e:
-            await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
+            await interaction.response.send_message(f"? Error: {e}", ephemeral=True)
 
 @bot.tree.command(name="bannedroles", description="[ADMIN] Set roles that cannot queue (comma separated)")
 @has_admin_role()
@@ -878,7 +879,7 @@ async def silent_rank_refresh(interaction: discord.Interaction):
     
     log_action(f"Admin {interaction.user.name} ran silent rank refresh: {refreshed} players updated, {reset_to_one} reset to Level 1")
     await interaction.followup.send(
-        f"✅ Silent rank refresh complete!\n"
+        f"? Silent rank refresh complete!\n"
         f"• **{refreshed}** players updated\n"
         f"• **{reset_to_one}** players set to Level 1 (no games)",
         ephemeral=True
@@ -926,7 +927,7 @@ async def setup_game_emojis(interaction: discord.Interaction):
         json.dump(game_emojis, f, indent=2)
     
     # Build response
-    response = f"✅ **Game Emojis Setup Complete!**\n\n"
+    response = f"? **Game Emojis Setup Complete!**\n\n"
     response += f"**Found:** {found_count}/40 emojis\n"
     response += f"**Saved to:** game_emojis.json\n\n"
     
@@ -936,7 +937,7 @@ async def setup_game_emojis(interaction: discord.Interaction):
         if len(missing) > 10:
             response += f"... and {len(missing) - 10} more"
     else:
-        response += "🎉 All 40 game emojis found!"
+        response += "?? All 40 game emojis found!"
     
     await interaction.followup.send(response, ephemeral=True)
     log_action(f"{interaction.user.display_name} ran game emoji setup - found {found_count}/40")
@@ -957,7 +958,7 @@ async def log_test_match(interaction: discord.Interaction):
     # Get 8 random members (exclude bots)
     all_members = [m for m in guild.members if not m.bot]
     if len(all_members) < 8:
-        await interaction.followup.send("❌ Not enough members in server (need 8)", ephemeral=True)
+        await interaction.followup.send("? Not enough members in server (need 8)", ephemeral=True)
         return
     
     random_players = random.sample(all_members, 8)
@@ -1068,10 +1069,10 @@ async def log_test_match(interaction: discord.Interaction):
     
     # Send summary
     await interaction.followup.send(
-        f"✅ **Test match logged to testmatchhistory.json**\n\n"
+        f"? **Test match logged to testmatchhistory.json**\n\n"
         f"**Teams:**\n"
-        f"🔴 Red Team (Avg MMR: {red_avg})\n"
-        f"🔵 Blue Team (Avg MMR: {blue_avg})\n\n"
+        f"?? Red Team (Avg MMR: {red_avg})\n"
+        f"?? Blue Team (Avg MMR: {blue_avg})\n\n"
         f"**Games:** {len(games)} total\n"
         f"**Final Score:** Red {red_wins} - {blue_wins} Blue\n"
         f"**Winner:** {overall_winner}\n\n"
@@ -1095,12 +1096,12 @@ async def test_matchmaking(interaction: discord.Interaction):
     
     # Check if there's already a match in progress
     if queue_state.current_series:
-        await interaction.followup.send("❌ A match is already in progress!", ephemeral=True)
+        await interaction.followup.send("? A match is already in progress!", ephemeral=True)
         return
     
     # Check if pregame is active
     if hasattr(queue_state, 'pregame_vc_id') and queue_state.pregame_vc_id:
-        await interaction.followup.send("❌ A pregame is already in progress!", ephemeral=True)
+        await interaction.followup.send("? A pregame is already in progress!", ephemeral=True)
         return
     
     # Get members from test voice channel
@@ -1108,7 +1109,7 @@ async def test_matchmaking(interaction: discord.Interaction):
     test_vc = guild.get_channel(TEST_VC_ID)
     
     if not test_vc:
-        await interaction.followup.send("❌ Test voice channel not found!", ephemeral=True)
+        await interaction.followup.send("? Test voice channel not found!", ephemeral=True)
         return
     
     # Get members in the voice channel (exclude bots)
@@ -1116,7 +1117,7 @@ async def test_matchmaking(interaction: discord.Interaction):
     
     if len(vc_members) < 2:
         await interaction.followup.send(
-            f"❌ Need at least 2 people in <#{TEST_VC_ID}> to start test match.\n"
+            f"? Need at least 2 people in <#{TEST_VC_ID}> to start test match.\n"
             f"Currently: {len(vc_members)} member(s)",
             ephemeral=True
         )
@@ -1133,7 +1134,7 @@ async def test_matchmaking(interaction: discord.Interaction):
     
     if not tester1_stats or 'mmr' not in tester1_stats:
         await interaction.followup.send(
-            f"❌ {tester1.mention} doesn't have MMR stats!\n"
+            f"? {tester1.mention} doesn't have MMR stats!\n"
             f"They need to be given an MMR before testing.",
             ephemeral=True
         )
@@ -1141,7 +1142,7 @@ async def test_matchmaking(interaction: discord.Interaction):
     
     if not tester2_stats or 'mmr' not in tester2_stats:
         await interaction.followup.send(
-            f"❌ {tester2.mention} doesn't have MMR stats!\n"
+            f"? {tester2.mention} doesn't have MMR stats!\n"
             f"They need to be given an MMR before testing.",
             ephemeral=True
         )
@@ -1165,7 +1166,7 @@ async def test_matchmaking(interaction: discord.Interaction):
     
     if len(members_with_mmr) < 6:
         await interaction.followup.send(
-            f"❌ Not enough members with MMR stats!\n"
+            f"? Not enough members with MMR stats!\n"
             f"Found: {len(members_with_mmr)} players with MMR\n"
             f"Need: 6 players for fillers\n\n"
             f"Use `/setmmr` to give players an MMR rating.",
@@ -1195,7 +1196,7 @@ async def test_matchmaking(interaction: discord.Interaction):
     
     # Send a followup to dismiss the "thinking" message (delete it immediately)
     try:
-        msg = await interaction.followup.send("✅", ephemeral=True)
+        msg = await interaction.followup.send("?", ephemeral=True)
         await msg.delete()
     except:
         pass
@@ -1215,18 +1216,18 @@ async def swap_players(
     from pregame import get_player_mmr
     
     if not queue_state.current_series:
-        await interaction.response.send_message("❌ No active series to swap players in!", ephemeral=True)
+        await interaction.response.send_message("? No active series to swap players in!", ephemeral=True)
         return
     
     series = queue_state.current_series
     
     # Verify players are on correct teams
     if red_player.id not in series.red_team:
-        await interaction.response.send_message(f"❌ {red_player.display_name} is not on Red team!", ephemeral=True)
+        await interaction.response.send_message(f"? {red_player.display_name} is not on Red team!", ephemeral=True)
         return
     
     if blue_player.id not in series.blue_team:
-        await interaction.response.send_message(f"❌ {blue_player.display_name} is not on Blue team!", ephemeral=True)
+        await interaction.response.send_message(f"? {blue_player.display_name} is not on Blue team!", ephemeral=True)
         return
     
     # Perform swap
@@ -1247,7 +1248,7 @@ async def swap_players(
         "timestamp": datetime.now().isoformat()
     })
     
-    log_action(f"Swap: {red_player.display_name} (RED→BLUE) ↔ {blue_player.display_name} (BLUE→RED)")
+    log_action(f"Swap: {red_player.display_name} (RED?BLUE) ? {blue_player.display_name} (BLUE?RED)")
     
     # Move players to new VCs if they're in voice and VCs exist
     guild = interaction.guild
@@ -1286,8 +1287,8 @@ async def swap_players(
             # Rename VCs with new MMR averages
             series_label = series.series_number
             try:
-                await red_vc.edit(name=f"🔴 Red {series_label} - {new_red_avg} MMR")
-                await blue_vc.edit(name=f"🔵 Blue {series_label} - {new_blue_avg} MMR")
+                await red_vc.edit(name=f"?? Red {series_label} - {new_red_avg} MMR")
+                await blue_vc.edit(name=f"?? Blue {series_label} - {new_blue_avg} MMR")
                 log_action(f"VCs renamed after swap - Red: {new_red_avg} MMR, Blue: {new_blue_avg} MMR")
             except Exception as e:
                 log_action(f"Failed to rename VCs: {e}")
@@ -1309,7 +1310,7 @@ async def swap_players(
         pass
     
     await interaction.response.send_message(
-        f"✅ Swapped **{red_player.display_name}** ↔ **{blue_player.display_name}**\n"
+        f"? Swapped **{red_player.display_name}** ? **{blue_player.display_name}**\n"
         f"Voice channels updated with new MMR averages.",
         ephemeral=True
     )
@@ -1332,19 +1333,19 @@ async def set_game_stats(
     
     # Check if there's an active series
     if not queue_state.current_series:
-        await interaction.response.send_message("❌ No active match!", ephemeral=True)
+        await interaction.response.send_message("? No active match!", ephemeral=True)
         return
     
     series = queue_state.current_series
     
     # Validate game number
     if game_number < 1:
-        await interaction.response.send_message("❌ Game number must be 1 or higher!", ephemeral=True)
+        await interaction.response.send_message("? Game number must be 1 or higher!", ephemeral=True)
         return
     
     if game_number > len(series.games):
         await interaction.response.send_message(
-            f"❌ Game {game_number} hasn't been played yet! Only {len(series.games)} game(s) completed.",
+            f"? Game {game_number} hasn't been played yet! Only {len(series.games)} game(s) completed.",
             ephemeral=True
         )
         return
@@ -1374,7 +1375,7 @@ async def set_game_stats(
         log_action(f"Failed to update general chat embed: {e}")
     
     await interaction.response.send_message(
-        f"✅ Set Game {game_number} stats: **{map_name}** - **{gametype}**",
+        f"? Set Game {game_number} stats: **{map_name}** - **{gametype}**",
         ephemeral=True
     )
 
@@ -1389,11 +1390,11 @@ async def link_alias(interaction: discord.Interaction, alias: str):
     alias = alias.strip()
     
     if not alias:
-        await interaction.response.send_message("❌ Please provide an alias.", ephemeral=True)
+        await interaction.response.send_message("? Please provide an alias.", ephemeral=True)
         return
     
     if len(alias) > 50:
-        await interaction.response.send_message("❌ Alias too long (max 50 characters).", ephemeral=True)
+        await interaction.response.send_message("? Alias too long (max 50 characters).", ephemeral=True)
         return
     
     players = twitch.load_players()
@@ -1410,7 +1411,7 @@ async def link_alias(interaction: discord.Interaction, alias: str):
     # Check if alias already linked to this user
     if alias.lower() in [a.lower() for a in players[user_id]["aliases"]]:
         await interaction.response.send_message(
-            f"❌ Alias **{alias}** is already linked to your account.",
+            f"? Alias **{alias}** is already linked to your account.",
             ephemeral=True
         )
         return
@@ -1421,7 +1422,7 @@ async def link_alias(interaction: discord.Interaction, alias: str):
             other_aliases = other_data.get("aliases", [])
             if alias.lower() in [a.lower() for a in other_aliases]:
                 await interaction.response.send_message(
-                    f"❌ Alias **{alias}** is already linked to another user.",
+                    f"? Alias **{alias}** is already linked to another user.",
                     ephemeral=True
                 )
                 return
@@ -1433,7 +1434,7 @@ async def link_alias(interaction: discord.Interaction, alias: str):
     # Show all aliases
     all_aliases = players[user_id]["aliases"]
     await interaction.response.send_message(
-        f"✅ Alias **{alias}** linked!\n"
+        f"? Alias **{alias}** linked!\n"
         f"Your aliases: {', '.join(all_aliases)}",
         ephemeral=True
     )
@@ -1450,7 +1451,7 @@ async def unlink_alias(interaction: discord.Interaction, alias: str):
     user_id = str(interaction.user.id)
     
     if user_id not in players or "aliases" not in players[user_id]:
-        await interaction.response.send_message("❌ You have no aliases linked.", ephemeral=True)
+        await interaction.response.send_message("? You have no aliases linked.", ephemeral=True)
         return
     
     # Find alias (case-insensitive)
@@ -1462,7 +1463,7 @@ async def unlink_alias(interaction: discord.Interaction, alias: str):
     
     if not found_alias:
         await interaction.response.send_message(
-            f"❌ Alias **{alias}** not found in your linked aliases.",
+            f"? Alias **{alias}** not found in your linked aliases.",
             ephemeral=True
         )
         return
@@ -1474,13 +1475,13 @@ async def unlink_alias(interaction: discord.Interaction, alias: str):
     remaining = players[user_id].get("aliases", [])
     if remaining:
         await interaction.response.send_message(
-            f"✅ Alias **{found_alias}** removed.\n"
+            f"? Alias **{found_alias}** removed.\n"
             f"Remaining aliases: {', '.join(remaining)}",
             ephemeral=True
         )
     else:
         await interaction.response.send_message(
-            f"✅ Alias **{found_alias}** removed. You have no more aliases.",
+            f"? Alias **{found_alias}** removed. You have no more aliases.",
             ephemeral=True
         )
     log_action(f"{interaction.user.name} unlinked alias: {found_alias}")
@@ -1541,7 +1542,7 @@ async def admin_unlink_alias(interaction: discord.Interaction, user: discord.Mem
     
     if user_id not in players or "aliases" not in players[user_id]:
         await interaction.response.send_message(
-            f"❌ {user.display_name} has no aliases linked.",
+            f"? {user.display_name} has no aliases linked.",
             ephemeral=True
         )
         return
@@ -1555,7 +1556,7 @@ async def admin_unlink_alias(interaction: discord.Interaction, user: discord.Mem
     
     if not found_alias:
         await interaction.response.send_message(
-            f"❌ Alias **{alias}** not found for {user.display_name}.",
+            f"? Alias **{alias}** not found for {user.display_name}.",
             ephemeral=True
         )
         return
@@ -1576,7 +1577,7 @@ async def test_matchmaking_red(interaction: discord.Interaction):
     
     # Check if there's already a match in progress
     if queue_state.current_series:
-        await interaction.followup.send("❌ A match is already in progress!", ephemeral=True)
+        await interaction.followup.send("? A match is already in progress!", ephemeral=True)
         return
     
     guild = interaction.guild
@@ -1584,7 +1585,7 @@ async def test_matchmaking_red(interaction: discord.Interaction):
     # Get 8 random members (exclude bots)
     all_members = [m for m in guild.members if not m.bot]
     if len(all_members) < 8:
-        await interaction.followup.send("❌ Not enough members in server for test (need 8)")
+        await interaction.followup.send("? Not enough members in server for test (need 8)")
         return
     
     random_players = random.sample(all_members, 8)
@@ -1633,7 +1634,7 @@ async def test_matchmaking_blue(interaction: discord.Interaction):
     
     # Check if there's already a match in progress
     if queue_state.current_series:
-        await interaction.followup.send("❌ A match is already in progress!", ephemeral=True)
+        await interaction.followup.send("? A match is already in progress!", ephemeral=True)
         return
     
     guild = interaction.guild
@@ -1641,7 +1642,7 @@ async def test_matchmaking_blue(interaction: discord.Interaction):
     # Get 8 random members (exclude bots)
     all_members = [m for m in guild.members if not m.bot]
     if len(all_members) < 8:
-        await interaction.followup.send("❌ Not enough members in server for test (need 8)")
+        await interaction.followup.send("? Not enough members in server for test (need 8)")
         return
     
     random_players = random.sample(all_members, 8)
@@ -1696,25 +1697,25 @@ async def help_command(interaction: discord.Interaction):
     
     # Public Commands
     embed.add_field(
-        name="🎮 Matchmaking",
+        name="?? Matchmaking",
         value="`/swap` `/stream`",
         inline=True
     )
     
     embed.add_field(
-        name="📺 Twitch",
+        name="?? Twitch",
         value="`/settwitch` `/removetwitch`\n`/mytwitch` `/checktwitch`",
         inline=True
     )
     
     embed.add_field(
-        name="🏷️ Aliases",
+        name="??? Aliases",
         value="`/linkalias` `/unlinkalias`\n`/myaliases` `/checkaliases`",
         inline=True
     )
     
     embed.add_field(
-        name="📊 Stats",
+        name="?? Stats",
         value="`/playerstats` `/leaderboard` `/verifystats`",
         inline=True
     )
@@ -1722,43 +1723,43 @@ async def help_command(interaction: discord.Interaction):
     # Admin Commands - only show to admins
     if is_admin:
         embed.add_field(
-            name="⚙️ Staff - Queue",
+            name="?? Staff - Queue",
             value="`/addplayer` `/removeplayer` `/resetqueue`\n`/pause` `/unpause` `/resetmatchmaking`",
             inline=True
         )
         
         embed.add_field(
-            name="⚙️ Staff - Match",
+            name="?? Staff - Match",
             value="`/cancelmatch` `/correctcurrent`\n`/setgamestats` `/adminarrange`\n`/adminguestmatch`\n`/manualmatchentry`",
             inline=True
         )
         
         embed.add_field(
-            name="⚙️ Staff - Guests",
+            name="?? Staff - Guests",
             value="`/guest` `/removeguest`",
             inline=True
         )
         
         embed.add_field(
-            name="⚙️ Staff - MAC Tracking",
+            name="?? Staff - MAC Tracking",
             value="`/linkmac` `/unlinkmac` `/checkmac`",
             inline=True
         )
         
         embed.add_field(
-            name="⚙️ Staff - Players",
+            name="?? Staff - Players",
             value="`/mmr` `/adminsettwitch`\n`/adminremovetwitch` `/adminunlinkalias`",
             inline=True
         )
         
         embed.add_field(
-            name="⚙️ Staff - Config",
+            name="?? Staff - Config",
             value="`/bannedroles` `/requiredroles`\n`/hideplayernames` `/showplayernames`\n`/silentrankrefresh`",
             inline=True
         )
         
         embed.add_field(
-            name="⚙️ Staff - Testing",
+            name="?? Staff - Testing",
             value="`/testmatchmaking`\n`/testmatchmakingred`\n`/testmatchmakingblue`",
             inline=True
         )
@@ -1782,7 +1783,7 @@ async def hide_player_names(interaction: discord.Interaction, playlist: str = "m
         queue_state.hide_player_names = True
         if queue_state.queue_channel:
             await update_queue_embed(queue_state.queue_channel)
-        await interaction.response.send_message("✅ MLG 4v4: Player names are now hidden.", ephemeral=True)
+        await interaction.response.send_message("? MLG 4v4: Player names are now hidden.", ephemeral=True)
     else:
         try:
             import playlists
@@ -1790,9 +1791,9 @@ async def hide_player_names(interaction: discord.Interaction, playlist: str = "m
             ps = playlists.get_playlist_state(playlist)
             if ps.queue_channel:
                 await playlists.update_playlist_embed(ps.queue_channel, ps)
-            await interaction.response.send_message(f"✅ {ps.name}: Player names are now hidden.", ephemeral=True)
+            await interaction.response.send_message(f"? {ps.name}: Player names are now hidden.", ephemeral=True)
         except Exception as e:
-            await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
+            await interaction.response.send_message(f"? Error: {e}", ephemeral=True)
 
 @bot.tree.command(name='showplayernames', description='[STAFF] Show real player names in queue')
 @has_staff_role()
@@ -1811,7 +1812,7 @@ async def show_player_names(interaction: discord.Interaction, playlist: str = "m
         queue_state.hide_player_names = False
         if queue_state.queue_channel:
             await update_queue_embed(queue_state.queue_channel)
-        await interaction.response.send_message("✅ MLG 4v4: Player names are now visible.", ephemeral=True)
+        await interaction.response.send_message("? MLG 4v4: Player names are now visible.", ephemeral=True)
     else:
         try:
             import playlists
@@ -1819,9 +1820,9 @@ async def show_player_names(interaction: discord.Interaction, playlist: str = "m
             ps = playlists.get_playlist_state(playlist)
             if ps.queue_channel:
                 await playlists.update_playlist_embed(ps.queue_channel, ps)
-            await interaction.response.send_message(f"✅ {ps.name}: Player names are now visible.", ephemeral=True)
+            await interaction.response.send_message(f"? {ps.name}: Player names are now visible.", ephemeral=True)
         except Exception as e:
-            await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
+            await interaction.response.send_message(f"? Error: {e}", ephemeral=True)
 
 @bot.tree.command(name='guest', description='[STAFF] Add a guest player attached to a host (MMR = half of host)')
 @app_commands.describe(
@@ -1839,7 +1840,7 @@ async def add_guest(
     # Check if host is in queue
     if host.id not in queue_state.queue:
         await interaction.response.send_message(
-            f"❌ {host.display_name} is not in the queue! They must join first.", 
+            f"? {host.display_name} is not in the queue! They must join first.", 
             ephemeral=True
         )
         return
@@ -1848,14 +1849,14 @@ async def add_guest(
     for guest_id, guest_info in queue_state.guests.items():
         if guest_info["host_id"] == host.id and guest_id in queue_state.queue:
             await interaction.response.send_message(
-                f"❌ {host.display_name} already has a guest in the queue!", 
+                f"? {host.display_name} already has a guest in the queue!", 
                 ephemeral=True
             )
             return
     
     # Check if queue is full
     if len(queue_state.queue) >= MAX_QUEUE_SIZE:
-        await interaction.response.send_message("❌ Queue is already full!", ephemeral=True)
+        await interaction.response.send_message("? Queue is already full!", ephemeral=True)
         return
     
     # Get host's MMR and calculate guest MMR as HALF
@@ -1885,7 +1886,7 @@ async def add_guest(
     log_action(f"Guest added: {display_name} (MMR: {guest_mmr}, half of {host.display_name}'s {host_mmr})")
     
     await interaction.response.send_message(
-        f"✅ Added **{display_name}** to queue\n"
+        f"? Added **{display_name}** to queue\n"
         f"**MMR:** {guest_mmr} (half of {host.display_name}'s {host_mmr})\n"
         f"They will always be on the same team as {host.mention}",
         ephemeral=True
@@ -1907,7 +1908,7 @@ async def remove_guest(interaction: discord.Interaction, host: discord.Member):
     
     if not guest_to_remove:
         await interaction.response.send_message(
-            f"❌ {host.display_name} doesn't have a guest in the queue!", 
+            f"? {host.display_name} doesn't have a guest in the queue!", 
             ephemeral=True
         )
         return
@@ -1926,7 +1927,7 @@ async def remove_guest(interaction: discord.Interaction, host: discord.Member):
     
     log_action(f"Guest removed: {guest_name}")
     
-    await interaction.response.send_message(f"✅ Removed **{guest_name}** from queue", ephemeral=True)
+    await interaction.response.send_message(f"? Removed **{guest_name}** from queue", ephemeral=True)
 
 @bot.tree.command(name='linkmac', description='[STAFF] Link a player to their MAC address for stat tracking')
 @app_commands.describe(
@@ -1973,7 +1974,7 @@ async def link_mac(interaction: discord.Interaction, player: discord.Member, mac
                 other_member = interaction.guild.get_member(int(other_id))
                 other_name = other_member.display_name if other_member else f"User {other_id}"
                 await interaction.response.send_message(
-                    f"⚠️ This MAC address is already linked to **{other_name}**!\n"
+                    f"?? This MAC address is already linked to **{other_name}**!\n"
                     f"Use `/unlinkmac` on them first if you want to reassign it.",
                     ephemeral=True
                 )
@@ -1986,7 +1987,7 @@ async def link_mac(interaction: discord.Interaction, player: discord.Member, mac
     # Check if already linked to this player
     if clean_mac in players[user_id]["mac_addresses"]:
         await interaction.response.send_message(
-            f"ℹ️ MAC address `{clean_mac}` is already linked to **{player.display_name}**",
+            f"?? MAC address `{clean_mac}` is already linked to **{player.display_name}**",
             ephemeral=True
         )
         return
@@ -2002,7 +2003,7 @@ async def link_mac(interaction: discord.Interaction, player: discord.Member, mac
     log_action(f"MAC linked: {player.display_name} -> {clean_mac}")
     
     await interaction.response.send_message(
-        f"✅ Linked MAC address to **{player.display_name}**\n"
+        f"? Linked MAC address to **{player.display_name}**\n"
         f"**MAC:** `{clean_mac}`\n"
         f"**Total MACs linked:** {mac_count}",
         ephemeral=True
@@ -2022,7 +2023,7 @@ async def unlink_mac(interaction: discord.Interaction, player: discord.Member, m
     
     players_file = "players.json"
     if not os.path.exists(players_file):
-        await interaction.response.send_message("❌ No player data found!", ephemeral=True)
+        await interaction.response.send_message("? No player data found!", ephemeral=True)
         return
     
     with open(players_file, 'r') as f:
@@ -2032,14 +2033,14 @@ async def unlink_mac(interaction: discord.Interaction, player: discord.Member, m
     
     if user_id not in players or "mac_addresses" not in players[user_id]:
         await interaction.response.send_message(
-            f"❌ **{player.display_name}** has no MAC addresses linked!",
+            f"? **{player.display_name}** has no MAC addresses linked!",
             ephemeral=True
         )
         return
     
     if not players[user_id]["mac_addresses"]:
         await interaction.response.send_message(
-            f"❌ **{player.display_name}** has no MAC addresses linked!",
+            f"? **{player.display_name}** has no MAC addresses linked!",
             ephemeral=True
         )
         return
@@ -2055,7 +2056,7 @@ async def unlink_mac(interaction: discord.Interaction, player: discord.Member, m
         log_action(f"All MACs unlinked from {player.display_name} ({count} removed)")
         
         await interaction.response.send_message(
-            f"✅ Removed all **{count}** MAC addresses from **{player.display_name}**",
+            f"? Removed all **{count}** MAC addresses from **{player.display_name}**",
             ephemeral=True
         )
         return
@@ -2067,7 +2068,7 @@ async def unlink_mac(interaction: discord.Interaction, player: discord.Member, m
     
     if clean_mac not in players[user_id]["mac_addresses"]:
         await interaction.response.send_message(
-            f"❌ MAC address `{clean_mac}` is not linked to **{player.display_name}**!",
+            f"? MAC address `{clean_mac}` is not linked to **{player.display_name}**!",
             ephemeral=True
         )
         return
@@ -2081,7 +2082,7 @@ async def unlink_mac(interaction: discord.Interaction, player: discord.Member, m
     log_action(f"MAC unlinked from {player.display_name}: {clean_mac}")
     
     await interaction.response.send_message(
-        f"✅ Removed MAC `{clean_mac}` from **{player.display_name}**\n"
+        f"? Removed MAC `{clean_mac}` from **{player.display_name}**\n"
         f"**Remaining MACs:** {remaining}",
         ephemeral=True
     )
@@ -2096,7 +2097,7 @@ async def check_mac(interaction: discord.Interaction, player: discord.Member):
     
     players_file = "players.json"
     if not os.path.exists(players_file):
-        await interaction.response.send_message("❌ No player data found!", ephemeral=True)
+        await interaction.response.send_message("? No player data found!", ephemeral=True)
         return
     
     with open(players_file, 'r') as f:
@@ -2106,7 +2107,7 @@ async def check_mac(interaction: discord.Interaction, player: discord.Member):
     
     if user_id not in players or "mac_addresses" not in players[user_id]:
         await interaction.response.send_message(
-            f"ℹ️ **{player.display_name}** has no MAC addresses linked.",
+            f"?? **{player.display_name}** has no MAC addresses linked.",
             ephemeral=True
         )
         return
@@ -2115,7 +2116,7 @@ async def check_mac(interaction: discord.Interaction, player: discord.Member):
     
     if not macs:
         await interaction.response.send_message(
-            f"ℹ️ **{player.display_name}** has no MAC addresses linked.",
+            f"?? **{player.display_name}** has no MAC addresses linked.",
             ephemeral=True
         )
         return
@@ -2148,7 +2149,7 @@ async def reset_matchmaking(interaction: discord.Interaction):
     log_action(f"Queue reset by {interaction.user.display_name} - {old_count} players removed")
     
     await interaction.response.send_message(
-        f"✅ Matchmaking queue has been reset! ({old_count} players removed)",
+        f"? Matchmaking queue has been reset! ({old_count} players removed)",
         ephemeral=True
     )
 
@@ -2197,11 +2198,11 @@ async def pause_matchmaking(interaction: discord.Interaction, playlist: str = "a
     if paused_list:
         log_action(f"Paused by {interaction.user.display_name}: {', '.join(paused_list)}")
         await interaction.response.send_message(
-            f"⏸️ **PAUSED:** {', '.join(paused_list)}\n\nUse `/unpause` to resume.",
+            f"?? **PAUSED:** {', '.join(paused_list)}\n\nUse `/unpause` to resume.",
             ephemeral=True
         )
     else:
-        await interaction.response.send_message("⏸️ Selected queue(s) already paused!", ephemeral=True)
+        await interaction.response.send_message("?? Selected queue(s) already paused!", ephemeral=True)
 
 @bot.tree.command(name='unpause', description='[STAFF] Unpause a matchmaking queue - allows players to join again')
 @has_staff_role()
@@ -2248,11 +2249,11 @@ async def unpause_matchmaking(interaction: discord.Interaction, playlist: str = 
     if unpaused_list:
         log_action(f"Unpaused by {interaction.user.display_name}: {', '.join(unpaused_list)}")
         await interaction.response.send_message(
-            f"▶️ **RESUMED:** {', '.join(unpaused_list)}\n\nPlayers can join again!",
+            f"?? **RESUMED:** {', '.join(unpaused_list)}\n\nPlayers can join again!",
             ephemeral=True
         )
     else:
-        await interaction.response.send_message("▶️ Selected queue(s) not paused!", ephemeral=True)
+        await interaction.response.send_message("?? Selected queue(s) not paused!", ephemeral=True)
 
 @bot.tree.command(name='clearqueue', description='[STAFF] Clear a matchmaking queue')
 @has_staff_role()
@@ -2303,11 +2304,11 @@ async def clear_queue(interaction: discord.Interaction, playlist: str = "all"):
     if cleared_info:
         log_action(f"Cleared by {interaction.user.display_name}: {', '.join(cleared_info)}")
         await interaction.response.send_message(
-            f"✅ **Cleared:**\n" + "\n".join(f"• {info}" for info in cleared_info),
+            f"? **Cleared:**\n" + "\n".join(f"• {info}" for info in cleared_info),
             ephemeral=True
         )
     else:
-        await interaction.response.send_message("❌ No players in the selected queue(s)!", ephemeral=True)
+        await interaction.response.send_message("? No players in the selected queue(s)!", ephemeral=True)
 
 @bot.tree.command(name='adminarrange', description='[STAFF] Manually set teams and start a match')
 @app_commands.describe(
@@ -2338,7 +2339,7 @@ async def admin_set_teams(
     
     # Check for active series
     if queue_state.current_series:
-        await interaction.response.send_message("❌ There's already an active match! End it first.", ephemeral=True)
+        await interaction.response.send_message("? There's already an active match! End it first.", ephemeral=True)
         return
     
     # Build teams
@@ -2348,7 +2349,7 @@ async def admin_set_teams(
     # Check for duplicates
     all_players = red_team + blue_team
     if len(all_players) != len(set(all_players)):
-        await interaction.response.send_message("❌ Duplicate players detected! Each player can only be on one team.", ephemeral=True)
+        await interaction.response.send_message("? Duplicate players detected! Each player can only be on one team.", ephemeral=True)
         return
     
     # Clear the queue since we're manually setting teams
@@ -2360,9 +2361,9 @@ async def admin_set_teams(
     log_action(f"Blue: {[m.display_name for m in [blue1, blue2, blue3, blue4]]}")
     
     await interaction.response.send_message(
-        f"✅ **Teams Set!**\n\n"
-        f"🔴 **Red Team:** {red1.mention}, {red2.mention}, {red3.mention}, {red4.mention}\n"
-        f"🔵 **Blue Team:** {blue1.mention}, {blue2.mention}, {blue3.mention}, {blue4.mention}\n\n"
+        f"? **Teams Set!**\n\n"
+        f"?? **Red Team:** {red1.mention}, {red2.mention}, {red3.mention}, {red4.mention}\n"
+        f"?? **Blue Team:** {blue1.mention}, {blue2.mention}, {blue3.mention}, {blue4.mention}\n\n"
         f"Starting match...",
         ephemeral=True
     )
@@ -2404,7 +2405,7 @@ async def admin_guest_match(
     
     # Check for active series
     if queue_state.current_series:
-        await interaction.response.send_message("❌ There's already an active match! End it first.", ephemeral=True)
+        await interaction.response.send_message("? There's already an active match! End it first.", ephemeral=True)
         return
     
     async def parse_player(player_str: str, guild: discord.Guild) -> tuple:
@@ -2497,7 +2498,7 @@ async def admin_guest_match(
     
     if errors:
         await interaction.response.send_message(
-            f"❌ **Errors parsing players:**\n" + "\n".join(errors) +
+            f"? **Errors parsing players:**\n" + "\n".join(errors) +
             "\n\n**Format:** Use Discord username OR `guest:HostName:GuestName:MMR`",
             ephemeral=True
         )
@@ -2506,7 +2507,7 @@ async def admin_guest_match(
     # Check for duplicates
     all_players = red_team + blue_team
     if len(all_players) != len(set(all_players)):
-        await interaction.response.send_message("❌ Duplicate players detected!", ephemeral=True)
+        await interaction.response.send_message("? Duplicate players detected!", ephemeral=True)
         return
     
     # Clear the queue
@@ -2518,9 +2519,9 @@ async def admin_guest_match(
     log_action(f"Blue: {blue_names}")
     
     await interaction.response.send_message(
-        f"✅ **Teams Set!**\n\n"
-        f"🔴 **Red Team:** {', '.join(red_names)}\n"
-        f"🔵 **Blue Team:** {', '.join(blue_names)}\n\n"
+        f"? **Teams Set!**\n\n"
+        f"?? **Red Team:** {', '.join(red_names)}\n"
+        f"?? **Blue Team:** {', '.join(blue_names)}\n\n"
         f"Starting match...",
         ephemeral=True
     )
@@ -2572,7 +2573,7 @@ class AddGameModal(discord.ui.Modal, title="Add Game Result"):
         
         if winner_input not in ['RED', 'BLUE']:
             await interaction.response.send_message(
-                "❌ Winner must be RED or BLUE!",
+                "? Winner must be RED or BLUE!",
                 ephemeral=True
             )
             return
@@ -2591,11 +2592,11 @@ class AddGameModal(discord.ui.Modal, title="Add Game Result"):
         # Show current games and prompt for more
         games_summary = ""
         for i, game in enumerate(self.match_data["games"], 1):
-            emoji = "🔴" if game["winner"] == "RED" else "🔵"
+            emoji = "??" if game["winner"] == "RED" else "??"
             games_summary += f"{emoji} Game {i}: {game['winner']} - {game['map']} - {game['gametype']}\n"
         
         await interaction.response.send_message(
-            f"✅ **Game {game_count} Added!**\n\n"
+            f"? **Game {game_count} Added!**\n\n"
             f"**Current Score:** Red {red_wins} - {blue_wins} Blue\n\n"
             f"**Games:**\n{games_summary}\n"
             f"Use the buttons below to add more games or submit the match.",
@@ -2614,7 +2615,7 @@ class ManualMatchView(discord.ui.View):
     @discord.ui.button(label="Add Another Game", style=discord.ButtonStyle.primary)
     async def add_game(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("❌ This isn't your match entry!", ephemeral=True)
+            await interaction.response.send_message("? This isn't your match entry!", ephemeral=True)
             return
         
         game_num = len(self.match_data["games"]) + 1
@@ -2623,11 +2624,11 @@ class ManualMatchView(discord.ui.View):
     @discord.ui.button(label="Submit Match", style=discord.ButtonStyle.success)
     async def submit_match(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("❌ This isn't your match entry!", ephemeral=True)
+            await interaction.response.send_message("? This isn't your match entry!", ephemeral=True)
             return
         
         if not self.match_data["games"]:
-            await interaction.response.send_message("❌ You must add at least one game!", ephemeral=True)
+            await interaction.response.send_message("? You must add at least one game!", ephemeral=True)
             return
         
         await submit_manual_match(interaction, self.match_data)
@@ -2635,10 +2636,10 @@ class ManualMatchView(discord.ui.View):
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.danger)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("❌ This isn't your match entry!", ephemeral=True)
+            await interaction.response.send_message("? This isn't your match entry!", ephemeral=True)
             return
         
-        await interaction.response.send_message("❌ Match entry cancelled.", ephemeral=True)
+        await interaction.response.send_message("? Match entry cancelled.", ephemeral=True)
         self.stop()
 
 async def submit_manual_match(interaction: discord.Interaction, match_data: dict):
@@ -2729,7 +2730,7 @@ async def submit_manual_match(interaction: discord.Interaction, match_data: dict
     log_action(f"Result: {winner} ({red_wins}-{blue_wins})")
     
     await interaction.response.send_message(
-        f"✅ **Match #{match_number} submitted!**\n\n"
+        f"? **Match #{match_number} submitted!**\n\n"
         f"**Winner:** {winner}\n"
         f"**Score:** Red {red_wins} - {blue_wins} Blue\n"
         f"**Games:** {len(games)}\n\n"
@@ -2767,7 +2768,7 @@ async def manual_match_entry(
     
     # Validate match number
     if match_number < 1:
-        await interaction.response.send_message("❌ Match number must be 1 or higher!", ephemeral=True)
+        await interaction.response.send_message("? Match number must be 1 or higher!", ephemeral=True)
         return
     
     # Check for duplicate players
@@ -2775,7 +2776,7 @@ async def manual_match_entry(
     player_ids = [p.id for p in all_players]
     
     if len(player_ids) != len(set(player_ids)):
-        await interaction.response.send_message("❌ Duplicate players detected!", ephemeral=True)
+        await interaction.response.send_message("? Duplicate players detected!", ephemeral=True)
         return
     
     red_team = [red1.id, red2.id, red3.id, red4.id]
@@ -2796,9 +2797,9 @@ async def manual_match_entry(
     
     # Send initial message with Add Game button
     await interaction.response.send_message(
-        f"📝 **Manual Match Entry - Match #{match_number}**\n\n"
-        f"🔴 **Red Team:** {', '.join(red_names)}\n"
-        f"🔵 **Blue Team:** {', '.join(blue_names)}\n\n"
+        f"?? **Manual Match Entry - Match #{match_number}**\n\n"
+        f"?? **Red Team:** {', '.join(red_names)}\n"
+        f"?? **Blue Team:** {', '.join(blue_names)}\n\n"
         f"Click **Add Game** to enter each game's result.\n"
         f"When done, click **Submit Match** to post the results.",
         view=ManualMatchView(match_data, interaction.user.id),
