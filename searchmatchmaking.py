@@ -1,7 +1,7 @@
 # searchmatchmaking.py - MLG 4v4 Queue Management System
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.4.3"
+MODULE_VERSION = "1.4.4"
 
 import discord
 from discord.ui import View, Button
@@ -792,18 +792,22 @@ async def create_queue_embed(channel: discord.TextChannel):
     # Store channel for auto-updates
     queue_state.queue_channel = channel
 
+    players_needed = MAX_QUEUE_SIZE
     embed = discord.Embed(
         title="MLG 4v4 Matchmaking",
-        description="Click **Join Matchmaking** to start searching for a Match!\n*Classic 4v4 with team selection vote*",
+        description=f"We have **0** players searching **MLG 4v4**, we need **{players_needed}** more for a game!\n\nClick **Join Matchmaking** to queue up!",
         color=discord.Color.blue()
     )
+
+    # Set header image
+    embed.set_image(url="https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/MessagefromCarnagereport.png")
 
     embed.add_field(
         name=f"Players in Queue (0/{MAX_QUEUE_SIZE})",
         value="*No players yet*",
         inline=False
     )
-    
+
     view = QueueView()
     
     # Try to find existing queue message
@@ -879,18 +883,24 @@ async def update_queue_embed(channel: discord.TextChannel):
         player_mentions = "*No players yet*"
     
     # Create embed
+    player_count = len(queue_state.queue)
+    players_needed = MAX_QUEUE_SIZE - player_count
+
     embed = discord.Embed(
         title="MLG 4v4 Matchmaking",
-        description="Click **Join Matchmaking** to start searching for a Match!\n*Classic 4v4 with team selection vote*",
+        description=f"We have **{player_count}** players searching **MLG 4v4**, we need **{players_needed}** more for a game!\n\nClick **Join Matchmaking** to queue up!",
         color=discord.Color.blue()
     )
 
+    # Set header image
+    embed.set_image(url="https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/MessagefromCarnagereport.png")
+
     embed.add_field(
-        name=f"Players in Queue ({len(queue_state.queue)}/{MAX_QUEUE_SIZE})",
+        name=f"Players in Queue ({player_count}/{MAX_QUEUE_SIZE})",
         value=player_mentions,
         inline=False
     )
-    
+
     # Add recent action - only show leaves (not joins)
     if queue_state.recent_action:
         action = queue_state.recent_action
@@ -908,11 +918,6 @@ async def update_queue_embed(channel: discord.TextChannel):
                     value=f"**{action['name']}** left matchmaking",
                     inline=False
                 )
-    
-    # Add queue progress image (shows X/8 players visually)
-    player_count = len(queue_state.queue)
-    if player_count > 0:
-        embed.set_image(url=get_queue_progress_image(player_count))
     
     view = QueueView()
     

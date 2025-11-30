@@ -7,7 +7,7 @@ Import this module in bot.py with:
     await bot.load_extension('STATSRANKS')
 """
 
-MODULE_VERSION = "1.2.1"
+MODULE_VERSION = "1.2.2"
 
 import discord
 from discord import app_commands
@@ -583,34 +583,61 @@ async def refresh_all_ranks(guild: discord.Guild, player_ids: List[int], send_dm
     """Refresh rank roles for all players in a match - always recalculates highest_rank"""
     from searchmatchmaking import queue_state
 
+    # Load stats once
+    stats = load_json_file(RANKSTATS_FILE)
+    updated = False
+
     for user_id in player_ids:
         if user_id in queue_state.guests:
             continue  # Skip guests
-        player_stats = get_player_stats(user_id)
+
+        user_key = str(user_id)
+        player_stats = stats.get(user_key)
+
+        if not player_stats:
+            continue  # Skip if no stats
+
         # Always recalculate highest rank to ensure accuracy
         highest = calculate_highest_rank(player_stats)
+
         # Update stored highest_rank
-        stats = load_json_file(RANKSTATS_FILE)
-        user_key = str(user_id)
-        if user_key in stats:
+        if stats[user_key].get("highest_rank") != highest:
             stats[user_key]["highest_rank"] = highest
-            save_json_file(RANKSTATS_FILE, stats, skip_github=True)
+            updated = True
+
         await update_player_rank_role(guild, user_id, highest, send_dm=send_dm)
+
+    # Save once at the end if anything changed
+    if updated:
+        save_json_file(RANKSTATS_FILE, stats, skip_github=True)
 
 
 async def refresh_playlist_ranks(guild: discord.Guild, player_ids: List[int], playlist_type: str, send_dm: bool = True):
     """Refresh rank roles for players after a playlist match - recalculates and saves highest_rank"""
+    # Load stats once
+    stats = load_json_file(RANKSTATS_FILE)
+    updated = False
+
     for user_id in player_ids:
-        player_stats = get_player_stats(user_id)
+        user_key = str(user_id)
+        player_stats = stats.get(user_key)
+
+        if not player_stats:
+            continue  # Skip if no stats
+
         # Recalculate highest rank
         highest = calculate_highest_rank(player_stats)
+
         # Update stored highest_rank
-        stats = load_json_file(RANKSTATS_FILE)
-        user_key = str(user_id)
-        if user_key in stats:
+        if stats[user_key].get("highest_rank") != highest:
             stats[user_key]["highest_rank"] = highest
-            save_json_file(RANKSTATS_FILE, stats, skip_github=True)
+            updated = True
+
         await update_player_rank_role(guild, user_id, highest, send_dm=send_dm)
+
+    # Save once at the end if anything changed
+    if updated:
+        save_json_file(RANKSTATS_FILE, stats, skip_github=True)
 
 def get_all_players_sorted(sort_by: str = "rank") -> List[Tuple[str, dict]]:
     """Get all players sorted by specified criteria"""
