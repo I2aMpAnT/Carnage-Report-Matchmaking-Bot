@@ -19,9 +19,9 @@ MATCHMAKING_IMAGE_BASE = "https://raw.githubusercontent.com/I2aMpAnT/H2CarnageRe
 QUEUE_CHANNEL_ID = None
 
 def get_queue_progress_image(player_count: int) -> str:
-    """Get the queue progress image URL for current player count"""
+    """Get the queue progress image URL for current player count, or None if empty"""
     if player_count < 1:
-        return f"{MATCHMAKING_IMAGE_BASE}/1outof8.png"  # Show empty/1 for 0 players
+        return None  # No image for empty queue
     if player_count > 8:
         player_count = 8
     return f"{MATCHMAKING_IMAGE_BASE}/{player_count}outof8.png"
@@ -599,7 +599,9 @@ class QueueView(View):
 
         # Simple embed with just the progress image - no redundant text
         embed = discord.Embed(color=discord.Color.green())
-        embed.set_image(url=get_queue_progress_image(current_count))
+        progress_image = get_queue_progress_image(current_count)
+        if progress_image:
+            embed.set_image(url=progress_image)
 
         # Create view with join button
         view = PingJoinView()
@@ -774,7 +776,9 @@ async def update_ping_message(guild: discord.Guild):
     
     # Update the message with just the progress image
     embed = discord.Embed(color=discord.Color.green())
-    embed.set_image(url=get_queue_progress_image(current_count))
+    progress_image = get_queue_progress_image(current_count)
+    if progress_image:
+        embed.set_image(url=progress_image)
 
     try:
         await queue_state.ping_message.edit(embed=embed)
@@ -807,7 +811,7 @@ async def create_queue_embed(channel: discord.TextChannel):
         value="*No players yet*",
         inline=False
     )
-    embed.set_image(url=get_queue_progress_image(0))
+    # No progress image for empty queue
 
     view = QueueView()
 
@@ -933,8 +937,10 @@ async def update_queue_embed(channel: discord.TextChannel):
                     inline=False
                 )
 
-    # Progress image at the bottom
-    embed.set_image(url=get_queue_progress_image(player_count))
+    # Progress image at the bottom (only if players in queue)
+    progress_image = get_queue_progress_image(player_count)
+    if progress_image:
+        embed.set_image(url=progress_image)
 
     view = QueueView()
 
