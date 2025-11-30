@@ -1,7 +1,7 @@
 # searchmatchmaking.py - MLG 4v4 Queue Management System
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.4.9"
+MODULE_VERSION = "1.5.0"
 
 import discord
 from discord.ui import View, Button
@@ -797,24 +797,17 @@ async def create_queue_embed(channel: discord.TextChannel):
     # Store channel for auto-updates
     queue_state.queue_channel = channel
 
-    players_needed = MAX_QUEUE_SIZE
-
-    # Header embed with banner image
-    header_embed = discord.Embed(color=discord.Color.blue())
-    header_embed.set_image(url="https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/MessagefromCarnagereport.png")
-
-    # Main embed with queue info and progress image
-    main_embed = discord.Embed(
+    embed = discord.Embed(
         title="MLG 4v4 Matchmaking",
         description="Click **Join Matchmaking** to start searching for a Match!\n*Classic 4v4 with team selection vote*",
         color=discord.Color.blue()
     )
-    main_embed.add_field(
+    embed.add_field(
         name=f"Players in Queue (0/{MAX_QUEUE_SIZE})",
         value="*No players yet*",
         inline=False
     )
-    main_embed.set_image(url=get_queue_progress_image(0))
+    embed.set_image(url=get_queue_progress_image(0))
 
     view = QueueView()
 
@@ -838,7 +831,7 @@ async def create_queue_embed(channel: discord.TextChannel):
         if is_at_bottom:
             # Already at bottom - just edit in place
             try:
-                await queue_message.edit(embeds=[header_embed, main_embed], view=view)
+                await queue_message.edit(embed=embed, view=view)
                 # Start auto-update task if not already running
                 if queue_state.auto_update_task is None or queue_state.auto_update_task.done():
                     queue_state.auto_update_task = asyncio.create_task(auto_update_queue_times())
@@ -853,7 +846,7 @@ async def create_queue_embed(channel: discord.TextChannel):
             pass
 
     # Post new message at bottom
-    await channel.send(embeds=[header_embed, main_embed], view=view)
+    await channel.send(embed=embed, view=view)
 
     # Start auto-update task if not already running
     if queue_state.auto_update_task is None or queue_state.auto_update_task.done():
@@ -908,21 +901,15 @@ async def update_queue_embed(channel: discord.TextChannel):
     else:
         player_mentions = "*No players yet*"
     
-    # Create embeds
+    # Create embed
     player_count = len(queue_state.queue)
-    players_needed = MAX_QUEUE_SIZE - player_count
 
-    # Header embed with banner image
-    header_embed = discord.Embed(color=discord.Color.blue())
-    header_embed.set_image(url="https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/MessagefromCarnagereport.png")
-
-    # Main embed with queue info and progress image
-    main_embed = discord.Embed(
+    embed = discord.Embed(
         title="MLG 4v4 Matchmaking",
         description="Click **Join Matchmaking** to start searching for a Match!\n*Classic 4v4 with team selection vote*",
         color=discord.Color.blue()
     )
-    main_embed.add_field(
+    embed.add_field(
         name=f"Players in Queue ({player_count}/{MAX_QUEUE_SIZE})",
         value=player_mentions,
         inline=False
@@ -934,20 +921,20 @@ async def update_queue_embed(channel: discord.TextChannel):
         if action['type'] == 'leave':
             time_str = action.get('time_in_queue', '')
             if time_str:
-                main_embed.add_field(
+                embed.add_field(
                     name="Recent Activity",
                     value=f"**{action['name']}** left matchmaking (was in queue {time_str})",
                     inline=False
                 )
             else:
-                main_embed.add_field(
+                embed.add_field(
                     name="Recent Activity",
                     value=f"**{action['name']}** left matchmaking",
                     inline=False
                 )
 
     # Progress image at the bottom
-    main_embed.set_image(url=get_queue_progress_image(player_count))
+    embed.set_image(url=get_queue_progress_image(player_count))
 
     view = QueueView()
 
@@ -972,7 +959,7 @@ async def update_queue_embed(channel: discord.TextChannel):
         if is_at_bottom:
             # Already at bottom - just edit in place
             try:
-                await queue_message.edit(embeds=[header_embed, main_embed], view=view)
+                await queue_message.edit(embed=embed, view=view)
                 return
             except:
                 pass
@@ -983,4 +970,4 @@ async def update_queue_embed(channel: discord.TextChannel):
             pass
 
     # Post new message at bottom
-    await channel.send(embeds=[header_embed, main_embed], view=view)
+    await channel.send(embed=embed, view=view)
