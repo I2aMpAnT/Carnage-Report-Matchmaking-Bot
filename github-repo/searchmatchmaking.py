@@ -1,6 +1,6 @@
 # searchmatchmaking.py - Queue Management System
 
-MODULE_VERSION = "1.1.0"
+MODULE_VERSION = "1.1.1"
 
 import discord
 from discord.ui import View, Button
@@ -307,26 +307,17 @@ class QueueView(View):
                 await queue_state.ping_message.delete()
             except:
                 pass
-        
-        # Create single combined embed for cleaner look
+
+        # Create single embed with just the progress image (image already contains player count info)
         current_count = len(queue_state.queue)
-        needed = MAX_QUEUE_SIZE - current_count
-        
-        main_embed = discord.Embed(
-            title="Message To All Friends:",
-            description=f"We have **{current_count}** players searching in Matchmaking, need **{needed}** more to start a Match!",
-            color=discord.Color.blue()
-        )
-        
-        # Set header as thumbnail for continuous look
-        main_embed.set_thumbnail(url=HEADER_IMAGE_URL)
-        
-        # Add queue progress image as main image
-        main_embed.set_image(url=get_queue_progress_image(current_count))
-        
+
+        # Simple embed with just the progress image - no redundant text
+        embed = discord.Embed(color=discord.Color.green())
+        embed.set_image(url=get_queue_progress_image(current_count))
+
         # Create view with join button
         view = PingJoinView()
-        
+
         # Send @here first, then delete it (pings but disappears)
         here_msg = await general_channel.send("@here")
         await asyncio.sleep(0.1)
@@ -334,9 +325,9 @@ class QueueView(View):
             await here_msg.delete()
         except:
             pass
-        
-        # Send single embed
-        queue_state.ping_message = await general_channel.send(embed=main_embed, view=view)
+
+        # Send single embed with just the image
+        queue_state.ping_message = await general_channel.send(embed=embed, view=view)
         
         log_action(f"{interaction.user.display_name} pinged general chat for queue ({current_count}/{MAX_QUEUE_SIZE})")
 
@@ -493,19 +484,12 @@ async def update_ping_message(guild: discord.Guild):
             pass
         return
     
-    # Update the message with single combined embed
-    needed = MAX_QUEUE_SIZE - current_count
-    
-    main_embed = discord.Embed(
-        title="Message To All Friends:",
-        description=f"We have **{current_count}** players searching in Matchmaking, need **{needed}** more to start a Match!",
-        color=discord.Color.green()
-    )
-    main_embed.set_thumbnail(url=HEADER_IMAGE_URL)
-    main_embed.set_image(url=get_queue_progress_image(current_count))
-    
+    # Update the message with just the progress image
+    embed = discord.Embed(color=discord.Color.green())
+    embed.set_image(url=get_queue_progress_image(current_count))
+
     try:
-        await queue_state.ping_message.edit(embed=main_embed)
+        await queue_state.ping_message.edit(embed=embed)
     except:
         pass
 
