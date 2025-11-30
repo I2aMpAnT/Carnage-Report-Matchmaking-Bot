@@ -1,6 +1,7 @@
 # searchmatchmaking.py - MLG 4v4 Queue Management System
+# !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.3.0"
+MODULE_VERSION = "1.4.1"
 
 import discord
 from discord.ui import View, Button
@@ -8,8 +9,8 @@ from typing import List, Optional
 from datetime import datetime, timedelta
 import asyncio
 
-# Header image for embeds and DMs
-HEADER_IMAGE_URL = "https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/MessagefromCarnageReportHEADER.png"
+# Header image for embeds and DMs (clean logo without text)
+HEADER_IMAGE_URL = "https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/H2CRFinal.png"
 
 # Matchmaking progress images (1-8 players)
 MATCHMAKING_IMAGE_BASE = "https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/assets/matchmaking"
@@ -589,22 +590,22 @@ class QueueView(View):
         # Create single combined embed for cleaner look
         current_count = len(queue_state.queue)
         needed = MAX_QUEUE_SIZE - current_count
-        
-        main_embed = discord.Embed(
-            title="Message To All Friends:",
-            description=f"We have **{current_count}** players searching in Matchmaking, need **{needed}** more to start a Match!",
-            color=discord.Color.blue()
-        )
 
-        # Set header at top using author
-        main_embed.set_author(name="Message From Carnage Report", icon_url=HEADER_IMAGE_URL)
-        
-        # Add queue progress image as main image
-        main_embed.set_image(url=get_queue_progress_image(current_count))
-        
+        # Header embed with full-width image at top
+        header_embed = discord.Embed(color=discord.Color.green())
+        header_embed.set_image(url=HEADER_IMAGE_URL)
+
+        # Content embed with progress image at bottom
+        content_embed = discord.Embed(
+            title="MLG 4v4 - Players Needed!",
+            description=f"We have **{current_count}/{MAX_QUEUE_SIZE}** players searching.\nNeed **{needed}** more to start!",
+            color=discord.Color.green()
+        )
+        content_embed.set_image(url=get_queue_progress_image(current_count))
+
         # Create view with join button
         view = PingJoinView()
-        
+
         # Send @here first, then delete it (pings but disappears)
         here_msg = await general_channel.send("@here")
         await asyncio.sleep(0.1)
@@ -612,9 +613,9 @@ class QueueView(View):
             await here_msg.delete()
         except:
             pass
-        
-        # Send single embed
-        queue_state.ping_message = await general_channel.send(embed=main_embed, view=view)
+
+        # Send both embeds
+        queue_state.ping_message = await general_channel.send(embeds=[header_embed, content_embed], view=view)
         
         log_action(f"{interaction.user.display_name} pinged general chat for queue ({current_count}/{MAX_QUEUE_SIZE})")
 
@@ -771,19 +772,23 @@ async def update_ping_message(guild: discord.Guild):
             pass
         return
     
-    # Update the message with single combined embed
+    # Update the message with two embeds
     needed = MAX_QUEUE_SIZE - current_count
-    
-    main_embed = discord.Embed(
-        title="Message To All Friends:",
-        description=f"We have **{current_count}** players searching in Matchmaking, need **{needed}** more to start a Match!",
+
+    # Header embed with full-width image at top
+    header_embed = discord.Embed(color=discord.Color.green())
+    header_embed.set_image(url=HEADER_IMAGE_URL)
+
+    # Content embed with progress image at bottom
+    content_embed = discord.Embed(
+        title="MLG 4v4 - Players Needed!",
+        description=f"We have **{current_count}/{MAX_QUEUE_SIZE}** players searching.\nNeed **{needed}** more to start!",
         color=discord.Color.green()
     )
-    main_embed.set_author(name="Message From Carnage Report", icon_url=HEADER_IMAGE_URL)
-    main_embed.set_image(url=get_queue_progress_image(current_count))
-    
+    content_embed.set_image(url=get_queue_progress_image(current_count))
+
     try:
-        await queue_state.ping_message.edit(embed=main_embed)
+        await queue_state.ping_message.edit(embeds=[header_embed, content_embed])
     except:
         pass
 

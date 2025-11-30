@@ -1,6 +1,6 @@
 # postgame.py - Postgame Processing, Stats Recording, and Cleanup
 
-MODULE_VERSION = "1.1.0"
+MODULE_VERSION = "1.2.0"
 
 import discord
 from discord.ui import View, Button
@@ -250,12 +250,19 @@ def log_individual_game(series, game_number: int, winner: str):
             log_action(f"Failed to push game to GitHub: {e}")
 
 async def end_series(series_view, channel: discord.TextChannel):
-    """End series, record stats, cleanup VCs, move players"""
+    """End series - closes the stats matching window and posts results embed"""
+    from datetime import datetime
+
     series = series_view.series
-    
+
+    # Record end time for stats matching window
+    series.end_time = datetime.now()
+    log_action(f"Series #{series.match_number} ended - Stats window: {series.start_time} to {series.end_time}")
+
+    # Get current game counts (may be updated later when stats are parsed)
     red_wins = series.games.count('RED')
     blue_wins = series.games.count('BLUE')
-    
+
     if red_wins > blue_wins:
         winner = 'RED'
         series_winners = series.red_team
@@ -265,83 +272,97 @@ async def end_series(series_view, channel: discord.TextChannel):
         series_winners = series.blue_team
         series_losers = series.red_team
     else:
-        winner = 'TIE'
+        winner = 'PENDING'  # Will be updated when stats are parsed
         series_winners = []
         series_losers = []
-    
-    log_action(f"Series ended - Winner: {winner} ({red_wins}-{blue_wins}) in Match #{series.match_number}")
-    save_match_history(series, winner)
-    
-    # Push to GitHub - ONLY for real matches, not test matches
-    if not series.test_mode:
+
+    log_action(f"Series ended - Current Winner: {winner} ({red_wins}-{blue_wins}) in Match #{series.match_number}")
+
+    # Create results embed - will be updated later when stats are parsed
+    if winner == 'RED':
+        embed_color = discord.Color.red()
+        title = f"Match #{series.match_number} Results - RED WINS!"
+    elif winner == 'BLUE':
+        embed_color = discord.Color.blue()
+        title = f"Match #{series.match_number} Results - BLUE WINS!"
+    else:
+        embed_color = discord.Color.gold()
+        title = f"Match #{series.match_number} Results - Awaiting Stats"
+
+    embed = discord.Embed(
+        title=title,
+        description="*Results will update automatically when game stats are parsed*",
+        color=embed_color
+    )
+
+    red_mentions = "\n".join([f"<@{uid}>" for uid in series.red_team])
+    blue_mentions = "\n".join([f"<@{uid}>" for uid in series.blue_team])
+
+    # Team fields with win counts
+    embed.add_field(
+        name=f"<:redteam:{RED_TEAM_EMOJI_ID}> Red Team - {red_wins}",
+        value=red_mentions,
+        inline=True
+    )
+    embed.add_field(
+        name=f"<:blueteam:{BLUE_TEAM_EMOJI_ID}> Blue Team - {blue_wins}",
+        value=blue_mentions,
+        inline=True
+    )
+
+    embed.add_field(name="Final Score", value=f"Red **{red_wins}** - **{blue_wins}** Blue", inline=False)
+
+    # Show game results with map/gametype stats (if any parsed yet)
+    if series.games:
+        from ingame import format_game_result
+        results_text = ""
+        for i, game_winner in enumerate(series.games, 1):
+            results_text += format_game_result(i, game_winner, series.game_stats)
+        embed.add_field(name="Game Results", value=results_text.strip(), inline=False)
+    else:
+        embed.add_field(name="Game Results", value="*No games recorded yet - will update from parsed stats*", inline=False)
+
+    # Add stats matching info
+    embed.set_footer(text=f"Stats window: {series.start_time.strftime('%H:%M')} - {series.end_time.strftime('%H:%M')}")
+
+    # Post to queue channel and store reference for later updates
+    queue_channel = channel.guild.get_channel(QUEUE_CHANNEL_ID)
+    if queue_channel:
+        results_message = await queue_channel.send(embed=embed)
+        series.results_message = results_message
+        series.results_channel_id = queue_channel.id
+
+    # Save series data for stats matching
+    save_series_for_stats_matching(series)
+
+    # Only record stats now if we have actual game results
+    if not series.test_mode and winner != 'PENDING' and series.games:
+        save_match_history(series, winner)
+
+        # Push to GitHub
         try:
             import github_webhook
             github_webhook.update_matchhistory_on_github()
         except Exception as e:
             log_action(f"Failed to push to GitHub: {e}")
-    
-    # Record series results if not test mode
-    if not series.test_mode and winner != 'TIE':
+
+        # Record series results
         import STATSRANKS
-        
         STATSRANKS.record_match_results(series_winners, series_losers, is_series_end=True)
-        
+
         # Refresh ranks for all players
         all_players = series.red_team + series.blue_team
         await STATSRANKS.refresh_all_ranks(channel.guild, all_players)
         print(f"✅ Refreshed ranks for {len(all_players)} players")
-    
-    # Create final results embed - color based on winning team
-    if winner == 'RED':
-        embed_color = discord.Color.red()
-    elif winner == 'BLUE':
-        embed_color = discord.Color.blue()
-    else:
-        embed_color = discord.Color.greyple()
-    
-    embed = discord.Embed(
-        title=f"Match #{series.match_number} Results - {winner} WINS!",
-        color=embed_color
-    )
-    
-    red_mentions = "\n".join([f"<@{uid}>" for uid in series.red_team])
-    blue_mentions = "\n".join([f"<@{uid}>" for uid in series.blue_team])
-    
-    # Team fields with win counts (same as ingame)
-    embed.add_field(
-        name=f"<:redteam:{RED_TEAM_EMOJI_ID}> Red Team - {red_wins}", 
-        value=red_mentions, 
-        inline=True
-    )
-    embed.add_field(
-        name=f"<:blueteam:{BLUE_TEAM_EMOJI_ID}> Blue Team - {blue_wins}", 
-        value=blue_mentions, 
-        inline=True
-    )
-    
-    embed.add_field(name="Final Score", value=f"Red **{red_wins}** - **{blue_wins}** Blue", inline=False)
-    
-    # Show game results with map/gametype stats
-    from ingame import format_game_result
-    results_text = ""
-    for i, game_winner in enumerate(series.games, 1):
-        results_text += format_game_result(i, game_winner, series.game_stats)
-    
-    embed.add_field(name="Game Results", value=results_text, inline=False)
-    
-    # Post to queue channel (no buttons)
-    queue_channel = channel.guild.get_channel(QUEUE_CHANNEL_ID)
-    if queue_channel:
-        await queue_channel.send(embed=embed)
-    
-    # Delete the series voting embed
+
+    # Delete the series embed
     if series_view.series.series_message:
         try:
             await series_view.series.series_message.delete()
-            log_action("Deleted series voting embed")
+            log_action("Deleted series embed")
         except:
             pass
-    
+
     # Delete general chat match-in-progress embed
     try:
         from ingame import delete_general_chat_embed
@@ -349,19 +370,59 @@ async def end_series(series_view, channel: discord.TextChannel):
         log_action("Deleted general chat match-in-progress embed")
     except Exception as e:
         log_action(f"Failed to delete general chat embed: {e}")
-    
+
     # Move to postgame and delete VCs
     await cleanup_after_series(series, channel.guild)
-    
+
     # Clear state
     from searchmatchmaking import queue_state, update_queue_embed
     queue_state.current_series = None
     queue_state.queue.clear()
     queue_state.test_mode = False
     queue_state.test_team = None
-    queue_state.testers = []  # Clear testers list
-    
+    queue_state.testers = []
+
     await update_queue_embed(queue_channel if queue_channel else channel)
+
+
+def save_series_for_stats_matching(series):
+    """Save series data for later stats matching"""
+    import json
+    import os
+
+    pending_file = 'pending_series.json'
+
+    # Load existing pending series
+    pending = []
+    if os.path.exists(pending_file):
+        try:
+            with open(pending_file, 'r') as f:
+                pending = json.load(f)
+        except:
+            pending = []
+
+    # Add this series
+    series_data = {
+        "match_number": series.match_number,
+        "series_number": series.series_number,
+        "test_mode": series.test_mode,
+        "red_team": series.red_team,
+        "blue_team": series.blue_team,
+        "start_time": series.start_time.isoformat(),
+        "end_time": series.end_time.isoformat() if series.end_time else None,
+        "results_channel_id": series.results_channel_id,
+        "results_message_id": series.results_message.id if series.results_message else None,
+        "games": series.games,
+        "game_stats": {str(k): v for k, v in series.game_stats.items()},
+    }
+
+    pending.append(series_data)
+
+    # Save back
+    with open(pending_file, 'w') as f:
+        json.dump(pending, f, indent=2)
+
+    log_action(f"Saved series #{series.match_number} for stats matching")
 
 async def cleanup_after_series(series, guild: discord.Guild):
     """Move players to postgame and delete team VCs"""

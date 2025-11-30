@@ -1,6 +1,7 @@
 # pregame.py - Pregame Lobby and Team Selection
+# !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.1.0"
+MODULE_VERSION = "1.3.0"
 
 import discord
 from discord.ui import View, Button, Select
@@ -42,7 +43,11 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
     import asyncio
     
     log_action(f"Starting pregame phase (test_mode={test_mode})")
-    
+
+    # Reset ping cooldown so players can ping again for new matches
+    queue_state.last_ping_time = None
+    log_action("Reset ping cooldown for new match")
+
     # Use test players if provided, otherwise use queue
     players = test_players if test_players else queue_state.queue[:]
     
@@ -107,29 +112,33 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
             else:
                 players_not_in_voice.append(user_id)
     
-    # Show team selection embed with 8/8 image
+    # Show waiting embed - team selection appears once all players join voice
     embed = discord.Embed(
         title=f"Pregame Lobby - {match_label}",
-        description="Select your preferred team selection method:",
+        description="⏳ **Waiting for all players to join the Pregame Lobby voice channel...**\n\nTeam selection will begin once everyone is in voice!",
         color=discord.Color.gold()
     )
-    
+
     # Add 8/8 image
     embed.set_image(url=get_queue_progress_image(8))
-    
+
     # Show player count
     player_count = f"{len(players)}/8 players"
     if test_mode:
-        player_count += " (TEST MODE - Both testers must vote same)"
-    
+        player_count += " (TEST MODE)"
+
     player_list = "\n".join([f"<@{uid}>" for uid in players])
     embed.add_field(name=f"Players ({player_count})", value=player_list, inline=False)
-    
-    # Notify players not in voice with timer warning (only for real matches)
+
+    # Show who's in voice and who's not
+    if players_in_voice:
+        in_voice_list = ", ".join([f"<@{uid}>" for uid in players_in_voice])
+        embed.add_field(name="✅ In Pregame Lobby", value=in_voice_list, inline=False)
+
     if players_not_in_voice and not test_mode:
         not_in_voice_list = ", ".join([f"<@{uid}>" for uid in players_not_in_voice])
         embed.add_field(
-            name="⚠️ Not in Voice - 60 seconds to join!",
+            name="⚠️ Not in Voice - 5 minutes to join!",
             value=f"{not_in_voice_list}\nJoin the Pregame Lobby or be replaced!",
             inline=False
         )
@@ -143,19 +152,224 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
                 value=f"{not_in_voice_list}\nPlease join the Pregame Lobby!",
                 inline=False
             )
-    
-    # Get testers list for voting requirement (already fetched above)
-    view = TeamSelectionView(players, test_mode=test_mode, testers=testers, pregame_vc_id=pregame_vc.id, match_label=match_label)
-    pregame_message = await target_channel.send(embed=embed, view=view)
-    
-    # Store message reference for deletion later
+
+    # Send waiting embed (no buttons yet)
+    pregame_message = await target_channel.send(embed=embed)
+    queue_state.pregame_message = pregame_message
+
+    # Start task to wait for all players and then show team selection
+    asyncio.create_task(wait_for_players_and_show_selection(
+        target_channel, pregame_message, players, pregame_vc.id,
+        test_mode=test_mode, testers=testers, match_label=match_label
+    ))
+
+
+async def wait_for_players_and_show_selection(
+    channel: discord.TextChannel,
+    pregame_message: discord.Message,
+    players: List[int],
+    pregame_vc_id: int,
+    test_mode: bool = False,
+    testers: List[int] = None,
+    match_label: str = "Match"
+):
+    """Wait for all players to join pregame VC, then show team selection"""
+    import asyncio
+    from searchmatchmaking import queue_state, get_queue_progress_image
+
+    guild = channel.guild
+    testers = testers or []
+    timeout_seconds = 300  # 5 minutes
+
+    # In test mode, only wait for testers (not filler players)
+    players_to_wait_for = [uid for uid in players if uid in testers] if test_mode else players[:]
+
+    start_time = asyncio.get_event_loop().time()
+
+    while True:
+        # Check if pregame was cancelled
+        if not hasattr(queue_state, 'pregame_vc_id') or queue_state.pregame_vc_id != pregame_vc_id:
+            return  # Pregame was cancelled
+
+        pregame_vc = guild.get_channel(pregame_vc_id)
+        if not pregame_vc:
+            return  # VC was deleted
+
+        # Check who's in voice now
+        members_in_vc = [m.id for m in pregame_vc.members if not m.bot]
+        players_in_voice = [uid for uid in players_to_wait_for if uid in members_in_vc]
+        players_not_in_voice = [uid for uid in players_to_wait_for if uid not in members_in_vc]
+
+        elapsed = asyncio.get_event_loop().time() - start_time
+        time_remaining = max(0, timeout_seconds - int(elapsed))
+        minutes_left = time_remaining // 60
+        seconds_left = time_remaining % 60
+
+        # Update embed to show current status
+        embed = discord.Embed(
+            title=f"Pregame Lobby - {match_label}",
+            description="⏳ **Waiting for all players to join the Pregame Lobby voice channel...**\n\nTeam selection will begin once everyone is in voice!",
+            color=discord.Color.gold()
+        )
+        embed.set_image(url=get_queue_progress_image(8))
+
+        player_count = f"{len(players)}/8 players"
+        if test_mode:
+            player_count += " (TEST MODE)"
+        player_list = "\n".join([f"<@{uid}>" for uid in players])
+        embed.add_field(name=f"Players ({player_count})", value=player_list, inline=False)
+
+        if players_in_voice:
+            in_voice_list = ", ".join([f"<@{uid}>" for uid in players_in_voice])
+            embed.add_field(name=f"✅ In Pregame Lobby ({len(players_in_voice)}/{len(players_to_wait_for)})", value=in_voice_list, inline=False)
+
+        if players_not_in_voice:
+            not_in_voice_list = ", ".join([f"<@{uid}>" for uid in players_not_in_voice])
+            embed.add_field(
+                name=f"⚠️ Not in Voice - {minutes_left}m {seconds_left}s remaining!",
+                value=f"{not_in_voice_list}\nJoin the Pregame Lobby or be replaced!",
+                inline=False
+            )
+
+        try:
+            await pregame_message.edit(embed=embed)
+        except:
+            pass
+
+        # Check if all players are in voice
+        if len(players_not_in_voice) == 0:
+            log_action(f"All players in pregame voice - showing team selection")
+            await show_team_selection(channel, pregame_message, players, pregame_vc_id, test_mode, testers, match_label)
+            return
+
+        # Check timeout
+        if elapsed >= timeout_seconds:
+            log_action(f"Pregame timeout - {len(players_not_in_voice)} players missing")
+            # Handle no-shows: replace with people from pregame VC or proceed anyway
+            await handle_pregame_timeout(channel, pregame_message, players, players_not_in_voice, pregame_vc_id, test_mode, testers, match_label)
+            return
+
+        # Wait 5 seconds before checking again
+        await asyncio.sleep(5)
+
+
+async def show_team_selection(
+    channel: discord.TextChannel,
+    pregame_message: discord.Message,
+    players: List[int],
+    pregame_vc_id: int,
+    test_mode: bool,
+    testers: List[int],
+    match_label: str
+):
+    """Show team selection buttons once all players are in voice"""
+    from searchmatchmaking import queue_state, get_queue_progress_image
+
+    embed = discord.Embed(
+        title=f"Pregame Lobby - {match_label}",
+        description="✅ **All players are in voice!**\n\nSelect your preferred team selection method:",
+        color=discord.Color.green()
+    )
+    embed.set_image(url=get_queue_progress_image(8))
+
+    player_count = f"{len(players)}/8 players"
+    if test_mode:
+        player_count += " (TEST MODE - Both testers must vote same)"
+    player_list = "\n".join([f"<@{uid}>" for uid in players])
+    embed.add_field(name=f"Players ({player_count})", value=player_list, inline=False)
+
+    view = TeamSelectionView(players, test_mode=test_mode, testers=testers, pregame_vc_id=pregame_vc_id, match_label=match_label)
     view.pregame_message = pregame_message
     queue_state.pregame_message = pregame_message
-    
-    # Start no-show timer for real matches only
-    if not test_mode and players_not_in_voice:
-        import asyncio
-        asyncio.create_task(check_no_shows(target_channel, view, players_not_in_voice, pregame_vc.id, 60))
+
+    try:
+        await pregame_message.edit(embed=embed, view=view)
+    except:
+        # If edit fails, send new message
+        new_message = await channel.send(embed=embed, view=view)
+        view.pregame_message = new_message
+        queue_state.pregame_message = new_message
+
+
+async def handle_pregame_timeout(
+    channel: discord.TextChannel,
+    pregame_message: discord.Message,
+    players: List[int],
+    no_show_players: List[int],
+    pregame_vc_id: int,
+    test_mode: bool,
+    testers: List[int],
+    match_label: str
+):
+    """Handle timeout - replace no-shows if possible, then proceed to team selection"""
+    from searchmatchmaking import queue_state, get_queue_progress_image
+
+    guild = channel.guild
+    pregame_vc = guild.get_channel(pregame_vc_id)
+
+    if not pregame_vc:
+        return
+
+    # Find replacement players from the pregame VC who weren't in the original 8
+    current_vc_members = [m.id for m in pregame_vc.members if not m.bot]
+    original_players = set(players)
+    potential_replacements = [uid for uid in current_vc_members if uid not in original_players]
+
+    replacements_made = []
+    updated_players = players[:]
+
+    for no_show_id in no_show_players:
+        if potential_replacements:
+            replacement_id = potential_replacements.pop(0)
+
+            # Replace in player list
+            idx = updated_players.index(no_show_id)
+            updated_players[idx] = replacement_id
+
+            no_show_member = guild.get_member(no_show_id)
+            replacement_member = guild.get_member(replacement_id)
+
+            no_show_name = no_show_member.display_name if no_show_member else str(no_show_id)
+            replacement_name = replacement_member.display_name if replacement_member else str(replacement_id)
+
+            replacements_made.append(f"<@{no_show_id}> → <@{replacement_id}>")
+            log_action(f"Replaced no-show {no_show_name} with {replacement_name}")
+
+    # Show team selection with updated player list
+    embed = discord.Embed(
+        title=f"Pregame Lobby - {match_label}",
+        description="⏰ **Time's up!** Proceeding to team selection.\n\nSelect your preferred team selection method:",
+        color=discord.Color.orange()
+    )
+    embed.set_image(url=get_queue_progress_image(8))
+
+    player_count = f"{len(updated_players)}/8 players"
+    if test_mode:
+        player_count += " (TEST MODE)"
+    player_list = "\n".join([f"<@{uid}>" for uid in updated_players])
+    embed.add_field(name=f"Players ({player_count})", value=player_list, inline=False)
+
+    if replacements_made:
+        embed.add_field(name="🔄 Replacements Made", value="\n".join(replacements_made), inline=False)
+
+    remaining_no_shows = [uid for uid in no_show_players if uid in updated_players]
+    if remaining_no_shows:
+        embed.add_field(
+            name="⚠️ Still Missing (no replacements available)",
+            value=", ".join([f"<@{uid}>" for uid in remaining_no_shows]),
+            inline=False
+        )
+
+    view = TeamSelectionView(updated_players, test_mode=test_mode, testers=testers, pregame_vc_id=pregame_vc_id, match_label=match_label)
+    view.pregame_message = pregame_message
+    queue_state.pregame_message = pregame_message
+
+    try:
+        await pregame_message.edit(embed=embed, view=view)
+    except:
+        new_message = await channel.send(embed=embed, view=view)
+        view.pregame_message = new_message
+        queue_state.pregame_message = new_message
 
 
 async def check_no_shows(channel: discord.TextChannel, view, no_show_players: List[int], pregame_vc_id: int, timeout_seconds: int):
@@ -262,55 +476,75 @@ class TeamSelectionView(View):
     async def update_embed_with_votes(self, interaction: discord.Interaction, votes_mismatch: bool = False):
         """Update the embed to show current votes"""
         from searchmatchmaking import get_queue_progress_image
-        
+
+        # Calculate majority threshold
+        majority_needed = (len(self.players) // 2) + 1  # 5 for 8 players
+
         embed = discord.Embed(
             title=f"Pregame Lobby - {self.match_label}",
-            description="Select your preferred team selection method:",
+            description=f"Select your preferred team selection method:\n**{majority_needed} votes needed** for majority!",
             color=discord.Color.gold()
         )
-        
+
         embed.set_image(url=get_queue_progress_image(8))
-        
+
         player_count = f"{len(self.players)}/8 players"
         if self.test_mode:
             player_count += " (TEST MODE)"
-        
+
         player_list = "\n".join([f"<@{uid}>" for uid in self.players])
         embed.add_field(name=f"Players ({player_count})", value=player_list, inline=False)
-        
-        # Show votes
+
+        # Show votes with counts
         if self.votes:
-            vote_text = "\n".join([f"<@{uid}>: **{vote}**" for uid, vote in self.votes.items()])
-            if votes_mismatch:
+            # Count votes per option
+            vote_counts = {}
+            for vote in self.votes.values():
+                vote_counts[vote] = vote_counts.get(vote, 0) + 1
+
+            # Format vote summary
+            option_labels = {"balanced": "Balanced (MMR)", "captains": "Captains Pick", "players_pick": "Players Pick"}
+            vote_summary = []
+            for option in ["balanced", "captains", "players_pick"]:
+                count = vote_counts.get(option, 0)
+                if count > 0:
+                    label = option_labels.get(option, option)
+                    vote_summary.append(f"**{label}**: {count}/{majority_needed}")
+
+            # Individual votes
+            vote_text = "\n".join([f"<@{uid}>: {vote}" for uid, vote in self.votes.items()])
+
+            if self.test_mode and votes_mismatch:
                 embed.add_field(name=f"⚠️ Votes Don't Match ({len(self.votes)}/{len(self.testers)})", value=vote_text + "\n\n*Change your vote to match!*", inline=False)
             else:
-                embed.add_field(name=f"Votes ({len(self.votes)}/{len(self.testers)})", value=vote_text, inline=False)
-        
+                embed.add_field(name=f"Vote Counts ({len(self.votes)} votes)", value="\n".join(vote_summary) if vote_summary else "No votes yet", inline=False)
+                embed.add_field(name="Individual Votes", value=vote_text, inline=False)
+
         try:
             await self.pregame_message.edit(embed=embed, view=self)
         except:
             pass
     
     async def handle_vote(self, interaction: discord.Interaction, method: str):
-        """Handle team selection vote"""
+        """Handle team selection vote - requires majority (5+ of 8 players)"""
         from searchmatchmaking import queue_state
-        
+
         # In test mode, only testers can vote and both must agree
         if self.test_mode and self.testers:
             if interaction.user.id not in self.testers:
                 await interaction.response.send_message("❌ Only testers can vote!", ephemeral=True)
                 return
-            
+
             # Record/update vote (allows changing vote)
             self.votes[interaction.user.id] = method
-            
+
             # Check if all testers voted
             if len(self.votes) < len(self.testers):
                 # Not all testers have voted yet - update embed to show votes
                 await interaction.response.defer()
                 await self.update_embed_with_votes(interaction)
                 return
-            
+
             # All testers voted - check if they agree
             vote_values = list(self.votes.values())
             if len(set(vote_values)) > 1:
@@ -319,13 +553,40 @@ class TeamSelectionView(View):
                 await interaction.response.defer()
                 await self.update_embed_with_votes(interaction, votes_mismatch=True)
                 return
-            
+
             # All testers agree - proceed
             await interaction.response.defer()
         else:
-            # Normal mode - any player can pick immediately
+            # Normal mode - require majority vote (5+ of 8 players)
+            if interaction.user.id not in self.players:
+                await interaction.response.send_message("❌ Only players in this match can vote!", ephemeral=True)
+                return
+
+            # Record/update vote (allows changing vote)
+            self.votes[interaction.user.id] = method
             await interaction.response.defer()
-        
+
+            # Count votes for each option
+            vote_counts = {}
+            for vote in self.votes.values():
+                vote_counts[vote] = vote_counts.get(vote, 0) + 1
+
+            # Check if any option has majority (5+ of 8)
+            majority_needed = (len(self.players) // 2) + 1  # 5 for 8 players
+            winning_method = None
+            for option, count in vote_counts.items():
+                if count >= majority_needed:
+                    winning_method = option
+                    break
+
+            if not winning_method:
+                # No majority yet - update embed to show votes
+                await self.update_embed_with_votes(interaction)
+                return
+
+            # Found majority - use the winning method
+            method = winning_method
+
         # Delete the pregame embed
         try:
             if self.pregame_message:
@@ -345,9 +606,10 @@ class TeamSelectionView(View):
             await self.start_players_pick(interaction)
     
     async def create_balanced_teams(self, interaction: discord.Interaction):
-        """Create balanced teams using MMR - keeps guests with their hosts"""
+        """Create balanced teams using MMR - keeps guests with their hosts via exhaustive search"""
         from searchmatchmaking import queue_state
-        
+        from itertools import combinations
+
         # Get all MMRs
         player_mmrs = {}
         for user_id in self.players:
@@ -356,11 +618,11 @@ class TeamSelectionView(View):
                 player_mmrs[user_id] = queue_state.guests[user_id]["mmr"]
             else:
                 player_mmrs[user_id] = await get_player_mmr(user_id)
-        
+
         # Identify host-guest pairs (treat as single unit for balancing)
         pairs = []  # [(host_id, guest_id, combined_mmr)]
         paired_players = set()
-        
+
         for guest_id, guest_info in queue_state.guests.items():
             if guest_id in self.players:
                 host_id = guest_info["host_id"]
@@ -369,105 +631,87 @@ class TeamSelectionView(View):
                     pairs.append((host_id, guest_id, combined_mmr))
                     paired_players.add(host_id)
                     paired_players.add(guest_id)
-        
+
         # Get solo players (not in a pair)
         solo_players = [uid for uid in self.players if uid not in paired_players]
-        
-        # Create items to balance: pairs count as single unit, solos are individual
+
+        # Create balance items: pairs count as single unit, solos are individual
         balance_items = []
         for host_id, guest_id, combined_mmr in pairs:
             balance_items.append({
                 "type": "pair",
                 "ids": [host_id, guest_id],
-                "mmr": combined_mmr
+                "mmr": combined_mmr,
+                "count": 2  # Takes 2 team slots
             })
         for uid in solo_players:
             balance_items.append({
                 "type": "solo",
                 "ids": [uid],
-                "mmr": player_mmrs[uid]
+                "mmr": player_mmrs[uid],
+                "count": 1  # Takes 1 team slot
             })
-        
-        # Sort by MMR (high to low)
-        balance_items.sort(key=lambda x: x["mmr"], reverse=True)
-        
-        # Snake draft for balance items
-        red_items = []
-        blue_items = []
-        
-        for i, item in enumerate(balance_items):
-            if i % 2 == 0:
-                red_items.append(item)
-            else:
-                blue_items.append(item)
-        
-        # Flatten to team lists
-        red_team = []
-        blue_team = []
-        for item in red_items:
-            red_team.extend(item["ids"])
-        for item in blue_items:
-            blue_team.extend(item["ids"])
-        
-        # Calculate current diff
-        red_mmr = sum(player_mmrs[uid] for uid in red_team)
-        blue_mmr = sum(player_mmrs[uid] for uid in blue_team)
-        best_diff = abs(red_mmr - blue_mmr)
-        best_red = red_team[:]
-        best_blue = blue_team[:]
-        
-        # Try swapping solo players only (never break up pairs)
-        red_solos = [uid for uid in red_team if uid not in paired_players]
-        blue_solos = [uid for uid in blue_team if uid not in paired_players]
-        
-        for r_uid in red_solos:
-            for b_uid in blue_solos:
-                test_red = red_team[:]
-                test_blue = blue_team[:]
-                
-                # Swap
-                r_idx = test_red.index(r_uid)
-                b_idx = test_blue.index(b_uid)
-                test_red[r_idx] = b_uid
-                test_blue[b_idx] = r_uid
-                
-                diff = abs(sum(player_mmrs[uid] for uid in test_red) - sum(player_mmrs[uid] for uid in test_blue))
-                
-                if diff < best_diff:
-                    best_diff = diff
-                    best_red = test_red[:]
-                    best_blue = test_blue[:]
-        
-        # Also try swapping pairs between teams if there are multiple pairs
-        if len(pairs) >= 2:
-            red_pairs = [(h, g) for h, g, _ in pairs if h in best_red]
-            blue_pairs = [(h, g) for h, g, _ in pairs if h in best_blue]
-            
-            for rp in red_pairs:
-                for bp in blue_pairs:
-                    test_red = best_red[:]
-                    test_blue = best_blue[:]
-                    
-                    # Remove red pair from red, add to blue
-                    test_red.remove(rp[0])
-                    test_red.remove(rp[1])
-                    test_blue.append(rp[0])
-                    test_blue.append(rp[1])
-                    
-                    # Remove blue pair from blue, add to red
-                    test_blue.remove(bp[0])
-                    test_blue.remove(bp[1])
-                    test_red.append(bp[0])
-                    test_red.append(bp[1])
-                    
-                    diff = abs(sum(player_mmrs[uid] for uid in test_red) - sum(player_mmrs[uid] for uid in test_blue))
-                    
+
+        # Exhaustive search: try all valid team combinations
+        # A valid combination has exactly 4 players on each team
+        # Pairs must stay together (both on same team)
+        best_diff = float('inf')
+        best_red = []
+        best_blue = []
+        combinations_checked = 0
+
+        def try_all_assignments(items, red_items, blue_items, red_count, blue_count):
+            """Recursively try all valid assignments of items to teams"""
+            nonlocal best_diff, best_red, best_blue, combinations_checked
+
+            # Base case: all items assigned
+            if not items:
+                if red_count == 4 and blue_count == 4:
+                    combinations_checked += 1
+                    # Calculate teams
+                    red_team = []
+                    blue_team = []
+                    for item in red_items:
+                        red_team.extend(item["ids"])
+                    for item in blue_items:
+                        blue_team.extend(item["ids"])
+
+                    red_mmr = sum(player_mmrs[uid] for uid in red_team)
+                    blue_mmr = sum(player_mmrs[uid] for uid in blue_team)
+                    diff = abs(red_mmr - blue_mmr)
+
                     if diff < best_diff:
                         best_diff = diff
-                        best_red = test_red[:]
-                        best_blue = test_blue[:]
-        
-        log_action(f"Balanced teams created - MMR diff: {best_diff}")
+                        best_red = red_team[:]
+                        best_blue = blue_team[:]
+                return
+
+            # Get next item to assign
+            item = items[0]
+            remaining = items[1:]
+            item_count = item["count"]
+
+            # Try adding to red team (if room)
+            if red_count + item_count <= 4:
+                try_all_assignments(remaining, red_items + [item], blue_items,
+                                    red_count + item_count, blue_count)
+
+            # Try adding to blue team (if room)
+            if blue_count + item_count <= 4:
+                try_all_assignments(remaining, red_items, blue_items + [item],
+                                    red_count, blue_count + item_count)
+
+        # Run exhaustive search
+        try_all_assignments(balance_items, [], [], 0, 0)
+
+        # Sort teams so higher MMR team is red (for consistency)
+        if best_red and best_blue:
+            red_avg = sum(player_mmrs[uid] for uid in best_red) / len(best_red)
+            blue_avg = sum(player_mmrs[uid] for uid in best_blue) / len(best_blue)
+            if blue_avg > red_avg:
+                best_red, best_blue = best_blue, best_red
+
+        log_action(f"Balanced teams created - MMR diff: {best_diff} (checked {combinations_checked} valid combinations)")
         await finalize_teams(interaction.channel, best_red, best_blue, test_mode=self.test_mode)
     
     async def start_captains_draft(self, interaction: discord.Interaction):
@@ -669,31 +913,7 @@ async def finalize_teams(channel: discord.TextChannel, red_team: List[int], blue
         user_limit=None,
         position=999  # Position at bottom
     )
-    
-    # Set permissions: All users muted by default but can unmute
-    everyone_role = guild.default_role
-    await red_vc.set_permissions(everyone_role, 
-                                   connect=True,
-                                   speak=False,
-                                   mute_members=False,
-                                   use_voice_activation=True)
-    await blue_vc.set_permissions(everyone_role, 
-                                    connect=True,
-                                    speak=False,
-                                    mute_members=False,
-                                    use_voice_activation=True)
-    
-    # Give team members speak permissions
-    for user_id in red_team:
-        member = guild.get_member(user_id)
-        if member:
-            await red_vc.set_permissions(member, speak=True, mute_members=False)
-    
-    for user_id in blue_team:
-        member = guild.get_member(user_id)
-        if member:
-            await blue_vc.set_permissions(member, speak=True, mute_members=False)
-    
+
     # Move players from pregame (or any voice channel) to their team channels
     # In test mode, only move testers (they're the only real players in voice)
     # In real mode, move all players who are in voice

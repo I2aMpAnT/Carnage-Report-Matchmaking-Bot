@@ -1,1 +1,40 @@
-{}
+{
+  "match_1": {
+    "game_1": {
+      "map": "Midship",
+      "gametype": "MLG CTF",
+      "score": "2-1",
+      "time": "15:03"
+    },
+    "game_2": {
+      "map": "Beaver Creek",
+      "gametype": "MLG Team Slayer",
+      "score": "33-19",
+      "time": "3:34"
+    },
+    "game_3": {
+      "map": "Lockout",
+      "gametype": "MLG Oddball",
+      "score": "2:42 - 2:16",
+      "time": "15:00"
+    },
+    "game_4": {
+      "map": "Warlock",
+      "gametype": "MLG Team Slayer",
+      "score": "50-32",
+      "time": "4:39"
+    },
+    "game_5": {
+      "map": "Sanctuary",
+      "gametype": "MLG CTF",
+      "score": "1-0",
+      "time": "15:01"
+    },
+    "game_6": {
+      "map": "Midship",
+      "gametype": "MLG Assault",
+      "score": "1-0",
+      "time": "15:05"
+    }
+  }
+}

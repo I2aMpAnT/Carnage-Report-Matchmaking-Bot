@@ -1,11 +1,12 @@
 # HCRBot.py - Main Bot Entry Point
 # Halo 2 Carnage Report Matchmaking Bot
+# !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
 # ============================================
 # VERSION INFO
 # ============================================
-BOT_VERSION = "1.3.0"
-BOT_BUILD_DATE = "2025-11-28"
+BOT_VERSION = "1.5.0"
+BOT_BUILD_DATE = "2025-11-29"
 # ============================================
 
 import discord
@@ -156,6 +157,11 @@ async def on_ready():
         print(f"  playlists.py:        v{playlists.MODULE_VERSION}")
     except:
         print(f"  playlists.py:        (no version)")
+    try:
+        import stats_parser
+        print(f"  stats_parser.py:     v{stats_parser.MODULE_VERSION}")
+    except:
+        print(f"  stats_parser.py:     (no version)")
     print("-" * 30)
     print()
     
@@ -184,6 +190,13 @@ async def on_ready():
         print('✅ Stats module loaded!')
     except Exception as e:
         print(f'⚠️ Stats module not loaded: {e}')
+
+    # Setup stats parser module (XLSX file parsing)
+    try:
+        await bot.load_extension('stats_parser')
+        print('✅ Stats parser module loaded!')
+    except Exception as e:
+        print(f'⚠️ Stats parser module not loaded: {e}')
     
     # Sync slash commands
     try:
@@ -340,6 +353,140 @@ async def on_interaction(interaction: discord.Interaction):
                     await interaction.response.send_message("👋 You've been removed from the queue.", ephemeral=True)
             else:
                 await interaction.response.send_message("You're no longer in the queue.", ephemeral=True)
+
+@bot.event
+async def on_message(message: discord.Message):
+    """Handle messages - keep queue embeds and match embeds at bottom of their channels"""
+    # Ignore bot messages
+    if message.author.bot:
+        return
+
+    # List of all queue channel IDs
+    QUEUE_CHANNELS = [
+        QUEUE_CHANNEL_ID,           # MLG 4v4
+        TEAM_HARDCORE_CHANNEL_ID,   # Team Hardcore
+        DOUBLE_TEAM_CHANNEL_ID,     # Double Team
+        HEAD_TO_HEAD_CHANNEL_ID,    # Head to Head
+    ]
+
+    GENERAL_CHANNEL_ID = 1403855176460406805
+
+    # Handle queue channels - keep queue embed at bottom
+    if message.channel.id in QUEUE_CHANNELS:
+        await repost_queue_embed_if_needed(message)
+        return
+
+    # Handle general chat - keep match embed at bottom during active series
+    if message.channel.id == GENERAL_CHANNEL_ID:
+        await repost_match_embed_if_needed(message)
+        return
+
+
+async def repost_queue_embed_if_needed(message: discord.Message):
+    """Repost queue embed to keep it at the bottom of the channel"""
+    from searchmatchmaking import queue_state, update_queue_embed, log_action
+
+    channel = message.channel
+
+    # Check if this is the MLG 4v4 queue channel
+    if channel.id == QUEUE_CHANNEL_ID:
+        # Check if queue is active (has players or no match in progress)
+        if queue_state.current_series:
+            return  # Don't mess with embeds during active series
+
+        try:
+            # Find the queue embed message
+            queue_message = None
+            async for msg in channel.history(limit=20):
+                if msg.author.bot and msg.embeds:
+                    title = msg.embeds[0].title or ""
+                    if "Matchmaking" in title and "MLG" in title:
+                        queue_message = msg
+                        break
+
+            if queue_message:
+                # Delete and repost
+                try:
+                    await queue_message.delete()
+                except:
+                    pass
+
+                # Repost the queue embed
+                await update_queue_embed(channel)
+                log_action(f"Reposted MLG queue embed (triggered by {message.author.display_name})")
+
+        except Exception as e:
+            print(f"Error reposting MLG queue embed: {e}")
+        return
+
+    # Handle other playlist channels
+    try:
+        from playlists import get_playlist_by_channel, update_playlist_embed
+
+        playlist_state = get_playlist_by_channel(channel.id)
+        if not playlist_state:
+            return
+
+        # Don't repost during active match
+        if playlist_state.current_match:
+            return
+
+        # Find the playlist queue embed
+        queue_message = None
+        async for msg in channel.history(limit=20):
+            if msg.author.bot and msg.embeds:
+                title = msg.embeds[0].title or ""
+                if playlist_state.name in title and "Matchmaking" in title:
+                    queue_message = msg
+                    break
+
+        if queue_message:
+            # Delete and repost
+            try:
+                await queue_message.delete()
+            except:
+                pass
+
+            # Repost the queue embed
+            await update_playlist_embed(channel, playlist_state)
+            from searchmatchmaking import log_action
+            log_action(f"Reposted {playlist_state.name} queue embed (triggered by {message.author.display_name})")
+
+    except Exception as e:
+        print(f"Error reposting playlist queue embed: {e}")
+
+
+async def repost_match_embed_if_needed(message: discord.Message):
+    """Repost match embed to keep it at the bottom of general chat during active series"""
+    from searchmatchmaking import queue_state, log_action
+
+    if not queue_state.current_series:
+        return
+
+    series = queue_state.current_series
+    if not hasattr(series, 'general_message') or not series.general_message:
+        return
+
+    # Repost the match embed to keep it at the bottom
+    try:
+        from ingame import update_general_chat_embed
+
+        # Delete the old message
+        old_message = series.general_message
+        try:
+            await old_message.delete()
+        except:
+            pass
+
+        # Clear the reference so update_general_chat_embed creates a new one
+        series.general_message = None
+
+        # Repost the embed
+        await update_general_chat_embed(message.guild, series)
+        log_action(f"Reposted match embed to bottom (triggered by {message.author.display_name})")
+
+    except Exception as e:
+        print(f"Error reposting match embed: {e}")
 
 # Run bot - works both when imported and when run directly
 if not TOKEN:

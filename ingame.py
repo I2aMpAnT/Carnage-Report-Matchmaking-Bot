@@ -1,6 +1,6 @@
 # ingame.py - In-Game Series Management and Voting
 
-MODULE_VERSION = "1.1.0"
+MODULE_VERSION = "1.3.0"
 
 import discord
 from discord.ui import View, Button
@@ -12,6 +12,9 @@ BLUE_TEAM_EMOJI_ID = None
 ADMIN_ROLES = []
 GENERAL_CHANNEL_ID = 1403855176460406805
 QUEUE_CHANNEL_ID = None
+
+# Header image for embeds
+HEADER_IMAGE_URL = "https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/H2CRFinal.png"
 
 def log_action(message: str):
     """Log actions"""
@@ -74,11 +77,12 @@ async def update_general_chat_embed(guild: discord.Guild, series):
             inline=True
         )
         embed.add_field(
-            name=f"<:blueteam:{BLUE_TEAM_EMOJI_ID}> Blue Team - {blue_wins}", 
-            value=blue_mentions, 
+            name=f"<:blueteam:{BLUE_TEAM_EMOJI_ID}> Blue Team - {blue_wins}",
+            value=blue_mentions,
             inline=True
         )
         embed.set_footer(text="Match in progress - voting in matchmaking channel")
+        embed.set_image(url=HEADER_IMAGE_URL)
         view = None
     
     # Check if test mode
@@ -145,11 +149,13 @@ async def delete_general_chat_embed(guild: discord.Guild, series):
 class Series:
     match_counter = 0  # For real matches
     test_counter = 0   # For test matches
-    
+
     def __init__(self, red_team: List[int], blue_team: List[int], test_mode: bool = False, testers: List[int] = None):
+        from datetime import datetime
+
         self.test_mode = test_mode
         self.testers = testers or []  # List of user IDs who can vote in test mode
-        
+
         if test_mode:
             Series.test_counter += 1
             self.match_number = Series.test_counter
@@ -158,11 +164,11 @@ class Series:
             Series.match_counter += 1
             self.match_number = Series.match_counter
             self.series_number = f"Series {Series.match_counter}"
-        
+
         self.red_team = red_team
         self.blue_team = blue_team
         self.games: List[str] = []
-        self.game_stats: Dict[int, dict] = {}  # game_number -> {"map": str, "gametype": str}
+        self.game_stats: Dict[int, dict] = {}  # game_number -> {"map": str, "gametype": str, "parsed_stats": dict}
         self.votes: Dict[int, str] = {}
         self.current_game = 1
         self.series_message: Optional[discord.Message] = None
@@ -170,130 +176,33 @@ class Series:
         self.red_vc_id: Optional[int] = None
         self.blue_vc_id: Optional[int] = None
 
+        # Time window for stats matching
+        self.start_time: datetime = datetime.now()
+        self.end_time: Optional[datetime] = None
+
+        # Results message for updating after stats parse
+        self.results_message: Optional[discord.Message] = None
+        self.results_channel_id: Optional[int] = None
+
 class SeriesView(View):
     def __init__(self, series: Series):
         super().__init__(timeout=None)
         self.series = series
-        self.game_voters = {}  # user_id -> 'RED' or 'BLUE'
         self.end_voters = set()
         self.update_buttons()
-    
+
     def update_buttons(self):
         self.clear_items()
-        
-        # Only add current game vote buttons and end series button
-        # Past games shown in embed, not as buttons
-        
-        # Current game vote buttons - stacked vertically
-        red_button = Button(
-            label=f"Game {self.series.current_game} Winner",
-            style=discord.ButtonStyle.danger,
-            custom_id=f"vote_red_{self.series.current_game}",
-            row=0
-        )
-        red_button.callback = self.vote_red
-        self.add_item(red_button)
-        
-        blue_button = Button(
-            label=f"Game {self.series.current_game} Winner",
-            style=discord.ButtonStyle.primary,
-            custom_id=f"vote_blue_{self.series.current_game}",
-            row=1
-        )
-        blue_button.callback = self.vote_blue
-        self.add_item(blue_button)
-        
-        # End series button
+
+        # Only END SERIES button - game winners are determined from parsed stats
         end_button = Button(
             label="END SERIES",
             style=discord.ButtonStyle.secondary,
             custom_id="end_series",
-            row=2
+            row=0
         )
         end_button.callback = self.vote_end_series
         self.add_item(end_button)
-    
-    async def vote_red(self, interaction: discord.Interaction):
-        await self.process_vote(interaction, 'RED')
-    
-    async def vote_blue(self, interaction: discord.Interaction):
-        await self.process_vote(interaction, 'BLUE')
-    
-    async def process_vote(self, interaction: discord.Interaction, team: str):
-        """Process game winner vote"""
-        all_players = self.series.red_team + self.series.blue_team
-        total_players = len(all_players)
-        
-        # Test mode: only testers can vote, need 2 matching votes
-        if self.series.test_mode:
-            # Check if user is a tester (if testers list exists)
-            if self.series.testers and interaction.user.id not in self.series.testers:
-                await interaction.response.send_message(
-                    "❌ Only testers can vote in test mode!",
-                    ephemeral=True
-                )
-                return
-            
-            # Allow vote changes - just update the vote
-            self.game_voters[interaction.user.id] = team
-            self.series.votes[interaction.user.id] = team
-            
-            await interaction.response.defer()
-            await self.update_series_embed(interaction.channel)
-            
-            # Count tester votes for each team
-            red_votes = sum(1 for uid, v in self.game_voters.items() if v == 'RED' and uid in self.series.testers)
-            blue_votes = sum(1 for uid, v in self.game_voters.items() if v == 'BLUE' and uid in self.series.testers)
-            
-            # Need 2 tester votes for same team to win
-            if red_votes >= 2:
-                from postgame import record_game_winner
-                await record_game_winner(self, 'RED', interaction.channel)
-            elif blue_votes >= 2:
-                from postgame import record_game_winner
-                await record_game_winner(self, 'BLUE', interaction.channel)
-            return
-        
-        # Real mode: Check if staff or player
-        user_roles = [role.name for role in interaction.user.roles]
-        is_staff = any(role in ADMIN_ROLES for role in user_roles)
-        
-        # Only staff or players can vote
-        if not is_staff and interaction.user.id not in all_players:
-            await interaction.response.send_message(
-                "❌ Only players in the series or Staff can vote!",
-                ephemeral=True
-            )
-            return
-        
-        # Allow vote changes - just update the vote
-        self.game_voters[interaction.user.id] = team
-        self.series.votes[interaction.user.id] = team
-        
-        await interaction.response.defer()
-        
-        # Count staff votes
-        staff_red_votes = 0
-        staff_blue_votes = 0
-        for uid, v in self.series.votes.items():
-            member = interaction.guild.get_member(uid)
-            if member:
-                member_roles = [role.name for role in member.roles]
-                if any(role in ADMIN_ROLES for role in member_roles):
-                    if v == 'RED':
-                        staff_red_votes += 1
-                    else:
-                        staff_blue_votes += 1
-        
-        await self.update_series_embed(interaction.channel)
-        
-        # Win condition: Just 1 staff vote
-        if staff_red_votes >= 1:
-            from postgame import record_game_winner
-            await record_game_winner(self, 'RED', interaction.channel)
-        elif staff_blue_votes >= 1:
-            from postgame import record_game_winner
-            await record_game_winner(self, 'BLUE', interaction.channel)
     
     async def vote_end_series(self, interaction: discord.Interaction):
         """Process end series vote"""
@@ -360,62 +269,59 @@ class SeriesView(View):
         """Update the series embed"""
         series = self.series
         total_players = len(series.red_team + series.blue_team)
-        
+
         embed = discord.Embed(
             title=f"Match #{series.match_number} in Progress",
-            description="**Halo 2 MLG 2007 Matchmaking**",
+            description="**Halo 2 MLG 2007 Matchmaking**\n*Game winners will be determined from parsed stats*",
             color=discord.Color.from_rgb(0, 112, 192)
         )
-        
+
         red_mentions = "\n".join([f"<@{uid}>" for uid in series.red_team])
         blue_mentions = "\n".join([f"<@{uid}>" for uid in series.blue_team])
-        
-        # Count wins for each team
+
+        # Count wins for each team (from parsed stats)
         red_wins = series.games.count('RED')
         blue_wins = series.games.count('BLUE')
-        
-        # Set base description
-        embed.description = "**Halo 2 MLG 2007 Matchmaking**"
-        
+
         # Add team fields with win counts
         embed.add_field(
-            name=f"<:redteam:{RED_TEAM_EMOJI_ID}> Red Team - {red_wins}", 
-            value=red_mentions, 
+            name=f"<:redteam:{RED_TEAM_EMOJI_ID}> Red Team - {red_wins}",
+            value=red_mentions,
             inline=True
         )
         embed.add_field(
-            name=f"<:blueteam:{BLUE_TEAM_EMOJI_ID}> Blue Team - {blue_wins}", 
-            value=blue_mentions, 
+            name=f"<:blueteam:{BLUE_TEAM_EMOJI_ID}> Blue Team - {blue_wins}",
+            value=blue_mentions,
             inline=True
         )
-        
-        # Add completed games section if any
+
+        # Add completed games section if any (populated from parsed stats)
         if series.games:
             games_text = ""
             for i, winner in enumerate(series.games, 1):
                 games_text += format_game_result(i, winner, series.game_stats)
-            
+
             embed.add_field(
                 name="Completed Games",
                 value=games_text.strip(),
                 inline=False
             )
-        
+
         # Show end series votes
         end_vote_count = len(self.end_voters)
-        
+
         embed.add_field(
             name=f"End Series Votes ({end_vote_count}/{total_players})",
-            value=f"{end_vote_count} vote{'s' if end_vote_count != 1 else ''}",
+            value=f"{end_vote_count} vote{'s' if end_vote_count != 1 else ''} - Click END SERIES when your games are done",
             inline=False
         )
-        
+
         if series.series_message:
             try:
                 await series.series_message.edit(embed=embed, view=self)
             except:
                 pass
-        
+
         # Also update general chat embed
         try:
             await update_general_chat_embed(channel.guild, series)
@@ -426,65 +332,44 @@ async def show_series_embed(channel: discord.TextChannel):
     """Show initial series embed - ALWAYS in queue channel"""
     from searchmatchmaking import queue_state
     series = queue_state.current_series
-    
-    # Always post voting embed to queue channel, regardless of where command was run
+
+    # Always post embed to queue channel, regardless of where command was run
     queue_channel = channel.guild.get_channel(QUEUE_CHANNEL_ID)
     target_channel = queue_channel if queue_channel else channel
-    
+
+    total_players = len(series.red_team + series.blue_team)
+
     embed = discord.Embed(
         title=f"Match #{series.match_number} in Progress",
-        description="**Halo 2 MLG 2007 Matchmaking**",
+        description="**Halo 2 MLG 2007 Matchmaking**\n*Game winners will be determined from parsed stats*",
         color=discord.Color.from_rgb(0, 112, 192)
     )
-    
+
     red_mentions = "\n".join([f"<@{uid}>" for uid in series.red_team])
     blue_mentions = "\n".join([f"<@{uid}>" for uid in series.blue_team])
-    
-    # Count wins for each team
-    red_wins = series.games.count('RED')
-    blue_wins = series.games.count('BLUE')
-    
+
     embed.add_field(
-        name=f"<:redteam:{RED_TEAM_EMOJI_ID}> Red Team - {red_wins}", 
-        value=red_mentions, 
+        name=f"<:redteam:{RED_TEAM_EMOJI_ID}> Red Team - 0",
+        value=red_mentions,
         inline=True
     )
     embed.add_field(
-        name=f"<:blueteam:{BLUE_TEAM_EMOJI_ID}> Blue Team - {blue_wins}", 
-        value=blue_mentions, 
+        name=f"<:blueteam:{BLUE_TEAM_EMOJI_ID}> Blue Team - 0",
+        value=blue_mentions,
         inline=True
     )
-    
-    # Current game
-    embed.add_field(
-        name="Current Game",
-        value=f"Game {series.current_game}",
-        inline=False
-    )
-    
-    # Show completed games if any
-    if series.games:
-        games_text = ""
-        for i, winner in enumerate(series.games, 1):
-            games_text += format_game_result(i, winner, series.game_stats)
-        
-        embed.add_field(
-            name="Completed Games",
-            value=games_text.strip(),
-            inline=False
-        )
-    
+
     # End series votes
     embed.add_field(
-        name="End Series Votes (0/8)",
-        value="0 votes",
+        name=f"End Series Votes (0/{total_players})",
+        value="0 votes - Click END SERIES when your games are done",
         inline=False
     )
-    
+
     view = SeriesView(series)
     series.series_message = await target_channel.send(embed=embed, view=view)
-    
-    # Also send to general chat (no voting buttons)
+
+    # Also send to general chat (no buttons)
     try:
         await update_general_chat_embed(channel.guild, series)
     except Exception as e:

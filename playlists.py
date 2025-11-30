@@ -1,6 +1,7 @@
 # playlists.py - Multi-Playlist Queue System
+# !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.0.0"
+MODULE_VERSION = "1.1.0"
 
 import discord
 from discord.ui import View, Button
@@ -156,8 +157,8 @@ class PlaylistMatch:
         playlist_state.match_counter += 1
         self.match_number = playlist_state.match_counter
 
-        self.games: List[str] = []  # 'TEAM1' or 'TEAM2'
-        self.game_stats: Dict[int, dict] = {}
+        self.games: List[str] = []  # 'TEAM1' or 'TEAM2' - populated from parsed stats
+        self.game_stats: Dict[int, dict] = {}  # game_number -> {"map": str, "gametype": str, "parsed_stats": dict}
         self.current_game = 1
 
         # Selected map/gametype for auto-queue playlists
@@ -173,7 +174,14 @@ class PlaylistMatch:
         self.match_message: Optional[discord.Message] = None
         self.general_message: Optional[discord.Message] = None
 
+        # Time window for stats matching
         self.start_time = datetime.now()
+        self.end_time: Optional[datetime] = None
+
+        # Results message for updating after stats parse
+        self.results_message: Optional[discord.Message] = None
+        self.results_channel_id: Optional[int] = None
+
         self.end_series_votes: set = set()  # User IDs who voted to end
 
     def get_match_label(self) -> str:
@@ -258,48 +266,49 @@ def get_end_series_votes_needed(playlist_type: str) -> int:
 
 
 async def balance_teams_by_mmr(players: List[int], team_size: int) -> Tuple[List[int], List[int]]:
-    """Balance players into two teams based on MMR"""
+    """Balance players into two teams based on MMR using exhaustive search"""
+    from itertools import combinations
+
     # Get all player MMRs
     player_mmrs = {}
     for uid in players:
         player_mmrs[uid] = await get_player_mmr(uid)
 
-    # Sort by MMR (highest first)
-    sorted_players = sorted(players, key=lambda x: player_mmrs[x], reverse=True)
+    total_mmr = sum(player_mmrs.values())
+    target_mmr = total_mmr / 2  # Ideal team MMR is half the total
 
-    # Snake draft for balance
-    team1 = []
-    team2 = []
+    best_team1 = None
+    best_team2 = None
+    best_diff = float('inf')
 
-    for i, player in enumerate(sorted_players):
-        if i % 2 == 0:
-            if len(team1) < team_size:
-                team1.append(player)
-            else:
-                team2.append(player)
-        else:
-            if len(team2) < team_size:
-                team2.append(player)
-            else:
-                team1.append(player)
+    # Try all possible team combinations and find the one closest to balanced
+    # For 8 players choosing 4, there are only 70 combinations
+    # For 4 players choosing 2, there are only 6 combinations
+    for team1_combo in combinations(players, team_size):
+        team1 = list(team1_combo)
+        team2 = [p for p in players if p not in team1]
 
-    # Try swapping to optimize
-    best_diff = abs(sum(player_mmrs[u] for u in team1) - sum(player_mmrs[u] for u in team2))
-    best_team1 = team1[:]
-    best_team2 = team2[:]
+        team1_mmr = sum(player_mmrs[uid] for uid in team1)
+        team2_mmr = sum(player_mmrs[uid] for uid in team2)
+        diff = abs(team1_mmr - team2_mmr)
 
-    for t1_player in team1:
-        for t2_player in team2:
-            test_team1 = [p if p != t1_player else t2_player for p in team1]
-            test_team2 = [p if p != t2_player else t1_player for p in team2]
+        if diff < best_diff:
+            best_diff = diff
+            best_team1 = team1[:]
+            best_team2 = team2[:]
 
-            diff = abs(sum(player_mmrs[u] for u in test_team1) - sum(player_mmrs[u] for u in test_team2))
-            if diff < best_diff:
-                best_diff = diff
-                best_team1 = test_team1[:]
-                best_team2 = test_team2[:]
+            # Perfect balance found, stop searching
+            if diff == 0:
+                break
 
-    log_action(f"Balanced teams - MMR diff: {best_diff}")
+    # Sort teams by average MMR (higher avg team first for consistency)
+    team1_avg = sum(player_mmrs[uid] for uid in best_team1) / len(best_team1)
+    team2_avg = sum(player_mmrs[uid] for uid in best_team2) / len(best_team2)
+
+    if team2_avg > team1_avg:
+        best_team1, best_team2 = best_team2, best_team1
+
+    log_action(f"Balanced teams - MMR diff: {best_diff} (checked all {len(list(combinations(players, team_size)))} combinations)")
     return best_team1, best_team2
 
 
@@ -673,6 +682,10 @@ async def start_playlist_match(channel: discord.TextChannel, playlist_state: Pla
     ps = playlist_state
     players = ps.queue[:]
 
+    # Reset ping cooldown so players can ping again for new matches
+    ps.last_ping_time = None
+    log_action(f"Reset ping cooldown for {ps.name}")
+
     log_action(f"Starting {ps.name} match with {len(players)} players")
 
     # Clear queue
@@ -797,7 +810,7 @@ async def show_playlist_match_embed(channel: discord.TextChannel, match: Playlis
 
     embed = discord.Embed(
         title=f"{match.get_match_label()} - In Progress",
-        description=f"**{ps.name}**",
+        description=f"**{ps.name}**\n*Game winners will be determined from parsed stats*",
         color=discord.Color.green()
     )
 
@@ -835,17 +848,20 @@ async def show_playlist_match_embed(channel: discord.TextChannel, match: Playlis
             inline=True
         )
 
-    # Show completed games
+    # Show completed games (populated from parsed stats)
     if match.games:
         games_text = ""
         for i, winner in enumerate(match.games, 1):
             stats = match.game_stats.get(i, {})
             map_name = stats.get("map", "")
+            gametype = stats.get("gametype", "")
             if ps.playlist_type == PlaylistType.HEAD_TO_HEAD:
                 winner_label = "P1" if winner == "TEAM1" else "P2"
             else:
                 winner_label = "🔴" if winner == "TEAM1" else "🔵"
-            if map_name:
+            if map_name and gametype:
+                games_text += f"Game {i}: {winner_label} - {map_name} - {gametype}\n"
+            elif map_name:
                 games_text += f"Game {i}: {winner_label} - {map_name}\n"
             else:
                 games_text += f"Game {i}: {winner_label}\n"
@@ -855,22 +871,13 @@ async def show_playlist_match_embed(channel: discord.TextChannel, match: Playlis
             inline=False
         )
 
-    # Show next map/gametype
-    if match.map_name and match.gametype:
-        embed.add_field(
-            name=f"Game {match.current_game} - Next Map",
-            value=f"**{match.map_name}** - {match.gametype}",
-            inline=False
-        )
-
     # Show end series votes
     votes_needed = get_end_series_votes_needed(ps.playlist_type)
     current_votes = len(match.end_series_votes)
-    total_players = len(match.team1) + len(match.team2)
 
     embed.add_field(
         name=f"End Series Votes ({current_votes}/{votes_needed})",
-        value=f"{current_votes} vote{'s' if current_votes != 1 else ''} to end",
+        value=f"{current_votes} vote{'s' if current_votes != 1 else ''} - Click End Match when your games are done",
         inline=False
     )
 
@@ -888,74 +895,18 @@ async def show_playlist_match_embed(channel: discord.TextChannel, match: Playlis
 
 
 class PlaylistMatchView(View):
-    """View for active playlist match with voting buttons"""
+    """View for active playlist match - only END SERIES button"""
     def __init__(self, match: PlaylistMatch):
         super().__init__(timeout=None)
         self.match = match
 
-        # Customize based on playlist type
-        if match.playlist_state.playlist_type == PlaylistType.HEAD_TO_HEAD:
-            self.team1_btn.label = "Player 1 Wins"
-            self.team2_btn.label = "Player 2 Wins"
-        else:
-            self.team1_btn.label = f"Red Team Wins Game {match.current_game}"
-            self.team2_btn.label = f"Blue Team Wins Game {match.current_game}"
-
-        # Set unique custom IDs
+        # Set unique custom ID for end button
         ptype = match.playlist_state.playlist_type
-        self.team1_btn.custom_id = f"vote_team1_{ptype}_{match.match_number}"
-        self.team2_btn.custom_id = f"vote_team2_{ptype}_{match.match_number}"
         self.end_btn.custom_id = f"end_match_{ptype}_{match.match_number}"
 
-    @discord.ui.button(label="Red Team Wins", style=discord.ButtonStyle.danger, row=0)
-    async def team1_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.process_vote(interaction, 'TEAM1')
-
-    @discord.ui.button(label="Blue Team Wins", style=discord.ButtonStyle.primary, row=1)
-    async def team2_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.process_vote(interaction, 'TEAM2')
-
-    @discord.ui.button(label="End Match", style=discord.ButtonStyle.secondary, row=2)
+    @discord.ui.button(label="End Match", style=discord.ButtonStyle.secondary, row=0)
     async def end_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.end_match(interaction)
-
-    async def process_vote(self, interaction: discord.Interaction, winner: str):
-        """Process game winner vote"""
-        # Check if user is a player or staff
-        all_players = self.match.team1 + self.match.team2
-        user_roles = [role.name for role in interaction.user.roles]
-        is_staff = any(role in ["Overlord", "Staff", "Server Tech Support"] for role in user_roles)
-
-        if not is_staff and interaction.user.id not in all_players:
-            await interaction.response.send_message("Only players or staff can vote!", ephemeral=True)
-            return
-
-        # Record game winner with current map/gametype
-        self.match.games.append(winner)
-        self.match.game_stats[len(self.match.games)] = {
-            "map": self.match.map_name,
-            "gametype": self.match.gametype
-        }
-        self.match.current_game += 1
-
-        log_action(f"{self.match.get_match_label()} - Game {len(self.match.games)} won by {winner} on {self.match.map_name}")
-
-        await interaction.response.defer()
-
-        # Select NEW random map/gametype for next game
-        new_map, new_gametype = select_random_map_gametype(self.match.playlist_state.playlist_type)
-        self.match.map_name = new_map
-        self.match.gametype = new_gametype
-
-        # Update buttons
-        if self.match.playlist_state.playlist_type == PlaylistType.HEAD_TO_HEAD:
-            self.team1_btn.label = "Player 1 Wins"
-            self.team2_btn.label = "Player 2 Wins"
-        else:
-            self.team1_btn.label = f"Red Team Wins Game {self.match.current_game}"
-            self.team2_btn.label = f"Blue Team Wins Game {self.match.current_game}"
-
-        await show_playlist_match_embed(interaction.channel, self.match)
 
     async def end_match(self, interaction: discord.Interaction):
         """Vote to end the series"""
