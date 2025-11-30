@@ -1,7 +1,7 @@
 # playlists.py - Multi-Playlist Queue System
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.1.0"
+MODULE_VERSION = "1.1.1"
 
 import discord
 from discord.ui import View, Button
@@ -480,16 +480,11 @@ class PlaylistQueueView(View):
             except:
                 pass
 
-        # Create ping embed
+        # Create ping embed - just the progress image, no redundant text
         current_count = len(ps.queue)
-        needed = ps.max_players - current_count
 
-        embed = discord.Embed(
-            title=f"{ps.name} - Players Needed!",
-            description=f"We have **{current_count}/{ps.max_players}** players searching.\nNeed **{needed}** more to start!",
-            color=discord.Color.blue()
-        )
-        embed.set_author(name="Message From Carnage Report", icon_url=HEADER_IMAGE_URL)
+        embed = discord.Embed(color=discord.Color.green())
+        embed.set_image(url=get_queue_progress_image(current_count, ps.max_players))
 
         # Create view with join button
         view = PlaylistPingJoinView(ps)
@@ -585,15 +580,9 @@ async def update_playlist_ping_message(guild: discord.Guild, ps: PlaylistQueueSt
             pass
         return
 
-    # Update the message
-    needed = ps.max_players - current_count
-
-    embed = discord.Embed(
-        title=f"{ps.name} - Players Needed!",
-        description=f"We have **{current_count}/{ps.max_players}** players searching.\nNeed **{needed}** more to start!",
-        color=discord.Color.green()
-    )
-    embed.set_author(name="Message From Carnage Report", icon_url=HEADER_IMAGE_URL)
+    # Update the message with just the progress image
+    embed = discord.Embed(color=discord.Color.green())
+    embed.set_image(url=get_queue_progress_image(current_count, ps.max_players))
 
     try:
         await ps.ping_message.edit(embed=embed)
