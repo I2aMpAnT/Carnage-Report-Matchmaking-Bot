@@ -1,7 +1,7 @@
 # commands.py - All Bot Commands
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.4.4"
+MODULE_VERSION = "1.4.5"
 
 import discord
 from discord import app_commands
@@ -10,7 +10,9 @@ import random
 from datetime import datetime
 import json
 import os
+import asyncio
 from itertools import combinations
+import github_webhook
 
 # Admin role configuration (highest level - can manage staff roles)
 ADMIN_ROLES = ["Overlord"]
@@ -781,7 +783,6 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         await interaction.response.defer(ephemeral=True)
 
         import STATSRANKS
-        import github_webhook
 
         guild = interaction.guild
 
