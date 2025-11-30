@@ -651,15 +651,22 @@ async def process_stats_and_update_results(bot, games: List[Dict] = None):
 async def sync_discord_ranks_for_all_players(bot) -> int:
     """
     Sync Discord rank roles for all players in rankstats.json.
+    Pulls latest data from GitHub first to ensure ranks match website.
     Called after stats are parsed/populated to ensure Discord roles match current XP.
 
     Returns:
         Number of players updated
     """
     import STATSRANKS
+    import github_webhook
 
-    # Load all player stats
-    stats = STATSRANKS.load_json_file(STATSRANKS.RANKSTATS_FILE)
+    # Pull latest stats from GitHub (source of truth for ranks)
+    stats = github_webhook.pull_rankstats_from_github()
+
+    if not stats:
+        # Fall back to local file if GitHub pull fails
+        print("⚠️ Could not pull from GitHub, using local rankstats.json")
+        stats = STATSRANKS.load_json_file(STATSRANKS.RANKSTATS_FILE)
 
     if not stats:
         print("No player stats to sync")
@@ -695,25 +702,24 @@ async def sync_discord_ranks_for_all_players(bot) -> int:
                     except:
                         pass
 
-            # Ensure playlist_stats exists
-            if "playlist_stats" not in player_stats:
-                player_stats["playlist_stats"] = STATSRANKS.get_default_playlist_stats()
-
-            # Calculate highest rank across all playlists
-            highest = STATSRANKS.calculate_highest_rank(player_stats)
-            player_stats["highest_rank"] = highest
+            # Use highest_rank from GitHub data (source of truth)
+            # Fall back to calculating if not present
+            highest = player_stats.get("highest_rank")
+            if highest is None or highest < 1:
+                highest = STATSRANKS.calculate_highest_rank(player_stats)
 
             # Only update Discord role if:
             # 1. They don't have a rank yet, OR
-            # 2. The calculated rank is HIGHER than current (never downgrade)
-            if current_rank is None or highest > current_rank:
+            # 2. The new rank is DIFFERENT from current
+            if current_rank is None or highest != current_rank:
                 await STATSRANKS.update_player_rank_role(guild, user_id, highest, send_dm=False)
                 updated_count += 1
+                print(f"  Updated {member.display_name}: Level {current_rank} → Level {highest}")
 
         except Exception as e:
             print(f"⚠️ Error syncing rank for user {user_id_str}: {e}")
 
-    # Save any updates to highest_rank
+    # Update local rankstats.json with GitHub data (keep local in sync)
     STATSRANKS.save_json_file(STATSRANKS.RANKSTATS_FILE, stats, skip_github=True)
 
     print(f"✅ Synced Discord ranks for {updated_count} players")
