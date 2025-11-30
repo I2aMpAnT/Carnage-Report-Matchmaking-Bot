@@ -786,9 +786,8 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
 
         guild = interaction.guild
 
-        # Pull from GitHub (source of truth) - run in executor to avoid blocking
-        loop = asyncio.get_event_loop()
-        stats = await loop.run_in_executor(None, github_webhook.pull_rankstats_from_github)
+        # Pull from GitHub (source of truth) using async version
+        stats = await github_webhook.async_pull_rankstats_from_github()
 
         if not stats:
             await interaction.followup.send(

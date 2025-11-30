@@ -3,13 +3,22 @@ github_webhook.py - Automatic GitHub Updates
 Pushes all JSON data files to GitHub whenever they're updated
 """
 
-MODULE_VERSION = "1.2.0"
+MODULE_VERSION = "1.2.1"
 
-import requests
 import json
 import base64
 import os
 from datetime import datetime
+
+# Try to import requests, but don't fail if not available
+try:
+    import requests
+    REQUESTS_AVAILABLE = True
+except ImportError:
+    REQUESTS_AVAILABLE = False
+
+# aiohttp for async operations (always available with discord.py)
+import aiohttp
 
 # GitHub Configuration
 GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')  # Personal Access Token
@@ -67,8 +76,45 @@ def pull_file_from_github(github_path: str) -> dict:
 
 
 def pull_rankstats_from_github() -> dict:
-    """Pull rankstats.json from GitHub"""
+    """Pull rankstats.json from GitHub (sync version)"""
     return pull_file_from_github("rankstats.json")
+
+
+async def async_pull_file_from_github(github_path: str) -> dict:
+    """
+    Async version: Pull a JSON file from GitHub repo using aiohttp
+
+    Args:
+        github_path: Path in the GitHub repo
+
+    Returns:
+        dict: Parsed JSON content, or None if failed
+    """
+    raw_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/{github_path}"
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(raw_url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                if response.status == 200:
+                    text = await response.text()
+                    data = json.loads(text)
+                    log_github_action(f"✅ Pulled {github_path} from GitHub (async)")
+                    return data
+                else:
+                    log_github_action(f"❌ Failed to pull {github_path}: {response.status}")
+                    return None
+
+    except json.JSONDecodeError as e:
+        log_github_action(f"⚠️ Invalid JSON in {github_path}: {e}")
+        return None
+    except Exception as e:
+        log_github_action(f"❌ Exception pulling {github_path}: {e}")
+        return None
+
+
+async def async_pull_rankstats_from_github() -> dict:
+    """Async version: Pull rankstats.json from GitHub"""
+    return await async_pull_file_from_github("rankstats.json")
 
 def push_file_to_github(local_file: str, github_path: str, commit_message: str = None) -> bool:
     """
