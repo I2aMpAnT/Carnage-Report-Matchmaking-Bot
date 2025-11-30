@@ -3,7 +3,7 @@ github_webhook.py - Automatic GitHub Updates
 Pushes all JSON data files to GitHub whenever they're updated
 """
 
-MODULE_VERSION = "1.1.0"
+MODULE_VERSION = "1.2.0"
 
 import requests
 import json
@@ -33,6 +33,42 @@ def log_github_action(message: str):
     """Log GitHub webhook actions"""
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     print(f"[GITHUB] [{timestamp}] {message}")
+
+
+def pull_file_from_github(github_path: str) -> dict:
+    """
+    Pull a JSON file from GitHub repo (raw content, no auth needed for public repos)
+
+    Args:
+        github_path: Path in the GitHub repo
+
+    Returns:
+        dict: Parsed JSON content, or None if failed
+    """
+    raw_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/{github_path}"
+
+    try:
+        response = requests.get(raw_url, timeout=10)
+
+        if response.status_code == 200:
+            data = response.json()
+            log_github_action(f"✅ Pulled {github_path} from GitHub")
+            return data
+        else:
+            log_github_action(f"❌ Failed to pull {github_path}: {response.status_code}")
+            return None
+
+    except json.JSONDecodeError as e:
+        log_github_action(f"⚠️ Invalid JSON in {github_path}: {e}")
+        return None
+    except Exception as e:
+        log_github_action(f"❌ Exception pulling {github_path}: {e}")
+        return None
+
+
+def pull_rankstats_from_github() -> dict:
+    """Pull rankstats.json from GitHub"""
+    return pull_file_from_github("rankstats.json")
 
 def push_file_to_github(local_file: str, github_path: str, commit_message: str = None) -> bool:
     """
