@@ -777,65 +777,78 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
     @bot.tree.command(name='silentrankrefresh', description='[ADMIN] Silently refresh all player ranks (no DMs)')
     @has_admin_role()
     async def silent_rank_refresh(interaction: discord.Interaction):
-        """Refresh all player ranks based on their stats - no DMs sent"""
+        """Refresh all player ranks from GitHub (source of truth) - no DMs sent"""
         await interaction.response.defer(ephemeral=True)
-        
+
         import STATSRANKS
-        
+        import github_webhook
+
         guild = interaction.guild
-        stats = STATSRANKS.load_json_file(STATSRANKS.RANKSTATS_FILE)
-        
-        refreshed = 0
-        reset_to_one = 0
-        
-        # Process all players in the stats file
+
+        # Pull from GitHub (source of truth)
+        stats = github_webhook.pull_rankstats_from_github()
+
+        if not stats:
+            await interaction.followup.send(
+                "❌ Could not pull stats from GitHub. Please try again.",
+                ephemeral=True
+            )
+            return
+
+        updated = 0
+        skipped = 0
+        errors = 0
+
+        # Process all players in GitHub stats
         for user_id_str, player_stats in stats.items():
             try:
                 user_id = int(user_id_str)
                 member = guild.get_member(user_id)
-                
+
                 if not member:
                     continue
-                
-                # Check if they have any games played
-                total_games = player_stats.get("wins", 0) + player_stats.get("losses", 0)
-                
-                if total_games == 0:
-                    # No games = Level 1
-                    new_level = 1
-                    reset_to_one += 1
-                else:
-                    # Calculate rank from XP
-                    new_level = STATSRANKS.calculate_rank(player_stats.get("xp", 0))
-                
+
+                # Get current Discord rank
+                current_rank = None
+                for role in member.roles:
+                    if role.name.startswith("Level "):
+                        try:
+                            current_rank = int(role.name.replace("Level ", ""))
+                            break
+                        except:
+                            pass
+
+                # Use highest_rank from GitHub, fall back to calculating
+                highest = player_stats.get("highest_rank")
+                if highest is None or highest < 1:
+                    highest = STATSRANKS.calculate_highest_rank(player_stats)
+
+                # Skip if already correct
+                if current_rank == highest:
+                    skipped += 1
+                    continue
+
                 # Update role silently (send_dm=False)
-                await STATSRANKS.update_player_rank_role(guild, user_id, new_level, send_dm=False)
-                refreshed += 1
-                
+                await STATSRANKS.update_player_rank_role(guild, user_id, highest, send_dm=False)
+                updated += 1
+                print(f"  [SILENT] {member.display_name}: Level {current_rank} → Level {highest}")
+
+                await asyncio.sleep(0.3)  # Rate limit protection
+
             except Exception as e:
                 log_action(f"Error refreshing rank for {user_id_str}: {e}")
+                errors += 1
                 continue
-        
-        # Also check all guild members who might not be in stats yet
-        for member in guild.members:
-            if member.bot:
-                continue
-            
-            user_id_str = str(member.id)
-            if user_id_str not in stats:
-                # Not in stats = Level 1
-                try:
-                    await STATSRANKS.update_player_rank_role(guild, member.id, 1, send_dm=False)
-                    reset_to_one += 1
-                    refreshed += 1
-                except:
-                    pass
-        
-        log_action(f"Admin {interaction.user.name} ran silent rank refresh: {refreshed} players updated, {reset_to_one} reset to Level 1")
+
+        # Update local stats to match GitHub
+        STATSRANKS.save_json_file(STATSRANKS.RANKSTATS_FILE, stats, skip_github=True)
+
+        log_action(f"Admin {interaction.user.name} ran silent rank refresh: {updated} updated, {skipped} skipped, {errors} errors")
         await interaction.followup.send(
             f"✅ Silent rank refresh complete!\n"
-            f"• **{refreshed}** players updated\n"
-            f"• **{reset_to_one}** players set to Level 1 (no games)",
+            f"• **{updated}** players updated\n"
+            f"• **{skipped}** already correct\n"
+            f"• **{errors}** errors",
             ephemeral=True
         )
     
