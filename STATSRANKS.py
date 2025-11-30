@@ -7,7 +7,7 @@ Import this module in bot.py with:
     await bot.load_extension('STATSRANKS')
 """
 
-MODULE_VERSION = "1.2.3"
+MODULE_VERSION = "1.2.4"
 
 import discord
 from discord import app_commands
@@ -860,30 +860,45 @@ class StatsCommands(commands.Cog):
     
     @app_commands.command(name="verifystats", description="Update your rank role based on your current stats")
     async def verifystats(self, interaction: discord.Interaction):
-        """Verify and update your own rank - uses highest rank across all playlists"""
+        """Verify and update your own rank - pulls from GitHub (source of truth)"""
         await interaction.response.defer(ephemeral=True)
 
-        # Get player stats
-        player_stats = get_player_stats(interaction.user.id)
+        import github_webhook
 
-        # Calculate and update highest rank
-        highest = calculate_highest_rank(player_stats)
-        player_stats["highest_rank"] = highest
+        # Pull latest stats from GitHub (source of truth)
+        github_stats = github_webhook.pull_rankstats_from_github()
 
-        # Save the updated highest_rank
-        stats = load_json_file(RANKSTATS_FILE)
-        stats[str(interaction.user.id)]["highest_rank"] = highest
-        save_json_file(RANKSTATS_FILE, stats)
+        user_id_str = str(interaction.user.id)
+
+        if not github_stats or user_id_str not in github_stats:
+            await interaction.followup.send(
+                "❌ Could not find your stats. You may not have played any ranked games yet.",
+                ephemeral=True
+            )
+            return
+
+        player_stats = github_stats[user_id_str]
+
+        # Use highest_rank from GitHub, fall back to calculating
+        highest = player_stats.get("highest_rank")
+        if highest is None or highest < 1:
+            highest = calculate_highest_rank(player_stats)
 
         # Update role based on highest rank
-        await update_player_rank_role(interaction.guild, interaction.user.id, highest, send_dm=True)
+        await update_player_rank_role(interaction.guild, interaction.user.id, highest, send_dm=False)
+
+        # Update local stats to match GitHub
+        local_stats = load_json_file(RANKSTATS_FILE)
+        local_stats[user_id_str] = player_stats
+        save_json_file(RANKSTATS_FILE, local_stats, skip_github=True)
 
         # Get per-playlist ranks for display
-        playlist_ranks = get_all_playlist_ranks(interaction.user.id)
+        playlist_stats = player_stats.get("playlist_stats", {})
         ranks_display = "\n".join([
-            f"• **{ptype.replace('_', ' ').title()}**: Level {rank}"
-            for ptype, rank in playlist_ranks.items()
-        ])
+            f"• **{ptype.replace('_', ' ').title()}**: Level {calculate_playlist_rank(pstats.get('xp', 0))}"
+            for ptype, pstats in playlist_stats.items()
+            if pstats.get('xp', 0) > 0
+        ]) or "No playlist stats yet"
 
         await interaction.followup.send(
             f"✅ Your rank has been verified!\n"
@@ -896,55 +911,80 @@ class StatsCommands(commands.Cog):
     @app_commands.command(name="verifystatsall", description="[ADMIN] Refresh all players' rank roles")
     @has_admin_role()
     async def verifystatsall(self, interaction: discord.Interaction):
-        """Refresh all ranks (Admin only) - uses highest rank across all playlists"""
+        """Refresh all ranks (Admin only) - pulls from GitHub (source of truth)"""
         await interaction.response.send_message(
-            "🔄 Starting rank refresh for all players... This may take a while.",
+            "🔄 Pulling ranks from GitHub and syncing... This may take a while.",
             ephemeral=True
         )
 
+        import github_webhook
+
         guild = interaction.guild
-        stats = load_json_file(RANKSTATS_FILE)
+
+        # Pull latest stats from GitHub (source of truth)
+        stats = github_webhook.pull_rankstats_from_github()
+
+        if not stats:
+            await interaction.followup.send(
+                "❌ Could not pull stats from GitHub. Please try again later.",
+                ephemeral=True
+            )
+            return
 
         updated_count = 0
+        skipped_count = 0
         error_count = 0
-        migrated_count = 0
 
         for user_id_str, player_stats in stats.items():
             try:
                 user_id = int(user_id_str)
+                member = guild.get_member(user_id)
+                if not member:
+                    continue
 
-                # Migrate old players to new structure if needed
-                if "playlist_stats" not in player_stats:
-                    player_stats["playlist_stats"] = get_default_playlist_stats()
-                    migrated_count += 1
+                # Get current Discord rank
+                current_rank = None
+                for role in member.roles:
+                    if role.name.startswith("Level "):
+                        try:
+                            current_rank = int(role.name.replace("Level ", ""))
+                            break
+                        except:
+                            pass
 
-                # Calculate highest rank across all playlists
-                highest = calculate_highest_rank(player_stats)
-                player_stats["highest_rank"] = highest
-                stats[user_id_str]["highest_rank"] = highest
+                # Use highest_rank from GitHub, fall back to calculating
+                highest = player_stats.get("highest_rank")
+                if highest is None or highest < 1:
+                    highest = calculate_highest_rank(player_stats)
+
+                # Skip if already correct
+                if current_rank == highest:
+                    skipped_count += 1
+                    continue
 
                 await update_player_rank_role(guild, user_id, highest, send_dm=False)
                 updated_count += 1
+                print(f"  Updated {member.display_name}: Level {current_rank} → Level {highest}")
 
                 # Small delay to avoid rate limits
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(0.3)
 
             except Exception as e:
                 print(f"❌ Error updating user {user_id_str}: {e}")
                 error_count += 1
 
-        # Save migrated data
-        save_json_file(RANKSTATS_FILE, stats)
+        # Update local stats to match GitHub
+        save_json_file(RANKSTATS_FILE, stats, skip_github=True)
 
         # Summary
         await interaction.followup.send(
-            f"✅ Rank refresh complete!\n"
+            f"✅ Rank sync complete!\n"
             f"**Updated:** {updated_count}\n"
-            f"**Migrated:** {migrated_count}\n"
+            f"**Already correct:** {skipped_count}\n"
             f"**Errors:** {error_count}",
             ephemeral=True
         )
-        print(f"[VERIFY ALL] Refreshed {updated_count} ranks, migrated {migrated_count}, {error_count} errors")
+        print(f"[VERIFY ALL] Synced {updated_count} ranks, skipped {skipped_count}, {error_count} errors")
     
     @app_commands.command(name="mmr", description="[ADMIN] Set a player's MMR")
     @has_admin_role()
