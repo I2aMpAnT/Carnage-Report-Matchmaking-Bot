@@ -5,8 +5,8 @@
 # ============================================
 # VERSION INFO
 # ============================================
-BOT_VERSION = "1.5.0"
-BOT_BUILD_DATE = "2025-11-29"
+BOT_VERSION = "1.6.0"
+BOT_BUILD_DATE = "2025-11-30"
 # ============================================
 
 import discord
@@ -162,6 +162,11 @@ async def on_ready():
         print(f"  stats_parser.py:     v{stats_parser.MODULE_VERSION}")
     except:
         print(f"  stats_parser.py:     (no version)")
+    try:
+        import game_stats_webhook
+        print(f"  game_stats_webhook.py: v{game_stats_webhook.MODULE_VERSION}")
+    except:
+        print(f"  game_stats_webhook.py: (no version)")
     print("-" * 30)
     print()
     
@@ -276,6 +281,15 @@ async def on_ready():
         print(f'⚠️ State restoration error: {e}')
         import traceback
         traceback.print_exc()
+
+    # Start game stats webhook server
+    try:
+        import game_stats_webhook
+        import asyncio
+        asyncio.create_task(game_stats_webhook.start_webhook_server())
+        print('✅ Game stats webhook server started on port 8080')
+    except Exception as e:
+        print(f'⚠️ Game stats webhook not started: {e}')
 
 @bot.event
 async def on_command_error(ctx, error):
