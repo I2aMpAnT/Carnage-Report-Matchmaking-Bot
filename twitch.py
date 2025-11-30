@@ -3,7 +3,7 @@ twitch.py - Twitch Integration Module
 Manages player Twitch links and multi-stream URLs
 """
 
-MODULE_VERSION = "1.2.1"
+MODULE_VERSION = "1.2.2"
 
 import discord
 from discord import app_commands
@@ -462,15 +462,18 @@ def setup_twitch_commands(bot: commands.Bot):
         if not any(role in ADMIN_ROLES for role in user_roles):
             await interaction.response.send_message("❌ Admin only.", ephemeral=True)
             return
-        
+
         name = extract_twitch_name(twitch)
         if not name:
             await interaction.response.send_message("❌ Invalid Twitch username.", ephemeral=True)
             return
-        
+
         set_player_twitch(user.id, name)
-        await interaction.response.defer()
-    
+        await interaction.response.send_message(
+            f"✅ Set {user.display_name}'s Twitch to **{name}**",
+            ephemeral=True
+        )
+
     @bot.tree.command(name="adminremovetwitch", description="[ADMIN] Remove someone's Twitch")
     @app_commands.describe(user="The user")
     async def admin_remove_twitch(interaction: discord.Interaction, user: discord.Member):
@@ -479,9 +482,12 @@ def setup_twitch_commands(bot: commands.Bot):
         if not any(role in ADMIN_ROLES for role in user_roles):
             await interaction.response.send_message("❌ Admin only.", ephemeral=True)
             return
-        
+
         if remove_player_twitch(user.id):
-            await interaction.response.defer()
+            await interaction.response.send_message(
+                f"✅ Removed {user.display_name}'s Twitch link.",
+                ephemeral=True
+            )
         else:
             await interaction.response.send_message(
                 f"❌ {user.display_name} has no Twitch linked.",
