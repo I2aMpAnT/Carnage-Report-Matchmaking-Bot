@@ -3,7 +3,7 @@ twitch.py - Twitch Integration Module
 Manages player Twitch links and multi-stream URLs
 """
 
-MODULE_VERSION = "1.2.3"
+MODULE_VERSION = "1.2.4"
 
 import discord
 from discord import app_commands
@@ -131,26 +131,43 @@ def get_player_twitch(user_id: int) -> Optional[dict]:
     return players.get(str(user_id))
 
 def set_player_twitch(user_id: int, twitch_name: str, display_name: Optional[str] = None):
-    """Set a player's Twitch info"""
+    """Set a player's Twitch info (preserves existing MAC/other data)"""
     players = load_players()
-    
-    players[str(user_id)] = {
-        "twitch_name": twitch_name,
-        "twitch_url": f"https://twitch.tv/{twitch_name}"
-    }
-    
+    user_key = str(user_id)
+
+    # Initialize if doesn't exist, otherwise preserve existing data
+    if user_key not in players:
+        players[user_key] = {}
+
+    # Update/add Twitch fields (preserves mac_addresses, discord_name, etc.)
+    players[user_key]["twitch_name"] = twitch_name
+    players[user_key]["twitch_url"] = f"https://twitch.tv/{twitch_name}"
+
     if display_name:
-        players[str(user_id)]["display_name"] = display_name
-    
+        players[user_key]["display_name"] = display_name
+
     save_players(players)
 
 def remove_player_twitch(user_id: int) -> bool:
-    """Remove a player's Twitch info"""
+    """Remove a player's Twitch info (preserves MAC/other data)"""
     players = load_players()
-    if str(user_id) in players:
-        del players[str(user_id)]
+    user_key = str(user_id)
+
+    if user_key in players:
+        player_data = players[user_key]
+        had_twitch = 'twitch_name' in player_data
+
+        # Remove only Twitch-related fields
+        player_data.pop('twitch_name', None)
+        player_data.pop('twitch_url', None)
+
+        # If no other data remains, remove the entry entirely
+        if not player_data:
+            del players[user_key]
+
         save_players(players)
-        return True
+        return had_twitch
+
     return False
 
 def make_multitwitch(names: List[str]) -> str:
