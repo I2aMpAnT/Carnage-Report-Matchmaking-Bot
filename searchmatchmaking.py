@@ -1,7 +1,7 @@
 # searchmatchmaking.py - MLG 4v4 Queue Management System
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.4.4"
+MODULE_VERSION = "1.4.5"
 
 import discord
 from discord.ui import View, Button
@@ -799,8 +799,10 @@ async def create_queue_embed(channel: discord.TextChannel):
         color=discord.Color.blue()
     )
 
-    # Set header image
-    embed.set_image(url="https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/MessagefromCarnagereport.png")
+    # Set header thumbnail (small image on side)
+    embed.set_thumbnail(url="https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/MessagefromCarnagereport.png")
+    # Set progress image (large image at bottom)
+    embed.set_image(url=get_queue_progress_image(0))
 
     embed.add_field(
         name=f"Players in Queue (0/{MAX_QUEUE_SIZE})",
@@ -892,8 +894,10 @@ async def update_queue_embed(channel: discord.TextChannel):
         color=discord.Color.blue()
     )
 
-    # Set header image
-    embed.set_image(url="https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/MessagefromCarnagereport.png")
+    # Set header thumbnail (small image on side)
+    embed.set_thumbnail(url="https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/MessagefromCarnagereport.png")
+    # Set progress image (large image at bottom)
+    embed.set_image(url=get_queue_progress_image(player_count))
 
     embed.add_field(
         name=f"Players in Queue ({player_count}/{MAX_QUEUE_SIZE})",
