@@ -1,7 +1,7 @@
 # searchmatchmaking.py - MLG 4v4 Queue Management System
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.4.6"
+MODULE_VERSION = "1.4.7"
 
 import discord
 from discord.ui import View, Button
@@ -813,24 +813,18 @@ async def create_queue_embed(channel: discord.TextChannel):
 
     view = QueueView()
 
-    # Try to find existing queue message
+    # Find and DELETE existing queue message
     async for message in channel.history(limit=50):
         if message.author.bot and message.embeds:
             for emb in message.embeds:
                 if emb.title and "Matchmaking" in emb.title:
                     try:
-                        await message.edit(embeds=[header_embed, main_embed], view=view)
-
-                        # Start auto-update task if not already running
-                        if queue_state.auto_update_task is None or queue_state.auto_update_task.done():
-                            queue_state.auto_update_task = asyncio.create_task(auto_update_queue_times())
-                            log_action("Started queue auto-update task")
-
-                        return
+                        await message.delete()
                     except:
                         pass
+                    break
 
-    # Create new message if not found
+    # Always post new message at bottom
     await channel.send(embeds=[header_embed, main_embed], view=view)
 
     # Start auto-update task if not already running
@@ -929,16 +923,16 @@ async def update_queue_embed(channel: discord.TextChannel):
 
     view = QueueView()
 
-    # Find and update existing message
+    # Find and DELETE existing message, then repost at bottom
     async for message in channel.history(limit=50):
         if message.author.bot and message.embeds:
             for emb in message.embeds:
                 if emb.title and "Matchmaking" in emb.title:
                     try:
-                        await message.edit(embeds=[header_embed, main_embed], view=view)
-                        return
+                        await message.delete()
                     except:
                         pass
+                    break
 
-    # Create new if not found
+    # Always post new message at bottom
     await channel.send(embeds=[header_embed, main_embed], view=view)
