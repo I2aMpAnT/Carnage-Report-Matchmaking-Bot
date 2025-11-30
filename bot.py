@@ -9,6 +9,18 @@ def pull_from_github():
     """Pull latest code from GitHub before starting"""
     print("📥 Pulling latest code from GitHub...")
     try:
+        # First, stash any local changes (like JSON data files)
+        stash_result = subprocess.run(
+            ["git", "stash", "--include-untracked"],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        had_changes = "No local changes" not in stash_result.stdout
+        if had_changes:
+            print("📦 Stashed local changes")
+
+        # Now pull the latest code
         result = subprocess.run(
             ["git", "pull", "origin", "main"],
             capture_output=True,
@@ -23,6 +35,22 @@ def pull_from_github():
                 print(result.stdout)
         else:
             print(f"⚠️ Git pull warning: {result.stderr}")
+
+        # Restore stashed changes (preserves local JSON data)
+        if had_changes:
+            pop_result = subprocess.run(
+                ["git", "stash", "pop"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if pop_result.returncode == 0:
+                print("📦 Restored local data files")
+            else:
+                # If pop fails due to conflicts, keep the stash and warn
+                print("⚠️ Could not auto-restore local changes (may have conflicts)")
+                print("   Run 'git stash pop' manually if needed")
+
     except subprocess.TimeoutExpired:
         print("⚠️ Git pull timed out - continuing with existing files")
     except FileNotFoundError:
