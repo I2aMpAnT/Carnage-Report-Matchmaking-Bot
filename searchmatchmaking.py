@@ -1,7 +1,7 @@
 # searchmatchmaking.py - MLG 4v4 Queue Management System
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.4.8"
+MODULE_VERSION = "1.4.9"
 
 import discord
 from discord.ui import View, Button
@@ -134,8 +134,10 @@ class InactivityConfirmView(View):
                     embed=None,
                     view=None
                 )
+            except discord.errors.InteractionResponded:
+                await interaction.followup.send("✅ You've been kept in the queue!", ephemeral=True)
             except:
-                await interaction.response.send_message("✅ You've been kept in the queue!", ephemeral=True)
+                pass
 
             # Update queue embed
             if queue_state.queue_channel:
@@ -165,8 +167,11 @@ class InactivityConfirmView(View):
                     embed=None,
                     view=None
                 )
+            except discord.errors.InteractionResponded:
+                # Already responded, use followup instead
+                await interaction.followup.send("👋 You've been removed from the queue.", ephemeral=True)
             except:
-                await interaction.response.send_message("👋 You've been removed from the queue.", ephemeral=True)
+                pass
         else:
             await interaction.response.send_message("You're no longer in the queue.", ephemeral=True)
 
@@ -813,18 +818,41 @@ async def create_queue_embed(channel: discord.TextChannel):
 
     view = QueueView()
 
-    # Find and DELETE existing queue message
+    # Find existing queue message and check if it's at the bottom
+    queue_message = None
+    is_at_bottom = True
+    message_count = 0
+
     async for message in channel.history(limit=50):
         if message.author.bot and message.embeds:
             for emb in message.embeds:
                 if emb.title and "Matchmaking" in emb.title:
-                    try:
-                        await message.delete()
-                    except:
-                        pass
+                    queue_message = message
+                    is_at_bottom = (message_count == 0)
                     break
+        if queue_message:
+            break
+        message_count += 1
 
-    # Always post new message at bottom
+    if queue_message:
+        if is_at_bottom:
+            # Already at bottom - just edit in place
+            try:
+                await queue_message.edit(embeds=[header_embed, main_embed], view=view)
+                # Start auto-update task if not already running
+                if queue_state.auto_update_task is None or queue_state.auto_update_task.done():
+                    queue_state.auto_update_task = asyncio.create_task(auto_update_queue_times())
+                    log_action("Started queue auto-update task")
+                return
+            except:
+                pass
+        # Not at bottom - delete and repost
+        try:
+            await queue_message.delete()
+        except:
+            pass
+
+    # Post new message at bottom
     await channel.send(embeds=[header_embed, main_embed], view=view)
 
     # Start auto-update task if not already running
@@ -923,16 +951,36 @@ async def update_queue_embed(channel: discord.TextChannel):
 
     view = QueueView()
 
-    # Find and DELETE existing message, then repost at bottom
+    # Find existing queue message and check if it's at the bottom
+    queue_message = None
+    is_at_bottom = True
+    message_count = 0
+
     async for message in channel.history(limit=50):
         if message.author.bot and message.embeds:
             for emb in message.embeds:
                 if emb.title and "Matchmaking" in emb.title:
-                    try:
-                        await message.delete()
-                    except:
-                        pass
+                    queue_message = message
+                    # If this isn't the first message we found, it's not at the bottom
+                    is_at_bottom = (message_count == 0)
                     break
+        if queue_message:
+            break
+        message_count += 1
 
-    # Always post new message at bottom
+    if queue_message:
+        if is_at_bottom:
+            # Already at bottom - just edit in place
+            try:
+                await queue_message.edit(embeds=[header_embed, main_embed], view=view)
+                return
+            except:
+                pass
+        # Not at bottom or edit failed - delete and repost
+        try:
+            await queue_message.delete()
+        except:
+            pass
+
+    # Post new message at bottom
     await channel.send(embeds=[header_embed, main_embed], view=view)
