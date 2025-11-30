@@ -7,7 +7,7 @@ Import this module in bot.py with:
     await bot.load_extension('STATSRANKS')
 """
 
-MODULE_VERSION = "1.2.4"
+MODULE_VERSION = "1.2.5"
 
 import discord
 from discord import app_commands
@@ -427,33 +427,32 @@ async def update_player_rank_role(guild: discord.Guild, user_id: int, new_level:
     
     if new_role:
         await member.add_roles(new_role, reason=f"Reached {new_role_name}")
-        
-        # DMs DISABLED - uncomment below to re-enable
+
         # Send DM notification if rank changed and send_dm is enabled
-        # if send_dm and old_level is not None and old_level != new_level:
-        #     try:
-        #         embed = discord.Embed(color=discord.Color.blue())
-        #         
-        #         # Add header image
-        #         embed.set_image(url="https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/MessagefromCarnageReportHEADER.png")
-        #         
-        #         if new_level > old_level:
-        #             # Level up - show new rank icon in description
-        #             embed.set_thumbnail(url=get_rank_icon_url(new_level))
-        #             embed.description = f"Congratulations, you have ranked up to"
-        #             embed.color = discord.Color.green()
-        #         elif new_level < old_level:
-        #             # Derank - show old and new rank icons
-        #             embed.set_thumbnail(url=get_rank_icon_url(new_level))
-        #             embed.description = f"Sorry, you have deranked from"
-        #             embed.color = discord.Color.red()
-        #         
-        #         await member.send(embed=embed)
-        #         print(f"Sent rank change DM to {member.name}: {old_level} -> {new_level}")
-        #     except discord.Forbidden:
-        #         print(f"Could not DM {member.name} - DMs disabled")
-        #     except Exception as e:
-        #         print(f"Error sending DM to {member.name}: {e}")
+        if send_dm and old_level is not None and old_level != new_level:
+            try:
+                embed = discord.Embed(color=discord.Color.blue())
+
+                # Add header image
+                embed.set_image(url="https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/MessagefromCarnageReportHEADER.png")
+
+                if new_level > old_level:
+                    # Level up
+                    embed.set_thumbnail(url=get_rank_icon_url(new_level))
+                    embed.description = f"Congratulations, you have ranked up to **Level {new_level}**!"
+                    embed.color = discord.Color.green()
+                elif new_level < old_level:
+                    # Derank
+                    embed.set_thumbnail(url=get_rank_icon_url(new_level))
+                    embed.description = f"Sorry, you have deranked to **Level {new_level}**."
+                    embed.color = discord.Color.red()
+
+                await member.send(embed=embed)
+                print(f"Sent rank change DM to {member.name}: {old_level} -> {new_level}")
+            except discord.Forbidden:
+                print(f"Could not DM {member.name} - DMs disabled")
+            except Exception as e:
+                print(f"Error sending DM to {member.name}: {e}")
     else:
         print(f"⚠️ Role '{new_role_name}' not found in guild")
 
@@ -884,8 +883,8 @@ class StatsCommands(commands.Cog):
         if highest is None or highest < 1:
             highest = calculate_highest_rank(player_stats)
 
-        # Update role based on highest rank
-        await update_player_rank_role(interaction.guild, interaction.user.id, highest, send_dm=False)
+        # Update role based on highest rank (with DM notification)
+        await update_player_rank_role(interaction.guild, interaction.user.id, highest, send_dm=True)
 
         # Update local stats to match GitHub
         local_stats = load_json_file(RANKSTATS_FILE)
@@ -962,7 +961,7 @@ class StatsCommands(commands.Cog):
                     skipped_count += 1
                     continue
 
-                await update_player_rank_role(guild, user_id, highest, send_dm=False)
+                await update_player_rank_role(guild, user_id, highest, send_dm=True)
                 updated_count += 1
                 print(f"  Updated {member.display_name}: Level {current_rank} → Level {highest}")
 
@@ -985,7 +984,85 @@ class StatsCommands(commands.Cog):
             ephemeral=True
         )
         print(f"[VERIFY ALL] Synced {updated_count} ranks, skipped {skipped_count}, {error_count} errors")
-    
+
+    @app_commands.command(name="silentverify", description="[ADMIN] Sync all ranks silently (no DMs)")
+    @has_admin_role()
+    async def silentverify(self, interaction: discord.Interaction):
+        """Refresh all ranks silently (Admin only) - NO DMs sent"""
+        await interaction.response.send_message(
+            "🔄 Silently syncing ranks from GitHub... (no DMs will be sent)",
+            ephemeral=True
+        )
+
+        import github_webhook
+
+        guild = interaction.guild
+
+        # Pull latest stats from GitHub (source of truth)
+        stats = github_webhook.pull_rankstats_from_github()
+
+        if not stats:
+            await interaction.followup.send(
+                "❌ Could not pull stats from GitHub. Please try again later.",
+                ephemeral=True
+            )
+            return
+
+        updated_count = 0
+        skipped_count = 0
+        error_count = 0
+
+        for user_id_str, player_stats in stats.items():
+            try:
+                user_id = int(user_id_str)
+                member = guild.get_member(user_id)
+                if not member:
+                    continue
+
+                # Get current Discord rank
+                current_rank = None
+                for role in member.roles:
+                    if role.name.startswith("Level "):
+                        try:
+                            current_rank = int(role.name.replace("Level ", ""))
+                            break
+                        except:
+                            pass
+
+                # Use highest_rank from GitHub, fall back to calculating
+                highest = player_stats.get("highest_rank")
+                if highest is None or highest < 1:
+                    highest = calculate_highest_rank(player_stats)
+
+                # Skip if already correct
+                if current_rank == highest:
+                    skipped_count += 1
+                    continue
+
+                await update_player_rank_role(guild, user_id, highest, send_dm=False)
+                updated_count += 1
+                print(f"  [SILENT] Updated {member.display_name}: Level {current_rank} → Level {highest}")
+
+                # Small delay to avoid rate limits
+                await asyncio.sleep(0.3)
+
+            except Exception as e:
+                print(f"❌ Error updating user {user_id_str}: {e}")
+                error_count += 1
+
+        # Update local stats to match GitHub
+        save_json_file(RANKSTATS_FILE, stats, skip_github=True)
+
+        # Summary
+        await interaction.followup.send(
+            f"✅ Silent rank sync complete!\n"
+            f"**Updated:** {updated_count}\n"
+            f"**Already correct:** {skipped_count}\n"
+            f"**Errors:** {error_count}",
+            ephemeral=True
+        )
+        print(f"[SILENT VERIFY] Synced {updated_count} ranks, skipped {skipped_count}, {error_count} errors")
+
     @app_commands.command(name="mmr", description="[ADMIN] Set a player's MMR")
     @has_admin_role()
     @app_commands.describe(

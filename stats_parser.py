@@ -859,26 +859,6 @@ class StatsParserCommands(commands.Cog):
             await interaction.followup.send(f"❌ Error matching stats: {e}", ephemeral=True)
             print(f"[STATS PARSER] Match error: {e}")
 
-    @app_commands.command(name="syncranks", description="[ADMIN] Sync all Discord rank roles with current stats")
-    @has_admin_role()
-    async def syncranks(self, interaction: discord.Interaction):
-        """Manually sync Discord rank roles for all players"""
-        await interaction.response.defer(ephemeral=True)
-
-        try:
-            ranks_synced = await sync_discord_ranks_for_all_players(self.bot)
-
-            await interaction.followup.send(
-                f"✅ **Discord Rank Sync Complete**\n"
-                f"• Synced ranks for **{ranks_synced}** players",
-                ephemeral=True
-            )
-            print(f"[STATS PARSER] {interaction.user.name} synced {ranks_synced} player ranks")
-
-        except Exception as e:
-            await interaction.followup.send(f"❌ Error syncing ranks: {e}", ephemeral=True)
-            print(f"[STATS PARSER] Sync error: {e}")
-
     @app_commands.command(name="liststats", description="[ADMIN] List available XLSX stats files")
     @has_admin_role()
     @app_commands.describe(directory="Which directory to list")
