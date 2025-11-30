@@ -1,0 +1,241 @@
+# HALOCASTER WEBHOOK INTEGRATION TODO
+# =====================================
+# Apply these changes to: I2aMpAnT/Halocaster
+# Path: Halo2/xemuh2stats-main/WhatTheFuck/
+
+## TASK 1: Create new file - classes/webhook_sender.cs
+Create this new file at: classes/webhook_sender.cs
+
+```csharp
+using System;
+using System.Net.Http;
+using System.Text;
+using System.Threading.Tasks;
+using System.IO;
+
+namespace xemuh2stats.classes
+{
+    public static class webhook_sender
+    {
+        // Configure this URL to your VPS webhook endpoint
+        // Example: http://YOUR_VPS_IP:8080/webhook/game
+        private static string WEBHOOK_URL = "";
+        private static readonly HttpClient httpClient = new HttpClient();
+        private static string LOG_FILE = "stats_export.log";
+
+        static webhook_sender()
+        {
+            // Set timeout for webhook calls
+            httpClient.Timeout = TimeSpan.FromSeconds(10);
+
+            // Try to load webhook URL from config file
+            LoadWebhookConfig();
+        }
+
+        private static void LoadWebhookConfig()
+        {
+            try
+            {
+                string configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "webhook_config.txt");
+                if (File.Exists(configPath))
+                {
+                    WEBHOOK_URL = File.ReadAllText(configPath).Trim();
+                    Log($"Loaded webhook URL from config: {WEBHOOK_URL}");
+                }
+                else
+                {
+                    // Create default config file
+                    File.WriteAllText(configPath, "http://YOUR_VPS_IP:8080/webhook/game");
+                    Log("Created default webhook_config.txt - please configure your VPS URL");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"Error loading webhook config: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Log a message to both console and log file
+        /// </summary>
+        public static void Log(string message)
+        {
+            string timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+            string logMessage = $"[{timestamp}] {message}";
+
+            // Write to console
+            Console.WriteLine(logMessage);
+
+            // Write to log file
+            try
+            {
+                string logPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, LOG_FILE);
+                File.AppendAllText(logPath, logMessage + Environment.NewLine);
+            }
+            catch
+            {
+                // Ignore log file errors
+            }
+        }
+
+        /// <summary>
+        /// Send webhook notification after stats export
+        /// </summary>
+        /// <param name="filename">The timestamp filename (e.g., 20251128_074332)</param>
+        /// <param name="directory">The directory type (public or private)</param>
+        public static async Task SendGameWebhookAsync(string filename, string directory = "private")
+        {
+            if (string.IsNullOrEmpty(WEBHOOK_URL) || WEBHOOK_URL.Contains("YOUR_VPS_IP"))
+            {
+                Log($"Webhook not configured - skipping notification for {filename}");
+                return;
+            }
+
+            try
+            {
+                Log($"Sending webhook for game: {filename}.xlsx");
+
+                // Create JSON payload
+                string jsonPayload = $@"{{
+    ""filename"": ""{filename}.xlsx"",
+    ""directory"": ""{directory}"",
+    ""timestamp"": ""{DateTime.Now:yyyy-MM-ddTHH:mm:ss}""
+}}";
+
+                var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
+
+                // Send POST request
+                var response = await httpClient.PostAsync(WEBHOOK_URL, content);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    string responseBody = await response.Content.ReadAsStringAsync();
+                    Log($"Webhook SUCCESS: {response.StatusCode} - {responseBody}");
+                }
+                else
+                {
+                    string errorBody = await response.Content.ReadAsStringAsync();
+                    Log($"Webhook FAILED: {response.StatusCode} - {errorBody}");
+                }
+            }
+            catch (TaskCanceledException)
+            {
+                Log($"Webhook TIMEOUT for {filename}");
+            }
+            catch (Exception ex)
+            {
+                Log($"Webhook ERROR for {filename}: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Synchronous wrapper for SendGameWebhookAsync
+        /// </summary>
+        public static void SendGameWebhook(string filename, string directory = "private")
+        {
+            Task.Run(() => SendGameWebhookAsync(filename, directory));
+        }
+
+        /// <summary>
+        /// Log stats export details
+        /// </summary>
+        public static void LogStatsExport(string filename, int playerCount, string mapName, string gameType, string variantName)
+        {
+            Log("========================================");
+            Log($"STATS EXPORT: {filename}");
+            Log($"  Players: {playerCount}");
+            Log($"  Map: {mapName}");
+            Log($"  Game Type: {gameType}");
+            Log($"  Variant: {variantName}");
+            Log($"  Files created:");
+            Log($"    - stats/{filename}.xlsx");
+            Log($"    - stats/{filename}_identity.xlsx");
+            Log("========================================");
+        }
+    }
+}
+```
+
+## TASK 2: Modify Form1.cs (around line 243-245)
+
+Find this code block:
+```csharp
+xls_generator.dump_game_to_sheet($"{timestamp}", real_time_cache, post_game_, Program.variant_details_cache);
+xls_generator.dump_identity_to_sheet($"{timestamp}", real_time_cache.Count);
+dump_lock = true;
+```
+
+Replace it with:
+```csharp
+xls_generator.dump_game_to_sheet($"{timestamp}", real_time_cache, post_game_, Program.variant_details_cache);
+xls_generator.dump_identity_to_sheet($"{timestamp}", real_time_cache.Count);
+
+// Log the export and send webhook notification
+webhook_sender.LogStatsExport(
+    timestamp,
+    real_time_cache.Count,
+    Program.variant_details_cache.map_name,
+    Program.variant_details_cache.game_type.ToString(),
+    Program.variant_details_cache.name
+);
+webhook_sender.SendGameWebhook(timestamp, "private");
+
+dump_lock = true;
+```
+
+## TASK 3: Modify Xemu H2 Stats.csproj
+
+Find this line:
+```xml
+<Compile Include="classes\xls_generator.cs" />
+<Compile Include="classes\object_formatter.cs" />
+```
+
+Replace with:
+```xml
+<Compile Include="classes\xls_generator.cs" />
+<Compile Include="classes\webhook_sender.cs" />
+<Compile Include="classes\object_formatter.cs" />
+```
+
+## TASK 4: After building, create webhook_config.txt
+
+Create a file called `webhook_config.txt` in the same folder as the built exe with contents:
+```
+http://YOUR_VPS_IP:8080/webhook/game
+```
+
+Replace YOUR_VPS_IP with your actual VPS IP address (e.g., http://123.45.67.89:8080/webhook/game)
+
+## SUMMARY
+
+Files to create:
+- classes/webhook_sender.cs (new file with full code above)
+
+Files to modify:
+- Form1.cs (add logging and webhook call after stats export)
+- Xemu H2 Stats.csproj (add webhook_sender.cs to compile list)
+
+Files to create after build:
+- webhook_config.txt (contains VPS webhook URL)
+
+## WHAT THIS DOES
+
+1. After each game ends and stats are exported:
+   - Logs export details to stats_export.log
+   - Sends HTTP POST to your VPS webhook
+
+2. The webhook payload looks like:
+```json
+{
+  "filename": "20251128_074332.xlsx",
+  "directory": "private",
+  "timestamp": "2025-11-28T07:43:32"
+}
+```
+
+3. Your VPS bot receives this and:
+   - Reads the identity file to get Machine IDs
+   - Looks up Machine IDs in players.json to find Discord IDs
+   - Associates game stats with Discord users
+   - Pushes to CarnageReport.com repo
