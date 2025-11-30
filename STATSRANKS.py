@@ -302,23 +302,16 @@ def calculate_playlist_rank(xp: int) -> int:
 
 def calculate_highest_rank(player_stats: dict) -> int:
     """Calculate the highest rank across all playlists for a player.
-    Also considers global XP for backwards compatibility with pre-playlist players."""
+    Returns the rank from whichever playlist they have the highest rank in."""
     highest = 1
 
-    # Check playlist-specific ranks
+    # Check each playlist and find the highest rank
     playlist_stats = player_stats.get("playlist_stats", {})
     for ptype, pstats in playlist_stats.items():
         playlist_xp = pstats.get("xp", 0)
         rank = calculate_playlist_rank(playlist_xp)
         if rank > highest:
             highest = rank
-
-    # Also check global XP for backwards compatibility (pre-playlist players)
-    global_xp = player_stats.get("xp", 0)
-    if global_xp > 0:
-        global_rank = calculate_rank(global_xp)
-        if global_rank > highest:
-            highest = global_rank
 
     return highest
 
