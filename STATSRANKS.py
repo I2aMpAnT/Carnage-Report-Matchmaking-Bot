@@ -7,7 +7,7 @@ Import this module in bot.py with:
     await bot.load_extension('STATSRANKS')
 """
 
-MODULE_VERSION = "1.2.0"
+MODULE_VERSION = "1.2.1"
 
 import discord
 from discord import app_commands
@@ -191,7 +191,7 @@ def get_existing_player_stats(user_id: int) -> dict:
     return None
 
 def update_player_stats(user_id: int, stats_update: dict):
-    """Update player stats - XP never goes below 0"""
+    """Update player stats - XP never goes below 0, recalculates highest_rank"""
     stats = load_json_file(RANKSTATS_FILE)
     user_key = str(user_id)
 
@@ -220,6 +220,9 @@ def update_player_stats(user_id: int, stats_update: dict):
 
     # Ensure XP never goes below 0
     stats[user_key]["xp"] = max(0, stats[user_key]["xp"])
+
+    # Recalculate highest rank after XP update
+    stats[user_key]["highest_rank"] = calculate_highest_rank(stats[user_key])
 
     save_json_file(RANKSTATS_FILE, stats)
 
@@ -298,10 +301,11 @@ def calculate_playlist_rank(xp: int) -> int:
 
 
 def calculate_highest_rank(player_stats: dict) -> int:
-    """Calculate the highest rank across all playlists for a player"""
+    """Calculate the highest rank across all playlists for a player.
+    Returns the rank from whichever playlist they have the highest rank in."""
     highest = 1
 
-    # Check playlist-specific ranks
+    # Check each playlist and find the highest rank
     playlist_stats = player_stats.get("playlist_stats", {})
     for ptype, pstats in playlist_stats.items():
         playlist_xp = pstats.get("xp", 0)
@@ -576,26 +580,36 @@ async def record_manual_match(red_team: List[int], blue_team: List[int], games: 
     print(f"✅ Manual match {match_label} recorded: {series_winner} wins ({red_game_wins}-{blue_game_wins})")
 
 async def refresh_all_ranks(guild: discord.Guild, player_ids: List[int], send_dm: bool = True):
-    """Refresh rank roles for all players in a match - uses highest_rank across playlists"""
+    """Refresh rank roles for all players in a match - always recalculates highest_rank"""
     from searchmatchmaking import queue_state
 
     for user_id in player_ids:
         if user_id in queue_state.guests:
             continue  # Skip guests
         player_stats = get_player_stats(user_id)
-        # Use highest rank across all playlists for Discord role
-        highest = player_stats.get("highest_rank", 1)
-        if highest < 1:
-            highest = calculate_highest_rank(player_stats)
+        # Always recalculate highest rank to ensure accuracy
+        highest = calculate_highest_rank(player_stats)
+        # Update stored highest_rank
+        stats = load_json_file(RANKSTATS_FILE)
+        user_key = str(user_id)
+        if user_key in stats:
+            stats[user_key]["highest_rank"] = highest
+            save_json_file(RANKSTATS_FILE, stats, skip_github=True)
         await update_player_rank_role(guild, user_id, highest, send_dm=send_dm)
 
 
 async def refresh_playlist_ranks(guild: discord.Guild, player_ids: List[int], playlist_type: str, send_dm: bool = True):
-    """Refresh rank roles for players after a playlist match - uses highest_rank"""
+    """Refresh rank roles for players after a playlist match - recalculates and saves highest_rank"""
     for user_id in player_ids:
         player_stats = get_player_stats(user_id)
         # Recalculate highest rank
         highest = calculate_highest_rank(player_stats)
+        # Update stored highest_rank
+        stats = load_json_file(RANKSTATS_FILE)
+        user_key = str(user_id)
+        if user_key in stats:
+            stats[user_key]["highest_rank"] = highest
+            save_json_file(RANKSTATS_FILE, stats, skip_github=True)
         await update_player_rank_role(guild, user_id, highest, send_dm=send_dm)
 
 def get_all_players_sorted(sort_by: str = "rank") -> List[Tuple[str, dict]]:

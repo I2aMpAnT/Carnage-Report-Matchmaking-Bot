@@ -1,7 +1,7 @@
 # searchmatchmaking.py - MLG 4v4 Queue Management System
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.4.2"
+MODULE_VERSION = "1.4.3"
 
 import discord
 from discord.ui import View, Button
@@ -413,13 +413,15 @@ class QueueView(View):
                 embed = discord.Embed(
                     title="⚠️ New Player Needs MMR",
                     description=f"{interaction.user.mention} tried to join matchmaking but doesn't have an MMR rating.\n\n"
-                               f"Please use `/setmmr` to assign them a starting MMR.",
+                               f"Please use `/mmr` to assign them a starting MMR.",
                     color=discord.Color.orange()
                 )
                 embed.set_footer(text="Player cannot queue until MMR is set")
-                # This is a separate message, not connected to any ping
+                # Ping @Server Support role by name
+                server_support_role = discord.utils.get(interaction.guild.roles, name="Server Support")
+                role_ping = server_support_role.mention if server_support_role else "@Server Support"
                 await general_channel.send(
-                    content="<@&1403858215707504642>",  # Server Tech Support role
+                    content=role_ping,
                     embed=embed
                 )
             return
@@ -668,13 +670,15 @@ class PingJoinView(View):
                 embed = discord.Embed(
                     title="⚠️ New Player Needs MMR",
                     description=f"{interaction.user.mention} tried to join matchmaking but doesn't have an MMR rating.\n\n"
-                               f"Please use `/setmmr` to assign them a starting MMR.",
+                               f"Please use `/mmr` to assign them a starting MMR.",
                     color=discord.Color.orange()
                 )
                 embed.set_footer(text="Player cannot queue until MMR is set")
-                # This is a completely separate message from the ping
+                # Ping @Server Support role by name
+                server_support_role = discord.utils.get(interaction.guild.roles, name="Server Support")
+                role_ping = server_support_role.mention if server_support_role else "@Server Support"
                 await general_channel.send(
-                    content="<@&1403858215707504642>",  # Server Tech Support role
+                    content=role_ping,
                     embed=embed
                 )
             return

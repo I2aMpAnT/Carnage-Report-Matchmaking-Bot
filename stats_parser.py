@@ -11,7 +11,7 @@ Converts XLSX files to gameshistory.json format for the website.
 !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 """
 
-MODULE_VERSION = "1.1.0"
+MODULE_VERSION = "1.2.0"
 
 import os
 import re
@@ -648,6 +648,62 @@ async def process_stats_and_update_results(bot, games: List[Dict] = None):
     return updated_series
 
 
+async def sync_discord_ranks_for_all_players(bot) -> int:
+    """
+    Sync Discord rank roles for all players in rankstats.json.
+    Called after stats are parsed/populated to ensure Discord roles match current XP.
+
+    Returns:
+        Number of players updated
+    """
+    import STATSRANKS
+
+    # Load all player stats
+    stats = STATSRANKS.load_json_file(STATSRANKS.RANKSTATS_FILE)
+
+    if not stats:
+        print("No player stats to sync")
+        return 0
+
+    # Get the guild from the bot
+    guild = None
+    for g in bot.guilds:
+        # Use the first guild (assuming single-server bot)
+        guild = g
+        break
+
+    if not guild:
+        print("❌ Could not find guild for rank sync")
+        return 0
+
+    updated_count = 0
+
+    for user_id_str, player_stats in stats.items():
+        try:
+            user_id = int(user_id_str)
+
+            # Ensure playlist_stats exists
+            if "playlist_stats" not in player_stats:
+                player_stats["playlist_stats"] = STATSRANKS.get_default_playlist_stats()
+
+            # Calculate highest rank across all playlists
+            highest = STATSRANKS.calculate_highest_rank(player_stats)
+            player_stats["highest_rank"] = highest
+
+            # Update Discord role
+            await STATSRANKS.update_player_rank_role(guild, user_id, highest, send_dm=False)
+            updated_count += 1
+
+        except Exception as e:
+            print(f"⚠️ Error syncing rank for user {user_id_str}: {e}")
+
+    # Save any updates to highest_rank
+    STATSRANKS.save_json_file(STATSRANKS.RANKSTATS_FILE, stats, skip_github=True)
+
+    print(f"✅ Synced Discord ranks for {updated_count} players")
+    return updated_count
+
+
 # Discord Bot Integration
 import discord
 from discord import app_commands
@@ -721,15 +777,25 @@ class StatsParserCommands(commands.Cog):
 
             series_status = f"✅ Updated {len(updated_series)} series results" if updated_series else "ℹ️ No matching series found"
 
+            # Sync Discord ranks for all players after stats are parsed
+            ranks_synced = 0
+            try:
+                ranks_synced = await sync_discord_ranks_for_all_players(self.bot)
+            except Exception as e:
+                print(f"Error syncing Discord ranks: {e}")
+
+            ranks_status = f"✅ Synced ranks for {ranks_synced} players" if ranks_synced > 0 else "ℹ️ No ranks to sync"
+
             await interaction.followup.send(
                 f"📊 **Stats Parsing Complete**\n"
                 f"• New games parsed: **{new_count}**\n"
                 f"• Total games: **{total_count}**\n"
                 f"• {github_status}\n"
-                f"• {series_status}",
+                f"• {series_status}\n"
+                f"• {ranks_status}",
                 ephemeral=True
             )
-            print(f"[STATS PARSER] {interaction.user.name} parsed stats: {new_count} new, {total_count} total, {len(updated_series)} series updated")
+            print(f"[STATS PARSER] {interaction.user.name} parsed stats: {new_count} new, {total_count} total, {len(updated_series)} series updated, {ranks_synced} ranks synced")
 
         except Exception as e:
             await interaction.followup.send(f"❌ Error parsing stats: {e}", ephemeral=True)
@@ -744,22 +810,51 @@ class StatsParserCommands(commands.Cog):
         try:
             updated_series = await process_stats_and_update_results(self.bot) or []
 
+            # Also sync Discord ranks after matching
+            ranks_synced = 0
+            try:
+                ranks_synced = await sync_discord_ranks_for_all_players(self.bot)
+            except Exception as e:
+                print(f"Error syncing Discord ranks: {e}")
+
             if updated_series:
                 await interaction.followup.send(
                     f"✅ **Updated {len(updated_series)} series results:**\n" +
-                    "\n".join([f"• {s}" for s in updated_series]),
+                    "\n".join([f"• {s}" for s in updated_series]) +
+                    f"\n\n✅ Synced ranks for {ranks_synced} players",
                     ephemeral=True
                 )
             else:
                 await interaction.followup.send(
-                    "ℹ️ No pending series matched to parsed games.\n"
-                    "Make sure games have been parsed and series are awaiting stats.",
+                    f"ℹ️ No pending series matched to parsed games.\n"
+                    f"Make sure games have been parsed and series are awaiting stats.\n\n"
+                    f"✅ Synced ranks for {ranks_synced} players",
                     ephemeral=True
                 )
 
         except Exception as e:
             await interaction.followup.send(f"❌ Error matching stats: {e}", ephemeral=True)
             print(f"[STATS PARSER] Match error: {e}")
+
+    @app_commands.command(name="syncranks", description="[ADMIN] Sync all Discord rank roles with current stats")
+    @has_admin_role()
+    async def syncranks(self, interaction: discord.Interaction):
+        """Manually sync Discord rank roles for all players"""
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            ranks_synced = await sync_discord_ranks_for_all_players(self.bot)
+
+            await interaction.followup.send(
+                f"✅ **Discord Rank Sync Complete**\n"
+                f"• Synced ranks for **{ranks_synced}** players",
+                ephemeral=True
+            )
+            print(f"[STATS PARSER] {interaction.user.name} synced {ranks_synced} player ranks")
+
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error syncing ranks: {e}", ephemeral=True)
+            print(f"[STATS PARSER] Sync error: {e}")
 
     @app_commands.command(name="liststats", description="[ADMIN] List available XLSX stats files")
     @has_admin_role()

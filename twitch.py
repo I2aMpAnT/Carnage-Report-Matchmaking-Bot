@@ -3,7 +3,7 @@ twitch.py - Twitch Integration Module
 Manages player Twitch links and multi-stream URLs
 """
 
-MODULE_VERSION = "1.2.1"
+MODULE_VERSION = "1.2.4"
 
 import discord
 from discord import app_commands
@@ -131,26 +131,43 @@ def get_player_twitch(user_id: int) -> Optional[dict]:
     return players.get(str(user_id))
 
 def set_player_twitch(user_id: int, twitch_name: str, display_name: Optional[str] = None):
-    """Set a player's Twitch info"""
+    """Set a player's Twitch info (preserves existing MAC/other data)"""
     players = load_players()
-    
-    players[str(user_id)] = {
-        "twitch_name": twitch_name,
-        "twitch_url": f"https://twitch.tv/{twitch_name}"
-    }
-    
+    user_key = str(user_id)
+
+    # Initialize if doesn't exist, otherwise preserve existing data
+    if user_key not in players:
+        players[user_key] = {}
+
+    # Update/add Twitch fields (preserves mac_addresses, discord_name, etc.)
+    players[user_key]["twitch_name"] = twitch_name
+    players[user_key]["twitch_url"] = f"https://twitch.tv/{twitch_name}"
+
     if display_name:
-        players[str(user_id)]["display_name"] = display_name
-    
+        players[user_key]["display_name"] = display_name
+
     save_players(players)
 
 def remove_player_twitch(user_id: int) -> bool:
-    """Remove a player's Twitch info"""
+    """Remove a player's Twitch info (preserves MAC/other data)"""
     players = load_players()
-    if str(user_id) in players:
-        del players[str(user_id)]
+    user_key = str(user_id)
+
+    if user_key in players:
+        player_data = players[user_key]
+        had_twitch = 'twitch_name' in player_data
+
+        # Remove only Twitch-related fields
+        player_data.pop('twitch_name', None)
+        player_data.pop('twitch_url', None)
+
+        # If no other data remains, remove the entry entirely
+        if not player_data:
+            del players[user_key]
+
         save_players(players)
-        return True
+        return had_twitch
+
     return False
 
 def make_multitwitch(names: List[str]) -> str:
@@ -164,22 +181,22 @@ def get_team_twitch_names(team_user_ids: List[int]) -> List[str]:
     """Get Twitch names for a list of user IDs"""
     players = load_players()
     names = []
-    
+
     for user_id in team_user_ids:
         player_data = players.get(str(user_id))
-        if player_data:
+        if player_data and 'twitch_name' in player_data:
             names.append(player_data["twitch_name"])
-    
+
     return names
 
 def get_player_display_name(user_id: int, guild: discord.Guild) -> str:
     """Get display name - Twitch display_name if set, otherwise twitch_name, otherwise Discord name"""
     players = load_players()
     player_data = players.get(str(user_id))
-    
-    if player_data:
+
+    if player_data and 'twitch_name' in player_data:
         return player_data.get("display_name", player_data["twitch_name"])
-    
+
     # Fallback to Discord display name
     member = guild.get_member(user_id)
     if member:
@@ -190,16 +207,16 @@ def get_player_as_link(user_id: int, guild: discord.Guild) -> str:
     """Get player as a clickable Twitch link (Discord name displayed) or just Discord name if no Twitch"""
     players = load_players()
     player_data = players.get(str(user_id))
-    
+
     # Get Discord display name
     member = guild.get_member(user_id)
     discord_name = member.display_name if member else str(user_id)
-    
-    if player_data:
+
+    if player_data and 'twitch_url' in player_data:
         # Use Discord name but link to Twitch
         url = player_data["twitch_url"]
         return f"[{discord_name}]({url})"
-    
+
     # No Twitch linked - just show Discord name (no link)
     return discord_name
 
@@ -369,9 +386,9 @@ def setup_twitch_commands(bot: commands.Bot):
     async def my_twitch(interaction: discord.Interaction):
         """Check your linked Twitch"""
         data = get_player_twitch(interaction.user.id)
-        if data:
+        if data and 'twitch_name' in data:
             await interaction.response.send_message(
-                f"Your Twitch: **{data['twitch_name']}**\n{data['twitch_url']}",
+                f"Your Twitch: **{data['twitch_name']}**\n{data.get('twitch_url', '')}",
                 ephemeral=True
             )
         else:
@@ -385,9 +402,9 @@ def setup_twitch_commands(bot: commands.Bot):
     async def check_twitch(interaction: discord.Interaction, user: discord.Member):
         """Check someone's linked Twitch"""
         data = get_player_twitch(user.id)
-        if data:
+        if data and 'twitch_name' in data:
             await interaction.response.send_message(
-                f"{user.display_name}'s Twitch: **{data['twitch_name']}**\n{data['twitch_url']}",
+                f"{user.display_name}'s Twitch: **{data['twitch_name']}**\n{data.get('twitch_url', '')}",
                 ephemeral=True
             )
         else:
@@ -462,15 +479,18 @@ def setup_twitch_commands(bot: commands.Bot):
         if not any(role in ADMIN_ROLES for role in user_roles):
             await interaction.response.send_message("❌ Admin only.", ephemeral=True)
             return
-        
+
         name = extract_twitch_name(twitch)
         if not name:
             await interaction.response.send_message("❌ Invalid Twitch username.", ephemeral=True)
             return
-        
+
         set_player_twitch(user.id, name)
-        await interaction.response.defer()
-    
+        await interaction.response.send_message(
+            f"✅ Set {user.display_name}'s Twitch to **{name}**",
+            ephemeral=True
+        )
+
     @bot.tree.command(name="adminremovetwitch", description="[ADMIN] Remove someone's Twitch")
     @app_commands.describe(user="The user")
     async def admin_remove_twitch(interaction: discord.Interaction, user: discord.Member):
@@ -479,9 +499,12 @@ def setup_twitch_commands(bot: commands.Bot):
         if not any(role in ADMIN_ROLES for role in user_roles):
             await interaction.response.send_message("❌ Admin only.", ephemeral=True)
             return
-        
+
         if remove_player_twitch(user.id):
-            await interaction.response.defer()
+            await interaction.response.send_message(
+                f"✅ Removed {user.display_name}'s Twitch link.",
+                ephemeral=True
+            )
         else:
             await interaction.response.send_message(
                 f"❌ {user.display_name} has no Twitch linked.",
