@@ -7,7 +7,7 @@ Import this module in bot.py with:
     await bot.load_extension('STATSRANKS')
 """
 
-MODULE_VERSION = "1.2.2"
+MODULE_VERSION = "1.2.3"
 
 import discord
 from discord import app_commands
@@ -302,16 +302,36 @@ def calculate_playlist_rank(xp: int) -> int:
 
 def calculate_highest_rank(player_stats: dict) -> int:
     """Calculate the highest rank across all playlists for a player.
-    Returns the rank from whichever playlist they have the highest rank in."""
+    Returns the rank from whichever playlist they have the highest rank in.
+    Falls back to calculating from global wins/losses if no playlist XP exists."""
     highest = 1
 
     # Check each playlist and find the highest rank
     playlist_stats = player_stats.get("playlist_stats", {})
+    has_playlist_xp = False
     for ptype, pstats in playlist_stats.items():
         playlist_xp = pstats.get("xp", 0)
-        rank = calculate_playlist_rank(playlist_xp)
-        if rank > highest:
-            highest = rank
+        if playlist_xp > 0:
+            has_playlist_xp = True
+            rank = calculate_playlist_rank(playlist_xp)
+            if rank > highest:
+                highest = rank
+
+    # If no playlist XP found, calculate from global stats (wins/losses)
+    if not has_playlist_xp:
+        global_xp = player_stats.get("xp", 0)
+        if global_xp > 0:
+            highest = calculate_playlist_rank(global_xp)
+        else:
+            # Calculate XP from wins/losses if XP is 0
+            config = get_xp_config()
+            win_xp = config.get("game_win", 50)
+            loss_xp = config.get("game_loss", 10)
+            wins = player_stats.get("wins", 0)
+            losses = player_stats.get("losses", 0)
+            estimated_xp = (wins * win_xp) + (losses * loss_xp)
+            if estimated_xp > 0:
+                highest = calculate_playlist_rank(estimated_xp)
 
     return highest
 

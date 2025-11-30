@@ -681,6 +681,19 @@ async def sync_discord_ranks_for_all_players(bot) -> int:
     for user_id_str, player_stats in stats.items():
         try:
             user_id = int(user_id_str)
+            member = guild.get_member(user_id)
+            if not member:
+                continue
+
+            # Get current Discord rank
+            current_rank = None
+            for role in member.roles:
+                if role.name.startswith("Level "):
+                    try:
+                        current_rank = int(role.name.replace("Level ", ""))
+                        break
+                    except:
+                        pass
 
             # Ensure playlist_stats exists
             if "playlist_stats" not in player_stats:
@@ -690,9 +703,12 @@ async def sync_discord_ranks_for_all_players(bot) -> int:
             highest = STATSRANKS.calculate_highest_rank(player_stats)
             player_stats["highest_rank"] = highest
 
-            # Update Discord role
-            await STATSRANKS.update_player_rank_role(guild, user_id, highest, send_dm=False)
-            updated_count += 1
+            # Only update Discord role if:
+            # 1. They don't have a rank yet, OR
+            # 2. The calculated rank is HIGHER than current (never downgrade)
+            if current_rank is None or highest > current_rank:
+                await STATSRANKS.update_player_rank_role(guild, user_id, highest, send_dm=False)
+                updated_count += 1
 
         except Exception as e:
             print(f"⚠️ Error syncing rank for user {user_id_str}: {e}")
