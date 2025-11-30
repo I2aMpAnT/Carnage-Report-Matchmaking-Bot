@@ -3,7 +3,7 @@ twitch.py - Twitch Integration Module
 Manages player Twitch links and multi-stream URLs
 """
 
-MODULE_VERSION = "1.2.0"
+MODULE_VERSION = "1.2.1"
 
 import discord
 from discord import app_commands
@@ -38,8 +38,19 @@ TWITCH_NAME_RE = re.compile(r"^[A-Za-z0-9_]{3,25}$")
 RED_TEAM_EMOJI_ID = None
 BLUE_TEAM_EMOJI_ID = None
 
-# Admin roles
+# Admin and Staff roles
 ADMIN_ROLES = ["Overlord", "Staff", "Server Support"]
+STAFF_ROLES = ["Overlord", "Staff", "Server Tech Support"]
+
+def has_staff_role():
+    """Check if user has staff role"""
+    async def predicate(interaction: discord.Interaction):
+        user_roles = [role.name for role in interaction.user.roles]
+        if any(role in STAFF_ROLES for role in user_roles):
+            return True
+        await interaction.response.send_message("❌ You need Overlord, Staff, or Server Tech Support role!", ephemeral=True)
+        return False
+    return app_commands.check(predicate)
 
 # In-memory cache
 _PLAYERS_CACHE = None
@@ -335,13 +346,24 @@ def setup_twitch_commands(bot: commands.Bot):
         set_player_twitch(interaction.user.id, name)
         await interaction.response.defer()
     
-    @bot.tree.command(name="removetwitch", description="Unlink your Twitch account")
-    async def remove_twitch(interaction: discord.Interaction):
-        """Unlink your Twitch account"""
-        if remove_player_twitch(interaction.user.id):
-            await interaction.response.defer()
+    @bot.tree.command(name="removetwitch", description="[STAFF] Unlink a player's Twitch account")
+    @app_commands.describe(user="The user to remove Twitch from (optional, defaults to yourself)")
+    @has_staff_role()
+    async def remove_twitch(interaction: discord.Interaction, user: discord.Member = None):
+        """Unlink a player's Twitch account (staff only)"""
+        target_user = user or interaction.user
+        if remove_player_twitch(target_user.id):
+            await interaction.response.send_message(
+                f"✅ Removed Twitch link from **{target_user.display_name}**.",
+                ephemeral=True
+            )
+            from searchmatchmaking import log_action
+            log_action(f"{interaction.user.name} removed Twitch from {target_user.display_name}")
         else:
-            await interaction.response.send_message("❌ No Twitch linked.", ephemeral=True)
+            await interaction.response.send_message(
+                f"❌ **{target_user.display_name}** has no Twitch linked.",
+                ephemeral=True
+            )
     
     @bot.tree.command(name="mytwitch", description="Check your linked Twitch")
     async def my_twitch(interaction: discord.Interaction):
