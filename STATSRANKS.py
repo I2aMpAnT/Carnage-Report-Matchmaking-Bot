@@ -7,7 +7,7 @@ Import this module in bot.py with:
     await bot.load_extension('STATSRANKS')
 """
 
-MODULE_VERSION = "1.2.5"
+MODULE_VERSION = "1.2.6"
 
 import discord
 from discord import app_commands
@@ -403,24 +403,30 @@ async def update_player_rank_role(guild: discord.Guild, user_id: int, new_level:
     member = guild.get_member(user_id)
     if not member:
         return
-    
+
     # Check current level before making changes
     old_level = None
-    for i in range(1, 51):
-        check_role = discord.utils.get(guild.roles, name=f"Level {i}")
-        if check_role and check_role in member.roles:
-            old_level = i
-            break
-    
+    for role in member.roles:
+        if role.name.startswith("Level "):
+            try:
+                old_level = int(role.name.replace("Level ", ""))
+                break
+            except ValueError:
+                pass
+
+    # Skip if player already has the correct rank - no changes needed
+    if old_level == new_level:
+        return
+
     # Remove all level roles (1-50)
     roles_to_remove = []
     for role in member.roles:
         if role.name.startswith("Level "):
             roles_to_remove.append(role)
-    
+
     if roles_to_remove:
         await member.remove_roles(*roles_to_remove, reason="Rank update")
-    
+
     # Add new level role
     new_role_name = get_rank_role_name(new_level)
     new_role = discord.utils.get(guild.roles, name=new_role_name)
@@ -955,12 +961,14 @@ class StatsCommands(commands.Cog):
                 highest = player_stats.get("highest_rank")
                 if highest is None or highest < 1:
                     highest = calculate_highest_rank(player_stats)
+                    print(f"  [DEBUG] {member.display_name}: highest_rank missing, calculated {highest} from stats: xp={player_stats.get('xp')}, wins={player_stats.get('wins')}")
 
                 # Skip if already correct
                 if current_rank == highest:
                     skipped_count += 1
                     continue
 
+                print(f"  [SYNC] {member.display_name}: Discord={current_rank}, GitHub highest_rank={highest}")
                 await update_player_rank_role(guild, user_id, highest, send_dm=True)
                 updated_count += 1
                 print(f"  Updated {member.display_name}: Level {current_rank} → Level {highest}")
@@ -1033,12 +1041,14 @@ class StatsCommands(commands.Cog):
                 highest = player_stats.get("highest_rank")
                 if highest is None or highest < 1:
                     highest = calculate_highest_rank(player_stats)
+                    print(f"  [DEBUG] {member.display_name}: highest_rank missing, calculated {highest} from stats: xp={player_stats.get('xp')}, wins={player_stats.get('wins')}")
 
                 # Skip if already correct
                 if current_rank == highest:
                     skipped_count += 1
                     continue
 
+                print(f"  [SILENT SYNC] {member.display_name}: Discord={current_rank}, GitHub highest_rank={highest}")
                 await update_player_rank_role(guild, user_id, highest, send_dm=False)
                 updated_count += 1
                 print(f"  [SILENT] Updated {member.display_name}: Level {current_rank} → Level {highest}")
