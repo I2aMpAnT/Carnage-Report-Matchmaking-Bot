@@ -1,7 +1,7 @@
 # commands.py - All Bot Commands
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.4.2"
+MODULE_VERSION = "1.4.3"
 
 import discord
 from discord import app_commands
@@ -1706,82 +1706,104 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         """Show all commands with availability info"""
         user_roles = [role.name for role in interaction.user.roles]
         is_admin = any(role in ADMIN_ROLES for role in user_roles)
-        
+        is_staff = any(role in STAFF_ROLES for role in user_roles)
+
+        # Build command list
+        commands_list = []
+
+        # Public Commands
+        commands_list.append("**📊 STATS & INFO**")
+        commands_list.append("`/playerstats` - View player stats and MMR")
+        commands_list.append("`/leaderboard` - View MMR leaderboard")
+        commands_list.append("`/verifystats` - Verify your stats are correct")
+        commands_list.append("`/help` - Show this help message")
+        commands_list.append("")
+
+        commands_list.append("**🎮 MATCHMAKING**")
+        commands_list.append("`/swap` - Swap teams with another player")
+        commands_list.append("`/stream` - Set stream link for current match")
+        commands_list.append("")
+
+        commands_list.append("**📺 TWITCH**")
+        commands_list.append("`/settwitch` - Link your Twitch account")
+        commands_list.append("`/removetwitch` - Unlink your Twitch account")
+        commands_list.append("`/mytwitch` - View your linked Twitch")
+        commands_list.append("`/checktwitch` - Check another player's Twitch")
+        commands_list.append("")
+
+        commands_list.append("**🏷️ ALIASES (Gamertags)**")
+        commands_list.append("`/linkalias` - Link a gamertag to your account")
+        commands_list.append("`/unlinkalias` - Unlink a gamertag")
+        commands_list.append("`/myaliases` - View your linked gamertags")
+        commands_list.append("`/checkaliases` - Check another player's aliases")
+
+        # Staff Commands
+        if is_staff or is_admin:
+            commands_list.append("")
+            commands_list.append("**⚙️ STAFF - QUEUE** `[STAFF]`")
+            commands_list.append("`/addplayer` - Add a player to queue")
+            commands_list.append("`/removeplayer` - Remove a player from queue")
+            commands_list.append("`/resetqueue` - Clear the queue")
+            commands_list.append("`/pause` - Pause matchmaking")
+            commands_list.append("`/unpause` - Resume matchmaking")
+            commands_list.append("`/resetmatchmaking` - Full reset of matchmaking")
+            commands_list.append("")
+
+            commands_list.append("**⚙️ STAFF - MATCH** `[STAFF]`")
+            commands_list.append("`/cancelmatch` - Cancel the current match")
+            commands_list.append("`/correctcurrent` - Correct current match stats")
+            commands_list.append("`/setgamestats` - Manually set game stats")
+            commands_list.append("`/adminarrange` - Arrange teams manually")
+            commands_list.append("`/adminguestmatch` - Start a guest match")
+            commands_list.append("`/manualmatchentry` - Manual match entry")
+            commands_list.append("")
+
+            commands_list.append("**⚙️ STAFF - GUESTS** `[STAFF]`")
+            commands_list.append("`/guest` - Add a guest player")
+            commands_list.append("`/removeguest` - Remove a guest player")
+            commands_list.append("")
+
+            commands_list.append("**⚙️ STAFF - PLAYERS** `[STAFF]`")
+            commands_list.append("`/mmr` - Set/view player MMR")
+            commands_list.append("`/adminsettwitch` - Set a player's Twitch")
+            commands_list.append("`/adminremovetwitch` - Remove a player's Twitch")
+            commands_list.append("`/adminunlinkalias` - Remove a player's alias")
+            commands_list.append("`/linkmac` - Link MAC address to player")
+            commands_list.append("`/unlinkmac` - Unlink MAC address")
+            commands_list.append("`/checkmac` - Check MAC address links")
+            commands_list.append("")
+
+            commands_list.append("**⚙️ STAFF - CONFIG** `[STAFF]`")
+            commands_list.append("`/bannedroles` - Manage banned roles")
+            commands_list.append("`/requiredroles` - Manage required roles")
+            commands_list.append("`/hideplayernames` - Hide names in queue")
+            commands_list.append("`/showplayernames` - Show names in queue")
+            commands_list.append("`/silentrankrefresh` - Refresh ranks silently")
+            commands_list.append("")
+
+            commands_list.append("**⚙️ STAFF - TESTING** `[STAFF]`")
+            commands_list.append("`/testmatchmaking` - Start a test match")
+            commands_list.append("`/testmatchmakingred` - Test as red team")
+            commands_list.append("`/testmatchmakingblue` - Test as blue team")
+
+        # Admin-only commands
+        if is_admin:
+            commands_list.append("")
+            commands_list.append("**🔒 ADMIN ONLY** `[ADMIN]`")
+            commands_list.append("`/addstaffrole` - Add a staff role")
+            commands_list.append("`/removestaffrole` - Remove a staff role")
+            commands_list.append("`/liststaffroles` - List staff roles")
+            commands_list.append("`/rolerulechange` - Change command permissions")
+            commands_list.append("`/listrolerules` - List permission overrides")
+
+        # Create embed
         embed = discord.Embed(
             title="HCR Bot Commands",
-            description="Halo 2 Carnage Report Matchmaking",
+            description="\n".join(commands_list),
             color=discord.Color.blue()
         )
-        
-        # Public Commands
-        embed.add_field(
-            name="🎮 Matchmaking",
-            value="`/swap` `/stream`",
-            inline=True
-        )
-        
-        embed.add_field(
-            name="📺 Twitch",
-            value="`/settwitch` `/removetwitch`\n`/mytwitch` `/checktwitch`",
-            inline=True
-        )
-        
-        embed.add_field(
-            name="🏷️ Aliases",
-            value="`/linkalias` `/unlinkalias`\n`/myaliases` `/checkaliases`",
-            inline=True
-        )
-        
-        embed.add_field(
-            name="📊 Stats",
-            value="`/playerstats` `/leaderboard` `/verifystats`",
-            inline=True
-        )
-        
-        # Admin Commands - only show to admins
-        if is_admin:
-            embed.add_field(
-                name="⚙️ Staff - Queue",
-                value="`/addplayer` `/removeplayer` `/resetqueue`\n`/pause` `/unpause` `/resetmatchmaking`",
-                inline=True
-            )
-            
-            embed.add_field(
-                name="⚙️ Staff - Match",
-                value="`/cancelmatch` `/correctcurrent`\n`/setgamestats` `/adminarrange`\n`/adminguestmatch`\n`/manualmatchentry`",
-                inline=True
-            )
-            
-            embed.add_field(
-                name="⚙️ Staff - Guests",
-                value="`/guest` `/removeguest`",
-                inline=True
-            )
-            
-            embed.add_field(
-                name="⚙️ Staff - MAC Tracking",
-                value="`/linkmac` `/unlinkmac` `/checkmac`",
-                inline=True
-            )
-            
-            embed.add_field(
-                name="⚙️ Staff - Players",
-                value="`/mmr` `/adminsettwitch`\n`/adminremovetwitch` `/adminunlinkalias`",
-                inline=True
-            )
-            
-            embed.add_field(
-                name="⚙️ Staff - Config",
-                value="`/bannedroles` `/requiredroles`\n`/hideplayernames` `/showplayernames`\n`/silentrankrefresh`",
-                inline=True
-            )
-            
-            embed.add_field(
-                name="⚙️ Staff - Testing",
-                value="`/testmatchmaking`\n`/testmatchmakingred`\n`/testmatchmakingblue`",
-                inline=True
-            )
-        
+        embed.set_footer(text="[STAFF] = Staff only | [ADMIN] = Admin only")
+
         await interaction.response.send_message(embed=embed, ephemeral=True)
     
     @bot.tree.command(name='hideplayernames', description='[STAFF] Hide player names in queue (show as "Matched Player")')
