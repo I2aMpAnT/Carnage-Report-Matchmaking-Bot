@@ -1,7 +1,7 @@
 # commands.py - All Bot Commands
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.4.4"
+MODULE_VERSION = "1.4.5"
 
 import discord
 from discord import app_commands
@@ -1719,25 +1719,25 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         commands_list = []
 
         # Public Commands
-        commands_list.append("**📊 STATS & INFO**")
+        commands_list.append("**STATS & INFO**")
         commands_list.append("`/playerstats` - View player stats and MMR")
         commands_list.append("`/leaderboard` - View MMR leaderboard")
         commands_list.append("`/verifystats` - Verify your stats are correct")
         commands_list.append("`/help` - Show this help message")
         commands_list.append("")
 
-        commands_list.append("**🎮 MATCHMAKING**")
+        commands_list.append("**MATCHMAKING**")
         commands_list.append("`/swap` - Swap teams with another player")
         commands_list.append("`/stream` - Set stream link for current match")
         commands_list.append("")
 
-        commands_list.append("**📺 TWITCH**")
+        commands_list.append("**TWITCH**")
         commands_list.append("`/settwitch` - Link your Twitch account")
         commands_list.append("`/mytwitch` - View your linked Twitch")
         commands_list.append("`/checktwitch` - Check another player's Twitch")
         commands_list.append("")
 
-        commands_list.append("**🏷️ ALIASES (Gamertags)**")
+        commands_list.append("**ALIASES (Gamertags)**")
         commands_list.append("`/linkalias` - Link a gamertag to your account")
         commands_list.append("`/myaliases` - View your linked gamertags")
         commands_list.append("`/checkaliases` - Check another player's aliases")
@@ -1745,7 +1745,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         # Staff Commands
         if is_staff or is_admin:
             commands_list.append("")
-            commands_list.append("**⚙️ STAFF - QUEUE** `[STAFF]`")
+            commands_list.append("**STAFF - QUEUE** `[STAFF]`")
             commands_list.append("`/addplayer` - Add a player to queue")
             commands_list.append("`/removeplayer` - Remove a player from queue")
             commands_list.append("`/resetqueue` - Clear the queue")
@@ -1754,7 +1754,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             commands_list.append("`/resetmatchmaking` - Full reset of matchmaking")
             commands_list.append("")
 
-            commands_list.append("**⚙️ STAFF - MATCH** `[STAFF]`")
+            commands_list.append("**STAFF - MATCH** `[STAFF]`")
             commands_list.append("`/cancelmatch` - Cancel the current match")
             commands_list.append("`/correctcurrent` - Correct current match stats")
             commands_list.append("`/setgamestats` - Manually set game stats")
@@ -1763,12 +1763,12 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             commands_list.append("`/manualmatchentry` - Manual match entry")
             commands_list.append("")
 
-            commands_list.append("**⚙️ STAFF - GUESTS** `[STAFF]`")
+            commands_list.append("**STAFF - GUESTS** `[STAFF]`")
             commands_list.append("`/guest` - Add a guest player")
             commands_list.append("`/removeguest` - Remove a guest player")
             commands_list.append("")
 
-            commands_list.append("**⚙️ STAFF - PLAYERS** `[STAFF]`")
+            commands_list.append("**STAFF - PLAYERS** `[STAFF]`")
             commands_list.append("`/mmr` - Set/view player MMR")
             commands_list.append("`/adminsettwitch` - Set a player's Twitch")
             commands_list.append("`/removetwitch` - Remove a player's Twitch")
@@ -1778,7 +1778,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             commands_list.append("`/checkmac` - Check MAC address links")
             commands_list.append("")
 
-            commands_list.append("**⚙️ STAFF - CONFIG** `[STAFF]`")
+            commands_list.append("**STAFF - CONFIG** `[STAFF]`")
             commands_list.append("`/bannedroles` - Manage banned roles")
             commands_list.append("`/requiredroles` - Manage required roles")
             commands_list.append("`/hideplayernames` - Hide names in queue")
@@ -1786,7 +1786,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             commands_list.append("`/silentrankrefresh` - Refresh ranks silently")
             commands_list.append("")
 
-            commands_list.append("**⚙️ STAFF - TESTING** `[STAFF]`")
+            commands_list.append("**STAFF - TESTING** `[STAFF]`")
             commands_list.append("`/testmatchmaking` - Start a test match")
             commands_list.append("`/testmatchmakingred` - Test as red team")
             commands_list.append("`/testmatchmakingblue` - Test as blue team")
@@ -1794,7 +1794,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         # Admin-only commands
         if is_admin:
             commands_list.append("")
-            commands_list.append("**🔒 ADMIN ONLY** `[ADMIN]`")
+            commands_list.append("**ADMIN ONLY** `[ADMIN]`")
             commands_list.append("`/addstaffrole` - Add a staff role")
             commands_list.append("`/removestaffrole` - Remove a staff role")
             commands_list.append("`/liststaffroles` - List staff roles")
@@ -1803,10 +1803,11 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
 
         # Create embed
         embed = discord.Embed(
-            title="HCR Bot Commands",
+            title="Carnage Report Matchmaking Bot Commands",
             description="\n".join(commands_list),
             color=discord.Color.blue()
         )
+        embed.set_thumbnail(url="https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/H2CRFinal.png")
         embed.set_footer(text="[STAFF] = Staff only | [ADMIN] = Admin only")
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
