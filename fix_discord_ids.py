@@ -104,22 +104,32 @@ def push_rankstats(data: dict):
                 pass
 
             # Check for redirect (307, 308, etc)
+            print(f"   DEBUG: HTTP error {e.code}")
             if e.code in [301, 302, 303, 307, 308]:
+                print(f"   DEBUG: Is redirect code")
                 # First try Location header
                 redirect_url = e.headers.get('Location')
                 if redirect_url:
                     print(f"   Following redirect (header) to: {redirect_url}")
                     return do_put(redirect_url)
+                print(f"   DEBUG: No Location header, checking body")
 
                 # Try to extract redirect URL from response body
                 if body:
+                    print(f"   DEBUG: Body length: {len(body)}")
                     try:
                         error_data = json.loads(body)
+                        print(f"   DEBUG: Parsed JSON, keys: {list(error_data.keys())}")
                         if 'url' in error_data:
-                            print(f"   Following redirect (body) to: {error_data['url']}")
-                            return do_put(error_data['url'])
-                    except json.JSONDecodeError:
-                        pass
+                            new_url = error_data['url']
+                            print(f"   Following redirect (body) to: {new_url}")
+                            return do_put(new_url)
+                        else:
+                            print(f"   DEBUG: No 'url' key in response")
+                    except json.JSONDecodeError as je:
+                        print(f"   DEBUG: JSON parse failed: {je}")
+                else:
+                    print(f"   DEBUG: Body is empty")
 
             print(f"Failed to push: {e.code} - {body}")
             return False
