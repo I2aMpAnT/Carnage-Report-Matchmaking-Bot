@@ -939,12 +939,23 @@ class StatsCommands(commands.Cog):
         updated_count = 0
         skipped_count = 0
         error_count = 0
+        not_found_count = 0
 
         for user_id_str, player_stats in stats.items():
             try:
                 user_id = int(user_id_str)
                 member = guild.get_member(user_id)
+
+                # Try to fetch if not in cache
                 if not member:
+                    try:
+                        member = await guild.fetch_member(user_id)
+                    except (discord.NotFound, discord.HTTPException):
+                        not_found_count += 1
+                        continue
+
+                if not member:
+                    not_found_count += 1
                     continue
 
                 # Get current Discord rank
@@ -988,10 +999,11 @@ class StatsCommands(commands.Cog):
             f"✅ Rank sync complete!\n"
             f"**Updated:** {updated_count}\n"
             f"**Already correct:** {skipped_count}\n"
+            f"**Not in server:** {not_found_count}\n"
             f"**Errors:** {error_count}",
             ephemeral=True
         )
-        print(f"[VERIFY ALL] Synced {updated_count} ranks, skipped {skipped_count}, {error_count} errors")
+        print(f"[VERIFY ALL] Synced {updated_count} ranks, skipped {skipped_count}, not found {not_found_count}, {error_count} errors")
 
     @app_commands.command(name="silentverify", description="[ADMIN] Sync all ranks silently (no DMs)")
     @has_admin_role()
@@ -1019,12 +1031,23 @@ class StatsCommands(commands.Cog):
         updated_count = 0
         skipped_count = 0
         error_count = 0
+        not_found_count = 0
 
         for user_id_str, player_stats in stats.items():
             try:
                 user_id = int(user_id_str)
                 member = guild.get_member(user_id)
+
+                # Try to fetch if not in cache
                 if not member:
+                    try:
+                        member = await guild.fetch_member(user_id)
+                    except (discord.NotFound, discord.HTTPException):
+                        not_found_count += 1
+                        continue
+
+                if not member:
+                    not_found_count += 1
                     continue
 
                 # Get current Discord rank
@@ -1068,10 +1091,11 @@ class StatsCommands(commands.Cog):
             f"✅ Silent rank sync complete!\n"
             f"**Updated:** {updated_count}\n"
             f"**Already correct:** {skipped_count}\n"
+            f"**Not in server:** {not_found_count}\n"
             f"**Errors:** {error_count}",
             ephemeral=True
         )
-        print(f"[SILENT VERIFY] Synced {updated_count} ranks, skipped {skipped_count}, {error_count} errors")
+        print(f"[SILENT VERIFY] Synced {updated_count} ranks, skipped {skipped_count}, not found {not_found_count}, {error_count} errors")
 
     @app_commands.command(name="mmr", description="[ADMIN] Set a player's MMR")
     @has_admin_role()
