@@ -494,31 +494,38 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                         await blue_vc.delete(reason="Match cancelled")
                     except:
                         pass
-            
+
             # Delete general chat embed
             try:
                 from ingame import delete_general_chat_embed
                 await delete_general_chat_embed(interaction.guild, series)
             except:
                 pass
-        
+
+            # Delete series message in queue channel
+            if series.series_message:
+                try:
+                    await series.series_message.delete()
+                except:
+                    pass
+
         # Clear state
         queue_state.current_series = None
         queue_state.queue.clear()
         queue_state.test_mode = False
         queue_state.testers = []
-        
+
         # Clear saved state
         try:
             import state_manager
             state_manager.clear_state()
         except:
             pass
-        
+
         channel = interaction.guild.get_channel(QUEUE_CHANNEL_ID)
         if channel:
             await update_queue_embed(channel)
-        
+
         await interaction.followup.send(f"✅ {match_type}{match_number} has been cancelled!", ephemeral=True)
     
     @bot.tree.command(name="cancelcurrent", description="[STAFF] Cancel the current active match (any type)")
@@ -597,31 +604,38 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                         await blue_vc.delete(reason="Match cancelled")
                     except:
                         pass
-            
+
             # Delete general chat embed
             try:
                 from ingame import delete_general_chat_embed
                 await delete_general_chat_embed(interaction.guild, series)
             except:
                 pass
-        
+
+            # Delete series message in queue channel
+            if series.series_message:
+                try:
+                    await series.series_message.delete()
+                except:
+                    pass
+
         # Clear all state
         queue_state.current_series = None
         queue_state.queue.clear()
         queue_state.test_mode = False
         queue_state.testers = []
-        
+
         # Clear saved state
         try:
             import state_manager
             state_manager.clear_state()
         except:
             pass
-        
+
         channel = interaction.guild.get_channel(QUEUE_CHANNEL_ID)
         if channel:
             await update_queue_embed(channel)
-        
+
         if has_series:
             match_type = "Test" if queue_state.current_series is None and has_series else "Match"
             await interaction.followup.send(f"✅ Match cancelled!", ephemeral=True)

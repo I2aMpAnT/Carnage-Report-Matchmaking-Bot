@@ -993,6 +993,21 @@ async def end_playlist_match(channel: discord.TextChannel, match: PlaylistMatch)
         except:
             pass
 
+    # Delete general chat message if exists
+    if match.general_message:
+        try:
+            await match.general_message.delete()
+        except:
+            pass
+
+    # Delete ping message if exists
+    if ps.ping_message:
+        try:
+            await ps.ping_message.delete()
+            ps.ping_message = None
+        except:
+            pass
+
     # Clear current match
     ps.current_match = None
 
