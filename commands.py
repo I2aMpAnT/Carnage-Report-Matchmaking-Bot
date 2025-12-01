@@ -659,13 +659,12 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         import json
         import os
         from playlists import MATCH_HISTORY_FILE
-        from postgame import MATCH_HISTORY_FILE as MLG_HISTORY_FILE
 
         await interaction.response.defer(ephemeral=True)
 
         if playlist == "mlg_4v4":
-            # MLG 4v4 uses different history file
-            history_file = MLG_HISTORY_FILE
+            # MLG 4v4 uses matchhistory.json
+            history_file = "matchhistory.json"
             if not os.path.exists(history_file):
                 await interaction.followup.send("❌ No match history found!", ephemeral=True)
                 return
