@@ -60,16 +60,14 @@ def push_rankstats(data: dict):
     headers = {
         "Authorization": f"token {GITHUB_TOKEN}",
         "Accept": "application/vnd.github.v3+json",
-        "User-Agent": "Python-Script"
+        "User-Agent": "Python-Script",
+        "Content-Type": "application/json"
     }
-
-    # Create opener that follows redirects for PUT
-    opener = urllib.request.build_opener(RedirectHandler())
 
     try:
         # Get current SHA
         req = urllib.request.Request(api_url, headers=headers)
-        with opener.open(req) as response:
+        with urllib.request.urlopen(req) as response:
             result = json.loads(response.read().decode('utf-8'))
             current_sha = result["sha"]
     except Exception as e:
@@ -87,21 +85,40 @@ def push_rankstats(data: dict):
         "sha": current_sha
     }
 
-    try:
-        # Push to GitHub
+    def do_put(url):
+        """Perform PUT request, following redirects manually"""
         req = urllib.request.Request(
-            api_url,
+            url,
             data=json.dumps(payload).encode('utf-8'),
             headers=headers,
             method='PUT'
         )
-        with opener.open(req) as response:
-            if response.status in [200, 201]:
-                print("Successfully pushed to GitHub!")
-                return True
-    except urllib.error.HTTPError as e:
-        print(f"Failed to push: {e.code} - {e.read().decode('utf-8')}")
-        return False
+        try:
+            with urllib.request.urlopen(req) as response:
+                return response.status in [200, 201]
+        except urllib.error.HTTPError as e:
+            if e.code in [301, 302, 303, 307, 308]:
+                # Follow redirect
+                redirect_url = e.headers.get('Location')
+                if redirect_url:
+                    print(f"   Following redirect to: {redirect_url}")
+                    return do_put(redirect_url)
+            # Try to extract redirect URL from response body
+            try:
+                body = e.read().decode('utf-8')
+                error_data = json.loads(body)
+                if 'url' in error_data:
+                    print(f"   Following redirect to: {error_data['url']}")
+                    return do_put(error_data['url'])
+            except:
+                pass
+            print(f"Failed to push: {e.code} - {body if 'body' in dir() else str(e)}")
+            return False
+
+    try:
+        if do_put(api_url):
+            print("Successfully pushed to GitHub!")
+            return True
     except Exception as e:
         print(f"Failed to push: {e}")
         return False
