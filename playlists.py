@@ -744,7 +744,7 @@ async def start_playlist_match(channel: discord.TextChannel, playlist_state: Pla
                 except:
                     pass
     else:
-        # Create team voice channels for 2v2 or 4v4
+        # Create team voice channels for 2v2 or 4v4 with red/blue emojis
         team1_mmrs = [await get_player_mmr(uid) for uid in team1]
         team2_mmrs = [await get_player_mmr(uid) for uid in team2]
         team1_avg = int(sum(team1_mmrs) / len(team1_mmrs)) if team1_mmrs else 1500
@@ -753,12 +753,12 @@ async def start_playlist_match(channel: discord.TextChannel, playlist_state: Pla
         match_label = match.get_match_label()
 
         team1_vc = await guild.create_voice_channel(
-            name=f"Red {match_label} - {team1_avg} MMR",
+            name=f"🔴 Red {match_label} - {team1_avg} MMR",
             category=category,
             user_limit=ps.team_size + 2
         )
         team2_vc = await guild.create_voice_channel(
-            name=f"Blue {match_label} - {team2_avg} MMR",
+            name=f"🔵 Blue {match_label} - {team2_avg} MMR",
             category=category,
             user_limit=ps.team_size + 2
         )
@@ -820,7 +820,7 @@ async def show_playlist_match_embed(channel: discord.TextChannel, match: Playlis
             inline=False
         )
     else:
-        # Team format
+        # Team format with red/blue emojis
         team1_mentions = "\n".join([f"<@{uid}>" for uid in match.team1])
         team2_mentions = "\n".join([f"<@{uid}>" for uid in match.team2])
 
@@ -828,12 +828,12 @@ async def show_playlist_match_embed(channel: discord.TextChannel, match: Playlis
         team2_wins = match.games.count('TEAM2')
 
         embed.add_field(
-            name=f"Red Team - {team1_wins}",
+            name=f"🔴 Red Team - {team1_wins}",
             value=team1_mentions or "TBD",
             inline=True
         )
         embed.add_field(
-            name=f"Blue Team - {team2_wins}",
+            name=f"🔵 Blue Team - {team2_wins}",
             value=team2_mentions or "TBD",
             inline=True
         )
@@ -960,6 +960,19 @@ async def end_playlist_match(channel: discord.TextChannel, match: PlaylistMatch)
 
     # Save to history
     save_match_to_history(match, result)
+
+    # Move players to postgame voice channel before deleting VCs
+    POSTGAME_VC_ID = 1424845826362048643
+    postgame_vc = guild.get_channel(POSTGAME_VC_ID)
+    if postgame_vc:
+        all_players = match.team1 + match.team2
+        for uid in all_players:
+            member = guild.get_member(uid)
+            if member and member.voice:
+                try:
+                    await member.move_to(postgame_vc)
+                except:
+                    pass
 
     # Delete voice channels
     if match.shared_vc_id:
