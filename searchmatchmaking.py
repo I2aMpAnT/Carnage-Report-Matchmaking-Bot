@@ -594,22 +594,23 @@ class QueueView(View):
             except:
                 pass
 
-        # Create single combined embed
+        # Create two embeds - header and content
         current_count = len(queue_state.queue)
         needed = MAX_QUEUE_SIZE - current_count
 
-        # Single embed with header as author icon and progress image
-        embed = discord.Embed(
+        # First embed: header image (full width)
+        header_embed = discord.Embed(color=discord.Color.green())
+        header_embed.set_image(url=HEADER_IMAGE_URL)
+
+        # Second embed: content with progress image (full width)
+        content_embed = discord.Embed(
             title="MLG 4v4 - Players Needed!",
             description=f"We have **{current_count}/{MAX_QUEUE_SIZE}** players searching.\nNeed **{needed}** more to start!",
             color=discord.Color.green()
         )
-        # Header as thumbnail on the right
-        embed.set_thumbnail(url=HEADER_IMAGE_URL)
-        # Progress image full width at bottom
         progress_image = get_queue_progress_image(current_count)
         if progress_image:
-            embed.set_image(url=progress_image)
+            content_embed.set_image(url=progress_image)
 
         # Create view with join button
         view = PingJoinView()
@@ -622,8 +623,8 @@ class QueueView(View):
         except:
             pass
 
-        # Send single embed
-        queue_state.ping_message = await general_channel.send(embed=embed, view=view)
+        # Send both embeds together
+        queue_state.ping_message = await general_channel.send(embeds=[header_embed, content_embed], view=view)
 
         log_action(f"{interaction.user.display_name} pinged general chat for queue ({current_count}/{MAX_QUEUE_SIZE})")
 
@@ -782,14 +783,25 @@ async def update_ping_message(guild: discord.Guild):
             pass
         return
     
-    # Update the message with just the progress image
-    embed = discord.Embed(color=discord.Color.green())
+    # Update with both embeds - header and progress
+    needed = MAX_QUEUE_SIZE - current_count
+
+    # First embed: header image (full width)
+    header_embed = discord.Embed(color=discord.Color.green())
+    header_embed.set_image(url=HEADER_IMAGE_URL)
+
+    # Second embed: content with progress image (full width)
+    content_embed = discord.Embed(
+        title="MLG 4v4 - Players Needed!",
+        description=f"We have **{current_count}/{MAX_QUEUE_SIZE}** players searching.\nNeed **{needed}** more to start!",
+        color=discord.Color.green()
+    )
     progress_image = get_queue_progress_image(current_count)
     if progress_image:
-        embed.set_image(url=progress_image)
+        content_embed.set_image(url=progress_image)
 
     try:
-        await queue_state.ping_message.edit(embed=embed)
+        await queue_state.ping_message.edit(embeds=[header_embed, content_embed])
     except:
         pass
 
