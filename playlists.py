@@ -12,8 +12,8 @@ import random
 import json
 import os
 
-# Header image for embeds
-HEADER_IMAGE_URL = "https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/MessagefromCarnageReportHEADER.png"
+# Header image for embeds and DMs
+HEADER_IMAGE_URL = "https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/MessageFromCarnageReport.png"
 
 # Matchmaking progress images (1-8 players) - using 8-player images temporarily for all queues
 MATCHMAKING_IMAGE_BASE = "https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/assets/matchmaking"
