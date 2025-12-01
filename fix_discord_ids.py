@@ -39,6 +39,17 @@ def pull_rankstats():
         print(f"Failed to pull rankstats: {e}")
         return None
 
+class RedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Handler that follows redirects for all HTTP methods including PUT"""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        new_req = urllib.request.Request(
+            newurl,
+            data=req.data,
+            headers=dict(req.headers),
+            method=req.get_method()
+        )
+        return new_req
+
 def push_rankstats(data: dict):
     """Push updated rankstats.json to GitHub"""
     if not GITHUB_TOKEN:
@@ -52,10 +63,13 @@ def push_rankstats(data: dict):
         "User-Agent": "Python-Script"
     }
 
+    # Create opener that follows redirects for PUT
+    opener = urllib.request.build_opener(RedirectHandler())
+
     try:
         # Get current SHA
         req = urllib.request.Request(api_url, headers=headers)
-        with urllib.request.urlopen(req) as response:
+        with opener.open(req) as response:
             result = json.loads(response.read().decode('utf-8'))
             current_sha = result["sha"]
     except Exception as e:
@@ -81,7 +95,7 @@ def push_rankstats(data: dict):
             headers=headers,
             method='PUT'
         )
-        with urllib.request.urlopen(req) as response:
+        with opener.open(req) as response:
             if response.status in [200, 201]:
                 print("Successfully pushed to GitHub!")
                 return True
