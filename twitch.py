@@ -303,18 +303,11 @@ def build_match_embed_with_twitch(
         inline=True
     )
     embed.add_field(
-        name=f"{blue_emoji} Blue Team - {blue_wins}", 
-        value=blue_text, 
+        name=f"{blue_emoji} Blue Team - {blue_wins}",
+        value=blue_text,
         inline=True
     )
-    
-    # Current game
-    embed.add_field(
-        name="Current Game",
-        value=f"Game {series.current_game}",
-        inline=False
-    )
-    
+
     # Completed games
     if series.games:
         from ingame import format_game_result
@@ -329,9 +322,6 @@ def build_match_embed_with_twitch(
         )
     
     embed.set_footer(text="Match in progress - Click player names to view streams")
-
-    # Add header image
-    embed.set_image(url=HEADER_IMAGE_URL)
 
     # Get Twitch names for multistream buttons
     red_twitch = get_team_twitch_names(red_team)
