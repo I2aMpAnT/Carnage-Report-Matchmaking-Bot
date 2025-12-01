@@ -210,7 +210,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         valid_commands = [
             "addplayer", "removeplayer", "resetqueue", "cancelmatch", "cancelcurrent",
             "correctcurrent", "testmatchmaking", "swap", "ping", "silentping",
-            "bannedroles", "requiredroles", "silentrankrefresh", "setupgameemojis",
+            "bannedroles", "requiredroles", "setupgameemojis",
             "logtestmatch", "adminunlinkalias", "linkalias", "unlinkalias", "myalias",
             "linktwitch", "unlinktwitch", "mytwitch", "stats", "leaderboard", "rank",
             "help", "addstaffrole", "removestaffrole", "liststaffroles", "rolerulechange",
@@ -775,84 +775,9 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         
         await interaction.response.defer()
         log_action(f"Admin {interaction.user.name} set required roles: {role_list}")
-    
-    @bot.tree.command(name='silentrankrefresh', description='[ADMIN] Silently refresh all player ranks (no DMs)')
-    @has_admin_role()
-    async def silent_rank_refresh(interaction: discord.Interaction):
-        """Refresh all player ranks from GitHub (source of truth) - no DMs sent"""
-        await interaction.response.defer(ephemeral=True)
 
-        import STATSRANKS
+    # NOTE: /silentrankrefresh removed - use /silentverify in STATSRANKS.py instead (duplicate functionality)
 
-        guild = interaction.guild
-
-        # Pull from GitHub (source of truth) using async version
-        stats = await github_webhook.async_pull_rankstats_from_github()
-
-        if not stats:
-            await interaction.followup.send(
-                "❌ Could not pull stats from GitHub. Please try again.",
-                ephemeral=True
-            )
-            return
-
-        updated = 0
-        skipped = 0
-        errors = 0
-
-        # Process all players in GitHub stats
-        for user_id_str, player_stats in stats.items():
-            try:
-                user_id = int(user_id_str)
-                member = guild.get_member(user_id)
-
-                if not member:
-                    continue
-
-                # Get current Discord rank
-                current_rank = None
-                for role in member.roles:
-                    if role.name.startswith("Level "):
-                        try:
-                            current_rank = int(role.name.replace("Level ", ""))
-                            break
-                        except:
-                            pass
-
-                # Use highest_rank from GitHub, fall back to calculating
-                highest = player_stats.get("highest_rank")
-                if highest is None or highest < 1:
-                    highest = STATSRANKS.calculate_highest_rank(player_stats)
-
-                # Skip if already correct
-                if current_rank == highest:
-                    skipped += 1
-                    continue
-
-                # Update role silently (send_dm=False)
-                await STATSRANKS.update_player_rank_role(guild, user_id, highest, send_dm=False)
-                updated += 1
-                print(f"  [SILENT] {member.display_name}: Level {current_rank} → Level {highest}")
-
-                await asyncio.sleep(0.3)  # Rate limit protection
-
-            except Exception as e:
-                log_action(f"Error refreshing rank for {user_id_str}: {e}")
-                errors += 1
-                continue
-
-        # Update local stats to match GitHub
-        STATSRANKS.save_json_file(STATSRANKS.RANKSTATS_FILE, stats, skip_github=True)
-
-        log_action(f"Admin {interaction.user.name} ran silent rank refresh: {updated} updated, {skipped} skipped, {errors} errors")
-        await interaction.followup.send(
-            f"✅ Silent rank refresh complete!\n"
-            f"• **{updated}** players updated\n"
-            f"• **{skipped}** already correct\n"
-            f"• **{errors}** errors",
-            ephemeral=True
-        )
-    
     @bot.tree.command(name='setupgameemojis', description='[ADMIN] Auto-detect game emoji IDs')
     @has_admin_role()
     async def setup_game_emojis(interaction: discord.Interaction):
@@ -1797,7 +1722,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             commands_list.append("`/requiredroles` - Manage required roles")
             commands_list.append("`/hideplayernames` - Hide names in queue")
             commands_list.append("`/showplayernames` - Show names in queue")
-            commands_list.append("`/silentrankrefresh` - Refresh ranks silently")
+            commands_list.append("`/silentverify` - Refresh ranks silently")
             commands_list.append("")
 
             commands_list.append("**⚙️ STAFF - TESTING** `[STAFF]`")
@@ -2075,10 +2000,11 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             log_action(f"Failed to sync players.json to GitHub: {e}")
 
         mac_count = len(players[user_id]["mac_addresses"])
-        log_action(f"MAC linked: {player.display_name} -> {clean_mac}")
+        log_action(f"MAC linked by {interaction.user.name}: {player.display_name} (ID: {user_id}) -> {clean_mac}")
 
         await interaction.response.send_message(
             f"✅ Linked MAC address to **{player.display_name}**\n"
+            f"**Discord ID:** `{user_id}`\n"
             f"**MAC:** `{clean_mac}`\n"
             f"**Total MACs linked:** {mac_count}\n"
             f"**{github_status}**",
