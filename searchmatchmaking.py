@@ -594,23 +594,22 @@ class QueueView(View):
             except:
                 pass
 
-        # Create single combined embed for cleaner look
+        # Create single combined embed
         current_count = len(queue_state.queue)
         needed = MAX_QUEUE_SIZE - current_count
 
-        # Header embed with full-width image at top
-        header_embed = discord.Embed(color=discord.Color.green())
-        header_embed.set_image(url=HEADER_IMAGE_URL)
-
-        # Content embed with progress image at bottom
-        content_embed = discord.Embed(
+        # Single embed with header as author icon and progress image
+        embed = discord.Embed(
             title="MLG 4v4 - Players Needed!",
             description=f"We have **{current_count}/{MAX_QUEUE_SIZE}** players searching.\nNeed **{needed}** more to start!",
             color=discord.Color.green()
         )
+        # Header as thumbnail on the right
+        embed.set_thumbnail(url=HEADER_IMAGE_URL)
+        # Progress image full width at bottom
         progress_image = get_queue_progress_image(current_count)
         if progress_image:
-            content_embed.set_image(url=progress_image)
+            embed.set_image(url=progress_image)
 
         # Create view with join button
         view = PingJoinView()
@@ -623,8 +622,8 @@ class QueueView(View):
         except:
             pass
 
-        # Send both embeds
-        queue_state.ping_message = await general_channel.send(embeds=[header_embed, content_embed], view=view)
+        # Send single embed
+        queue_state.ping_message = await general_channel.send(embed=embed, view=view)
 
         log_action(f"{interaction.user.display_name} pinged general chat for queue ({current_count}/{MAX_QUEUE_SIZE})")
 
