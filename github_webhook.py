@@ -83,6 +83,7 @@ def pull_rankstats_from_github() -> dict:
 async def async_pull_file_from_github(github_path: str) -> dict:
     """
     Async version: Pull a JSON file from GitHub repo using aiohttp
+    Uses GitHub API instead of raw.githubusercontent.com to avoid caching issues.
 
     Args:
         github_path: Path in the GitHub repo
@@ -90,15 +91,26 @@ async def async_pull_file_from_github(github_path: str) -> dict:
     Returns:
         dict: Parsed JSON content, or None if failed
     """
-    raw_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/{github_path}"
+    # Use GitHub API to avoid raw.githubusercontent.com cache (can be 5-10 min stale)
+    api_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{github_path}"
+    headers = {
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "CarnageReportBot"
+    }
+    # Add auth token if available for higher rate limits
+    if GITHUB_TOKEN:
+        headers["Authorization"] = f"token {GITHUB_TOKEN}"
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(raw_url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+            async with session.get(api_url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as response:
                 if response.status == 200:
-                    text = await response.text()
-                    data = json.loads(text)
-                    log_github_action(f"✅ Pulled {github_path} from GitHub (async)")
+                    result = await response.json()
+                    # GitHub API returns base64 encoded content
+                    content_b64 = result.get("content", "")
+                    content = base64.b64decode(content_b64).decode('utf-8')
+                    data = json.loads(content)
+                    log_github_action(f"✅ Pulled {github_path} from GitHub API (async, no cache)")
                     return data
                 else:
                     log_github_action(f"❌ Failed to pull {github_path}: {response.status}")
