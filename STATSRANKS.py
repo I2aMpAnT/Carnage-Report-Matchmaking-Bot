@@ -1140,72 +1140,7 @@ class StatsCommands(commands.Cog):
             ephemeral=True
         )
         print(f"[MMR] {interaction.user.name} set {player.name}'s MMR to {value}")
-
-    @app_commands.command(name="transferstats", description="[ADMIN] Transfer stats from one user ID to another")
-    @has_admin_role()
-    @app_commands.describe(
-        source_id="The old/wrong Discord ID to transfer FROM",
-        target_player="The correct player to transfer stats TO"
-    )
-    async def transferstats(self, interaction: discord.Interaction, source_id: str, target_player: discord.Member):
-        """Transfer stats from one Discord ID to another (Admin only)"""
-        await interaction.response.defer(ephemeral=True)
-
-        import github_webhook
-
-        # Pull latest from GitHub
-        stats = await github_webhook.async_pull_rankstats_from_github()
-
-        if not stats:
-            await interaction.followup.send("❌ Could not pull stats from GitHub.", ephemeral=True)
-            return
-
-        # Check source exists
-        if source_id not in stats:
-            await interaction.followup.send(f"❌ Source ID `{source_id}` not found in stats.", ephemeral=True)
-            return
-
-        source_stats = stats[source_id]
-        target_id = str(target_player.id)
-
-        # Check if target already has stats with games
-        if target_id in stats:
-            target_games = stats[target_id].get("wins", 0) + stats[target_id].get("losses", 0)
-            if target_games > 0:
-                await interaction.followup.send(
-                    f"⚠️ **{target_player.display_name}** already has stats ({target_games} games)!\n"
-                    f"Transfer would overwrite them. Delete their stats first if you're sure.",
-                    ephemeral=True
-                )
-                return
-
-        # Get source player name for logging
-        source_name = source_stats.get("discord_name", f"ID {source_id}")
-
-        # Transfer: copy stats to target, update discord_name
-        stats[target_id] = source_stats.copy()
-        stats[target_id]["discord_name"] = target_player.display_name
-
-        # Delete old entry
-        del stats[source_id]
-
-        # Save locally
-        save_json_file(RANKSTATS_FILE, stats, skip_github=False)
-
-        # Update Discord role
-        highest = stats[target_id].get("highest_rank", 1)
-        await update_player_rank_role(interaction.guild, target_player.id, highest, send_dm=False)
-
-        await interaction.followup.send(
-            f"✅ **Stats transferred!**\n"
-            f"**From:** `{source_id}` ({source_name})\n"
-            f"**To:** {target_player.mention} (`{target_id}`)\n"
-            f"**Stats:** {source_stats.get('wins', 0)}W/{source_stats.get('losses', 0)}L, Level {highest}\n"
-            f"**Role updated:** Level {highest}",
-            ephemeral=True
-        )
-        print(f"[TRANSFER] {interaction.user.name} transferred stats from {source_id} to {target_id} ({target_player.display_name})")
-
+    
     @app_commands.command(name="leaderboard", description="View the matchmaking leaderboard")
     @app_commands.describe(
         sort_by="How to sort the leaderboard",
