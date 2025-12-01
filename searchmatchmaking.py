@@ -9,8 +9,8 @@ from typing import List, Optional
 from datetime import datetime, timedelta
 import asyncio
 
-# Header image for embeds and DMs (clean logo without text)
-HEADER_IMAGE_URL = "https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/H2CRFinal.png"
+# Header image for embeds and DMs
+HEADER_IMAGE_URL = "https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/MessageFromCarnageReport.png"
 
 # Matchmaking progress images (1-8 players)
 MATCHMAKING_IMAGE_BASE = "https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/assets/matchmaking"
