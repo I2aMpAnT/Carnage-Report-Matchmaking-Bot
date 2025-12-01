@@ -233,25 +233,26 @@ def select_random_map_gametype(playlist_type: str) -> Tuple[str, str]:
 
 
 def get_queue_progress_image(player_count: int, max_players: int = 8) -> str:
-    """Get the queue progress image URL for current player count.
-    Temporarily using 8-player images for all queues - scales smaller queues to 8."""
-    # Scale to 8-player images temporarily
-    if max_players == 8:
-        scaled_count = player_count
-    elif max_players == 4:
-        # 2v2: 1->2, 2->4, 3->6, 4->8
-        scaled_count = player_count * 2
-    elif max_players == 2:
-        # 1v1: 1->4, 2->8
-        scaled_count = player_count * 4
-    else:
-        scaled_count = player_count
+    """Get the queue progress image URL for current player count."""
+    if player_count < 1:
+        return None  # No image for empty queue
 
-    if scaled_count < 1:
-        return f"{MATCHMAKING_IMAGE_BASE}/1outof8.png"
-    if scaled_count > 8:
-        scaled_count = 8
-    return f"{MATCHMAKING_IMAGE_BASE}/{scaled_count}outof8.png"
+    # Use actual images for each queue size
+    if max_players == 2:
+        # Head to Head 1v1 - use 1outof2.png and 2outof2.png
+        if player_count > 2:
+            player_count = 2
+        return f"{MATCHMAKING_IMAGE_BASE}/{player_count}outof2.png"
+    elif max_players == 4:
+        # Double Team 2v2 - use 1outof4.png through 4outof4.png
+        if player_count > 4:
+            player_count = 4
+        return f"{MATCHMAKING_IMAGE_BASE}/{player_count}outof4.png"
+    else:
+        # MLG 4v4 and Team Hardcore - use 8-player images
+        if player_count > 8:
+            player_count = 8
+        return f"{MATCHMAKING_IMAGE_BASE}/{player_count}outof8.png"
 
 
 def get_end_series_votes_needed(playlist_type: str) -> int:
