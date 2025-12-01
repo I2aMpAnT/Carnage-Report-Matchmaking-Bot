@@ -396,138 +396,222 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         
         # Send confirmation (not defer - that would leave "thinking")
         await interaction.response.send_message("✅ Queue reset!", ephemeral=True)
-    
-    @bot.tree.command(name="cancelmatch", description="[STAFF] Cancel a match by number (completed games stay recorded)")
+
+    @bot.tree.command(name="cancelmatch", description="[STAFF] Cancel an active match by playlist and number")
     @has_staff_role()
     @app_commands.describe(
-        match_number="The match/test number to cancel (e.g., 1 for Match #1 or Test 1)",
-        test_mode="Is this a test match? (Default: False)"
+        playlist="Which playlist's match to cancel",
+        match_number="The match number to cancel"
     )
-    async def cancel_queue(interaction: discord.Interaction, match_number: int, test_mode: bool = False):
-        """Cancel match but register games"""
+    @app_commands.choices(playlist=[
+        app_commands.Choice(name="MLG 4v4", value="mlg_4v4"),
+        app_commands.Choice(name="Team Hardcore", value="team_hardcore"),
+        app_commands.Choice(name="Double Team", value="double_team"),
+        app_commands.Choice(name="Head to Head", value="head_to_head"),
+    ])
+    async def cancel_match(interaction: discord.Interaction, playlist: str, match_number: int):
+        """Cancel an active match in any playlist"""
         from searchmatchmaking import queue_state, update_queue_embed
         from postgame import save_match_history
-        
-        # Check if there's a series OR if we're in pregame
-        has_series = queue_state.current_series is not None
-        has_pregame = hasattr(queue_state, 'pregame_vc_id') and queue_state.pregame_vc_id
-        
-        if not has_series and not has_pregame:
-            await interaction.response.send_message("❌ No active match!", ephemeral=True)
-            return
-        
-        # If we have a series, verify the match number and type
-        if has_series:
-            series = queue_state.current_series
-            current_match_num = series.match_number
-            current_is_test = series.test_mode
-            
-            if match_number != current_match_num or test_mode != current_is_test:
-                current_type = "Test" if current_is_test else "Match #"
-                requested_type = "Test" if test_mode else "Match #"
+        from playlists import playlist_states, end_playlist_match
+
+        if playlist == "mlg_4v4":
+            # Original MLG 4v4 queue
+            has_series = queue_state.current_series is not None
+            has_pregame = hasattr(queue_state, 'pregame_vc_id') and queue_state.pregame_vc_id
+
+            if not has_series and not has_pregame:
+                await interaction.response.send_message("❌ No active MLG 4v4 match!", ephemeral=True)
+                return
+
+            # Verify match number
+            if has_series:
+                series = queue_state.current_series
+                if match_number != series.match_number:
+                    await interaction.response.send_message(
+                        f"❌ Match mismatch! Current: Match #{series.match_number}, you specified: #{match_number}",
+                        ephemeral=True
+                    )
+                    return
+
+            await interaction.response.defer()
+
+            # Handle pregame cleanup
+            if has_pregame:
+                pregame_vc = interaction.guild.get_channel(queue_state.pregame_vc_id)
+                if pregame_vc:
+                    try:
+                        await pregame_vc.delete(reason="Match cancelled")
+                        log_action("Deleted Pregame Lobby VC")
+                    except:
+                        pass
+                queue_state.pregame_vc_id = None
+
+                if hasattr(queue_state, 'pregame_message') and queue_state.pregame_message:
+                    try:
+                        await queue_state.pregame_message.delete()
+                    except:
+                        pass
+                    queue_state.pregame_message = None
+
+            # Handle series cleanup
+            if has_series:
+                series = queue_state.current_series
+
+                if series.games:
+                    log_action(f"Staff {interaction.user.name} cancelled Match #{match_number} - {len(series.games)} games played")
+                    save_match_history(series, 'CANCELLED')
+                else:
+                    log_action(f"Staff {interaction.user.name} cancelled Match #{match_number} - no games played")
+
+                # Move players to postgame
+                postgame_vc = interaction.guild.get_channel(POSTGAME_LOBBY_ID)
+                if postgame_vc:
+                    all_players = series.red_team + series.blue_team
+                    for user_id in all_players:
+                        member = interaction.guild.get_member(user_id)
+                        if member and member.voice:
+                            try:
+                                await member.move_to(postgame_vc)
+                            except:
+                                pass
+
+                # Delete VCs
+                if series.red_vc_id:
+                    red_vc = interaction.guild.get_channel(series.red_vc_id)
+                    if red_vc:
+                        try:
+                            await red_vc.delete(reason="Match cancelled")
+                        except:
+                            pass
+
+                if series.blue_vc_id:
+                    blue_vc = interaction.guild.get_channel(series.blue_vc_id)
+                    if blue_vc:
+                        try:
+                            await blue_vc.delete(reason="Match cancelled")
+                        except:
+                            pass
+
+                # Delete general chat embed
+                try:
+                    from ingame import delete_general_chat_embed
+                    await delete_general_chat_embed(interaction.guild, series)
+                except:
+                    pass
+
+                # Delete series message
+                if series.series_message:
+                    try:
+                        await series.series_message.delete()
+                    except:
+                        pass
+
+            # Clear state
+            queue_state.current_series = None
+            queue_state.queue.clear()
+            queue_state.test_mode = False
+            queue_state.testers = []
+
+            try:
+                import state_manager
+                state_manager.clear_state()
+            except:
+                pass
+
+            channel = interaction.guild.get_channel(QUEUE_CHANNEL_ID)
+            if channel:
+                await update_queue_embed(channel)
+
+            await interaction.followup.send(f"✅ MLG 4v4 Match #{match_number} cancelled!", ephemeral=True)
+
+        else:
+            # Other playlists
+            ps = playlist_states.get(playlist)
+            if not ps:
+                await interaction.response.send_message(f"❌ Playlist {playlist} not found!", ephemeral=True)
+                return
+
+            if not ps.current_match:
+                await interaction.response.send_message(f"❌ No active match in {ps.name}!", ephemeral=True)
+                return
+
+            match = ps.current_match
+            if match.match_number != match_number:
                 await interaction.response.send_message(
-                    f"❌ Match mismatch!\n"
-                    f"You specified: **{requested_type}{match_number}**\n"
-                    f"Current active match: **{current_type}{current_match_num}**",
+                    f"❌ Match mismatch! Current: {match.get_match_label()}, you specified: #{match_number}",
                     ephemeral=True
                 )
                 return
-        
-        await interaction.response.defer()
-        
-        # Handle pregame cleanup
-        if has_pregame:
-            pregame_vc = interaction.guild.get_channel(queue_state.pregame_vc_id)
-            if pregame_vc:
-                try:
-                    await pregame_vc.delete(reason="Match cancelled")
-                    log_action("Deleted Pregame Lobby VC")
-                except:
-                    pass
-            queue_state.pregame_vc_id = None
-            
-            # Delete pregame message
-            if hasattr(queue_state, 'pregame_message') and queue_state.pregame_message:
-                try:
-                    await queue_state.pregame_message.delete()
-                except:
-                    pass
-                queue_state.pregame_message = None
-        
-        match_type = "Test" if test_mode else "Match #"
-        
-        # Handle series cleanup
-        if has_series:
-            series = queue_state.current_series
-            
-            if series.games:
-                log_action(f"Admin {interaction.user.name} cancelled {match_type}{match_number} - {len(series.games)} games played")
-                save_match_history(series, 'CANCELLED')
-            else:
-                log_action(f"Admin {interaction.user.name} cancelled {match_type}{match_number} - no games played")
-            
+
+            await interaction.response.defer()
+
             # Move players to postgame
-            postgame_vc = interaction.guild.get_channel(POSTGAME_LOBBY_ID)
+            POSTGAME_VC_ID = 1424845826362048643
+            postgame_vc = interaction.guild.get_channel(POSTGAME_VC_ID)
             if postgame_vc:
-                all_players = series.red_team + series.blue_team
-                for user_id in all_players:
-                    member = interaction.guild.get_member(user_id)
+                all_players = match.team1 + match.team2
+                for uid in all_players:
+                    member = interaction.guild.get_member(uid)
                     if member and member.voice:
                         try:
                             await member.move_to(postgame_vc)
                         except:
                             pass
-            
+
             # Delete VCs
-            if series.red_vc_id:
-                red_vc = interaction.guild.get_channel(series.red_vc_id)
-                if red_vc:
+            if match.shared_vc_id:
+                vc = interaction.guild.get_channel(match.shared_vc_id)
+                if vc:
                     try:
-                        await red_vc.delete(reason="Match cancelled")
-                    except:
-                        pass
-            
-            if series.blue_vc_id:
-                blue_vc = interaction.guild.get_channel(series.blue_vc_id)
-                if blue_vc:
-                    try:
-                        await blue_vc.delete(reason="Match cancelled")
+                        await vc.delete()
                     except:
                         pass
 
-            # Delete general chat embed
-            try:
-                from ingame import delete_general_chat_embed
-                await delete_general_chat_embed(interaction.guild, series)
-            except:
-                pass
+            if match.team1_vc_id:
+                vc = interaction.guild.get_channel(match.team1_vc_id)
+                if vc:
+                    try:
+                        await vc.delete()
+                    except:
+                        pass
 
-            # Delete series message in queue channel
-            if series.series_message:
+            if match.team2_vc_id:
+                vc = interaction.guild.get_channel(match.team2_vc_id)
+                if vc:
+                    try:
+                        await vc.delete()
+                    except:
+                        pass
+
+            # Delete match message
+            if match.match_message:
                 try:
-                    await series.series_message.delete()
+                    await match.match_message.delete()
                 except:
                     pass
 
-        # Clear state
-        queue_state.current_series = None
-        queue_state.queue.clear()
-        queue_state.test_mode = False
-        queue_state.testers = []
+            # Delete ping message
+            if ps.ping_message:
+                try:
+                    await ps.ping_message.delete()
+                    ps.ping_message = None
+                except:
+                    pass
 
-        # Clear saved state
-        try:
-            import state_manager
-            state_manager.clear_state()
-        except:
-            pass
+            log_action(f"Staff {interaction.user.name} cancelled {ps.name} Match #{match_number}")
 
-        channel = interaction.guild.get_channel(QUEUE_CHANNEL_ID)
-        if channel:
-            await update_queue_embed(channel)
+            # Clear match
+            ps.current_match = None
 
-        await interaction.followup.send(f"✅ {match_type}{match_number} has been cancelled!", ephemeral=True)
-    
+            # Update queue embed
+            from playlists import update_playlist_embed
+            channel = interaction.guild.get_channel(ps.channel_id)
+            if channel:
+                await update_playlist_embed(channel, ps)
+
+            await interaction.followup.send(f"✅ {ps.name} Match #{match_number} cancelled!", ephemeral=True)
+
     @bot.tree.command(name="cancelcurrent", description="[STAFF] Cancel the current active match (any type)")
     @has_staff_role()
     async def cancel_current(interaction: discord.Interaction):
