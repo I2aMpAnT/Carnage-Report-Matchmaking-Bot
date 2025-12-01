@@ -244,11 +244,10 @@ def get_queue_progress_image(player_count: int, max_players: int = 8) -> str:
             player_count = 2
         return f"{MATCHMAKING_IMAGE_BASE}/{player_count}outof2.png"
     elif max_players == 4:
-        # Double Team 2v2 - scale to 8-player images for now
-        scaled_count = player_count * 2
-        if scaled_count > 8:
-            scaled_count = 8
-        return f"{MATCHMAKING_IMAGE_BASE}/{scaled_count}outof8.png"
+        # Double Team 2v2 - use 1outof4.png through 4outof4.png
+        if player_count > 4:
+            player_count = 4
+        return f"{MATCHMAKING_IMAGE_BASE}/{player_count}outof4.png"
     else:
         # MLG 4v4 and Team Hardcore - use 8-player images
         if player_count > 8:
