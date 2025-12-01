@@ -23,8 +23,7 @@ GITHUB_BRANCH = "main"
 
 # Corrections to make (wrong_id -> correct_id)
 ID_CORRECTIONS = {
-    "467006237617687770": "269681242335739905",   # keylord
-    "460394656304217571": "175060415833833472",   # josiah
+    "449344331426203546": "652998057087991838",   # TwoDash (2D)
 }
 
 def pull_rankstats():
