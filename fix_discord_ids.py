@@ -97,22 +97,31 @@ def push_rankstats(data: dict):
             with urllib.request.urlopen(req) as response:
                 return response.status in [200, 201]
         except urllib.error.HTTPError as e:
-            if e.code in [301, 302, 303, 307, 308]:
-                # Follow redirect
-                redirect_url = e.headers.get('Location')
-                if redirect_url:
-                    print(f"   Following redirect to: {redirect_url}")
-                    return do_put(redirect_url)
-            # Try to extract redirect URL from response body
+            body = ""
             try:
                 body = e.read().decode('utf-8')
-                error_data = json.loads(body)
-                if 'url' in error_data:
-                    print(f"   Following redirect to: {error_data['url']}")
-                    return do_put(error_data['url'])
             except:
                 pass
-            print(f"Failed to push: {e.code} - {body if 'body' in dir() else str(e)}")
+
+            # Check for redirect (307, 308, etc)
+            if e.code in [301, 302, 303, 307, 308]:
+                # First try Location header
+                redirect_url = e.headers.get('Location')
+                if redirect_url:
+                    print(f"   Following redirect (header) to: {redirect_url}")
+                    return do_put(redirect_url)
+
+                # Try to extract redirect URL from response body
+                if body:
+                    try:
+                        error_data = json.loads(body)
+                        if 'url' in error_data:
+                            print(f"   Following redirect (body) to: {error_data['url']}")
+                            return do_put(error_data['url'])
+                    except json.JSONDecodeError:
+                        pass
+
+            print(f"Failed to push: {e.code} - {body}")
             return False
 
     try:
