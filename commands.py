@@ -2441,6 +2441,76 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         else:
             await interaction.response.send_message("❌ No players in the selected queue(s)!", ephemeral=True)
 
+    @bot.tree.command(name='stop', description='[STAFF] Stop a matchmaking queue - pauses and clears all players')
+    @has_staff_role()
+    @app_commands.describe(playlist="Which playlist to stop (default: all)")
+    @app_commands.choices(playlist=[
+        app_commands.Choice(name="All Playlists", value="all"),
+        app_commands.Choice(name="MLG 4v4", value="mlg_4v4"),
+        app_commands.Choice(name="Team Hardcore", value="team_hardcore"),
+        app_commands.Choice(name="Double Team", value="double_team"),
+        app_commands.Choice(name="Head to Head", value="head_to_head"),
+    ])
+    async def stop_matchmaking(interaction: discord.Interaction, playlist: str = "all"):
+        """Stop matchmaking queue(s) - pauses and clears all players"""
+        from searchmatchmaking import queue_state, update_queue_embed, log_action
+
+        stopped_info = []
+
+        if playlist == "all" or playlist == "mlg_4v4":
+            count = len(queue_state.queue)
+            was_paused = queue_state.paused
+            # Pause the queue
+            queue_state.paused = True
+            # Hide player names
+            queue_state.hide_player_names = True
+            # Clear players
+            if count > 0:
+                queue_state.queue.clear()
+                queue_state.queue_join_times.clear()
+                queue_state.guests.clear()
+                queue_state.recent_action = None
+            if count > 0 or not was_paused:
+                stopped_info.append(f"MLG 4v4: {count} players removed, queue hidden")
+            if queue_state.queue_channel:
+                await update_queue_embed(queue_state.queue_channel)
+
+        # Stop other playlists
+        try:
+            import playlists
+            ptypes_to_stop = []
+            if playlist == "all":
+                ptypes_to_stop = [playlists.PlaylistType.TEAM_HARDCORE, playlists.PlaylistType.DOUBLE_TEAM, playlists.PlaylistType.HEAD_TO_HEAD]
+            elif playlist == "team_hardcore":
+                ptypes_to_stop = [playlists.PlaylistType.TEAM_HARDCORE]
+            elif playlist == "double_team":
+                ptypes_to_stop = [playlists.PlaylistType.DOUBLE_TEAM]
+            elif playlist == "head_to_head":
+                ptypes_to_stop = [playlists.PlaylistType.HEAD_TO_HEAD]
+
+            for ptype in ptypes_to_stop:
+                ps = playlists.get_playlist_state(ptype)
+                was_paused = ps.paused
+                count = playlists.clear_playlist_queue(ptype)
+                ps.paused = True
+                # Hide player names
+                playlists.set_playlist_hidden(ptype, True)
+                if count > 0 or not was_paused:
+                    stopped_info.append(f"{ps.name}: {count} players removed, queue hidden")
+                if ps.queue_channel:
+                    await playlists.update_playlist_embed(ps.queue_channel, ps)
+        except Exception as e:
+            log_action(f"Error stopping playlists: {e}")
+
+        if stopped_info:
+            log_action(f"Stopped by {interaction.user.display_name}: {', '.join(stopped_info)}")
+            await interaction.response.send_message(
+                f"🛑 **STOPPED:**\n" + "\n".join(f"• {info}" for info in stopped_info) + "\n\nUse `/unpause` to resume and `/showplayernames` to unhide.",
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message("🛑 Selected queue(s) already stopped (paused and hidden with no players)!", ephemeral=True)
+
     @bot.tree.command(name='adminarrange', description='[STAFF] Manually set teams and start a match')
     @app_commands.describe(
         red1="Red Team Player 1",
