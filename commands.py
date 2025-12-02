@@ -2462,6 +2462,8 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             was_paused = queue_state.paused
             # Pause the queue
             queue_state.paused = True
+            # Hide player names
+            queue_state.hide_player_names = True
             # Clear players
             if count > 0:
                 queue_state.queue.clear()
@@ -2469,7 +2471,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                 queue_state.guests.clear()
                 queue_state.recent_action = None
             if count > 0 or not was_paused:
-                stopped_info.append(f"MLG 4v4: {count} players removed, queue paused")
+                stopped_info.append(f"MLG 4v4: {count} players removed, queue hidden")
             if queue_state.queue_channel:
                 await update_queue_embed(queue_state.queue_channel)
 
@@ -2491,8 +2493,10 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                 was_paused = ps.paused
                 count = playlists.clear_playlist_queue(ptype)
                 ps.paused = True
+                # Hide player names
+                playlists.set_playlist_hidden(ptype, True)
                 if count > 0 or not was_paused:
-                    stopped_info.append(f"{ps.name}: {count} players removed, queue paused")
+                    stopped_info.append(f"{ps.name}: {count} players removed, queue hidden")
                 if ps.queue_channel:
                     await playlists.update_playlist_embed(ps.queue_channel, ps)
         except Exception as e:
@@ -2501,11 +2505,11 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         if stopped_info:
             log_action(f"Stopped by {interaction.user.display_name}: {', '.join(stopped_info)}")
             await interaction.response.send_message(
-                f"🛑 **STOPPED:**\n" + "\n".join(f"• {info}" for info in stopped_info) + "\n\nUse `/unpause` to allow players to join again.",
+                f"🛑 **STOPPED:**\n" + "\n".join(f"• {info}" for info in stopped_info) + "\n\nUse `/unpause` to resume and `/showplayernames` to unhide.",
                 ephemeral=True
             )
         else:
-            await interaction.response.send_message("🛑 Selected queue(s) already stopped (paused with no players)!", ephemeral=True)
+            await interaction.response.send_message("🛑 Selected queue(s) already stopped (paused and hidden with no players)!", ephemeral=True)
 
     @bot.tree.command(name='adminarrange', description='[STAFF] Manually set teams and start a match')
     @app_commands.describe(
