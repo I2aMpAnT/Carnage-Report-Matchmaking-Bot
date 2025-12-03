@@ -496,43 +496,20 @@ def add_game_stats(match_number: int, game_number: int, map_name: str, gametype:
     return True
 
 def record_match_results(winners: List[int], losers: List[int], is_series_end: bool = False):
-    """Record match results for all players with XP (no series bonuses)"""
-    from searchmatchmaking import queue_state
-    
-    xp_config = get_xp_config()
-    
-    # Update winners (skip guests - they don't track stats)
-    for user_id in winners:
-        if user_id in queue_state.guests:
-            continue  # Skip guests
-        update = {
-            "wins": 1,
-            "total_games": 1,
-            "xp": xp_config["game_win"]  # No series bonus
-        }
-        if is_series_end:
-            update["series_wins"] = 1
-            update["total_series"] = 1
-        update_player_stats(user_id, update)
-    
-    # Update losers (skip guests - they don't track stats)
-    for user_id in losers:
-        if user_id in queue_state.guests:
-            continue  # Skip guests
-        update = {
-            "losses": 1,
-            "total_games": 1,
-            "xp": xp_config["game_loss"]  # No series penalty
-        }
-        if is_series_end:
-            update["series_losses"] = 1
-            update["total_series"] = 1
-        update_player_stats(user_id, update)
+    """Record match results - stats are handled by populate_stats.py
 
-async def record_manual_match(red_team: List[int], blue_team: List[int], games: List[dict], 
+    This function no longer writes stats directly. Stats are calculated
+    from xlsx game files by populate_stats.py, which is the authoritative source.
+    The bot only tracks active_matches for playlist tagging.
+    """
+    # Stats are handled by populate_stats.py from xlsx files
+    # This function now just logs for debugging
+    print(f"  Match recorded: {len(winners)} winners, {len(losers)} losers (stats via populate_stats.py)")
+
+async def record_manual_match(red_team: List[int], blue_team: List[int], games: List[dict],
                                series_winner: str, guild: discord.Guild, match_number: int = None):
-    """Record a manually entered match with full stats tracking
-    
+    """Record a manually entered match - stats handled by populate_stats.py
+
     Args:
         red_team: List of red team player IDs
         blue_team: List of blue team player IDs
@@ -540,72 +517,25 @@ async def record_manual_match(red_team: List[int], blue_team: List[int], games: 
         series_winner: 'RED', 'BLUE', or 'TIE'
         guild: Discord guild for rank updates
         match_number: Optional match number for logging
+
+    Note: Player stats (wins/losses/XP) are NOT written here.
+    Stats are calculated from xlsx files by populate_stats.py.
+    This only records game stats (map/gametype) and refreshes Discord roles.
     """
-    xp_config = get_xp_config()
-    
-    # Count wins for each team
+    # Count wins for each team (for logging only)
     red_game_wins = sum(1 for g in games if g["winner"] == "RED")
     blue_game_wins = sum(1 for g in games if g["winner"] == "BLUE")
-    
-    # Determine winners and losers lists
-    if series_winner == "RED":
-        series_winners = red_team
-        series_losers = blue_team
-    elif series_winner == "BLUE":
-        series_winners = blue_team
-        series_losers = red_team
-    else:  # TIE
-        series_winners = []
-        series_losers = []
-    
-    # Update stats for red team players
-    for user_id in red_team:
-        update = {
-            "wins": red_game_wins,
-            "losses": blue_game_wins,
-            "total_games": len(games),
-            "total_series": 1,
-            "xp": (red_game_wins * xp_config["game_win"]) + (blue_game_wins * xp_config["game_loss"])
-        }
-        
-        if series_winner == "RED":
-            update["series_wins"] = 1
-            update["xp"] += xp_config.get("series_win_bonus", 0)
-        elif series_winner == "BLUE":
-            update["series_losses"] = 1
-        # TIE: no series win/loss recorded
-        
-        update_player_stats(user_id, update)
-    
-    # Update stats for blue team players
-    for user_id in blue_team:
-        update = {
-            "wins": blue_game_wins,
-            "losses": red_game_wins,
-            "total_games": len(games),
-            "total_series": 1,
-            "xp": (blue_game_wins * xp_config["game_win"]) + (red_game_wins * xp_config["game_loss"])
-        }
-        
-        if series_winner == "BLUE":
-            update["series_wins"] = 1
-            update["xp"] += xp_config.get("series_win_bonus", 0)
-        elif series_winner == "RED":
-            update["series_losses"] = 1
-        # TIE: no series win/loss recorded
-        
-        update_player_stats(user_id, update)
-    
-    # Record game stats (map/gametype tracking)
+
+    # Record game stats (map/gametype tracking) - this is still useful
     for i, game in enumerate(games, 1):
         record_game_stat(game["map"], game["gametype"], game["winner"])
-    
-    # Refresh ranks for all players
+
+    # Refresh ranks for all players from rankstats.json (populated by populate_stats.py)
     all_players = red_team + blue_team
     await refresh_all_ranks(guild, all_players, send_dm=True)
-    
+
     match_label = f"#{match_number}" if match_number else ""
-    print(f"✅ Manual match {match_label} recorded: {series_winner} wins ({red_game_wins}-{blue_game_wins})")
+    print(f"✅ Manual match {match_label} logged: {series_winner} wins ({red_game_wins}-{blue_game_wins}) - stats via populate_stats.py")
 
 async def refresh_all_ranks(guild: discord.Guild, player_ids: List[int], send_dm: bool = True):
     """Refresh rank roles for all players in a match - always recalculates highest_rank"""
