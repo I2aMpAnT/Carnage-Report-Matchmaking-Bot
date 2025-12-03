@@ -208,7 +208,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         
         # List of valid commands
         valid_commands = [
-            "addplayer", "removeplayer", "resetqueue", "cancelmatch", "cancelcurrent",
+            "addplayer", "removeplayer", "resetqueue", "cancelmatch", "deletematch", "cancelcurrent",
             "correctcurrent", "testmatchmaking", "swap", "ping", "silentping",
             "bannedroles", "requiredroles", "setupgameemojis",
             "logtestmatch", "adminunlinkalias", "linkalias", "unlinkalias", "myalias",
@@ -642,7 +642,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         else:
             await interaction.followup.send(f"✅ Pregame cancelled!", ephemeral=True)
 
-    @bot.tree.command(name="cancelmatch", description="[STAFF] Delete a match from history by playlist and match number")
+    @bot.tree.command(name="deletematch", description="[STAFF] Delete a match from history by playlist and match number")
     @has_staff_role()
     @app_commands.describe(
         playlist="Which playlist's match to delete",
@@ -654,7 +654,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         app_commands.Choice(name="Double Team", value="double_team"),
         app_commands.Choice(name="Head to Head", value="head_to_head"),
     ])
-    async def cancel_match(interaction: discord.Interaction, playlist: str, match_number: int):
+    async def delete_match(interaction: discord.Interaction, playlist: str, match_number: int):
         """Delete a match from history by playlist and match number"""
         import json
         import os
