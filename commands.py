@@ -1,7 +1,7 @@
 # commands.py - All Bot Commands
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.4.5"
+MODULE_VERSION = "1.4.6"
 
 import discord
 from discord import app_commands
@@ -3006,5 +3006,178 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             view=ManualMatchView(match_data, interaction.user.id),
             ephemeral=True
         )
-    
+
+    # =====================================================
+    # MANUAL PLAYLIST FILE LINKING COMMANDS
+    # =====================================================
+
+    MANUAL_PLAYLISTS_FILE = "manual_playlists.json"
+
+    # Valid playlist names for rank verification
+    VALID_PLAYLISTS = [
+        "MLG 4v4",
+        "Team Hardcore",
+        "Double Team",
+        "Head to Head",
+        "UNRANKED"
+    ]
+
+    def load_manual_playlists() -> dict:
+        """Load manual playlists mapping from file"""
+        try:
+            if os.path.exists(MANUAL_PLAYLISTS_FILE):
+                with open(MANUAL_PLAYLISTS_FILE, 'r') as f:
+                    return json.load(f)
+        except Exception as e:
+            print(f"Error loading manual_playlists.json: {e}")
+        return {}
+
+    def save_manual_playlists(data: dict):
+        """Save manual playlists mapping to file"""
+        with open(MANUAL_PLAYLISTS_FILE, 'w') as f:
+            json.dump(data, f, indent=2)
+
+    async def playlist_autocomplete(
+        interaction: discord.Interaction,
+        current: str
+    ) -> list[app_commands.Choice[str]]:
+        """Autocomplete for playlist names"""
+        return [
+            app_commands.Choice(name=playlist, value=playlist)
+            for playlist in VALID_PLAYLISTS
+            if current.lower() in playlist.lower()
+        ]
+
+    @bot.tree.command(name='linkfile', description='[STAFF] Link a game file to a playlist for rank verification')
+    @app_commands.describe(
+        filename="Game filename (e.g., 20251205_123456.xlsx)",
+        playlist="The playlist to assign to this file"
+    )
+    @app_commands.autocomplete(playlist=playlist_autocomplete)
+    @has_staff_role()
+    async def link_file(interaction: discord.Interaction, filename: str, playlist: str):
+        """Link a game file to a specific playlist for manual rank verification"""
+        from searchmatchmaking import log_action
+
+        # Validate filename format (YYYYMMDD_HHMMSS.xlsx)
+        import re
+        if not re.match(r'^\d{8}_\d{6}\.xlsx$', filename):
+            await interaction.response.send_message(
+                f"❌ Invalid filename format!\n\n"
+                f"Expected format: `YYYYMMDD_HHMMSS.xlsx`\n"
+                f"Example: `20251205_123456.xlsx`",
+                ephemeral=True
+            )
+            return
+
+        # Validate playlist name
+        if playlist not in VALID_PLAYLISTS:
+            await interaction.response.send_message(
+                f"❌ Invalid playlist!\n\n"
+                f"Valid playlists: {', '.join(VALID_PLAYLISTS)}",
+                ephemeral=True
+            )
+            return
+
+        # Load existing mappings
+        mappings = load_manual_playlists()
+
+        # Check if already linked
+        if filename in mappings:
+            old_playlist = mappings[filename]
+            mappings[filename] = playlist
+            save_manual_playlists(mappings)
+
+            log_action(f"Staff {interaction.user.name} updated file link: {filename} from '{old_playlist}' to '{playlist}'")
+
+            await interaction.response.send_message(
+                f"✅ **File link updated!**\n\n"
+                f"**File:** `{filename}`\n"
+                f"**Old Playlist:** {old_playlist}\n"
+                f"**New Playlist:** {playlist}",
+                ephemeral=True
+            )
+        else:
+            mappings[filename] = playlist
+            save_manual_playlists(mappings)
+
+            log_action(f"Staff {interaction.user.name} linked file: {filename} -> '{playlist}'")
+
+            await interaction.response.send_message(
+                f"✅ **File linked to playlist!**\n\n"
+                f"**File:** `{filename}`\n"
+                f"**Playlist:** {playlist}",
+                ephemeral=True
+            )
+
+    @bot.tree.command(name='unlinkfile', description='[STAFF] Remove a file-to-playlist link')
+    @app_commands.describe(
+        filename="Game filename to unlink (e.g., 20251205_123456.xlsx)"
+    )
+    @has_staff_role()
+    async def unlink_file(interaction: discord.Interaction, filename: str):
+        """Remove a manual file-to-playlist link"""
+        from searchmatchmaking import log_action
+
+        # Load existing mappings
+        mappings = load_manual_playlists()
+
+        if filename not in mappings:
+            await interaction.response.send_message(
+                f"❌ File `{filename}` is not linked to any playlist.",
+                ephemeral=True
+            )
+            return
+
+        old_playlist = mappings.pop(filename)
+        save_manual_playlists(mappings)
+
+        log_action(f"Staff {interaction.user.name} unlinked file: {filename} (was '{old_playlist}')")
+
+        await interaction.response.send_message(
+            f"✅ **File unlinked!**\n\n"
+            f"**File:** `{filename}`\n"
+            f"**Was linked to:** {old_playlist}",
+            ephemeral=True
+        )
+
+    @bot.tree.command(name='listlinks', description='[STAFF] List all manual file-to-playlist links')
+    @has_staff_role()
+    async def list_links(interaction: discord.Interaction):
+        """Show all manual file-to-playlist mappings"""
+        mappings = load_manual_playlists()
+
+        if not mappings:
+            await interaction.response.send_message(
+                "📋 **No manual file links configured.**\n\n"
+                "Use `/linkfile` to link game files to playlists.",
+                ephemeral=True
+            )
+            return
+
+        # Group by playlist
+        by_playlist = {}
+        for filename, playlist in mappings.items():
+            if playlist not in by_playlist:
+                by_playlist[playlist] = []
+            by_playlist[playlist].append(filename)
+
+        # Build response
+        lines = ["📋 **Manual File-to-Playlist Links**\n"]
+
+        for playlist in VALID_PLAYLISTS:
+            if playlist in by_playlist:
+                files = by_playlist[playlist]
+                lines.append(f"\n**{playlist}** ({len(files)} files):")
+                # Show up to 10 files per playlist, sorted by date
+                sorted_files = sorted(files, reverse=True)[:10]
+                for f in sorted_files:
+                    lines.append(f"  • `{f}`")
+                if len(files) > 10:
+                    lines.append(f"  • ... and {len(files) - 10} more")
+
+        lines.append(f"\n**Total:** {len(mappings)} file(s) linked")
+
+        await interaction.response.send_message("\n".join(lines), ephemeral=True)
+
     return bot
