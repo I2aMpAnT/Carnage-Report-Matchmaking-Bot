@@ -34,6 +34,9 @@ ALL_GAMETYPES = ["MLG CTF5", "MLG CTF3", "MLG Team Slayer", "MLG Oddball", "MLG 
 # Admin roles
 ADMIN_ROLES = ["Overlord", "Staff", "Server Support"]
 
+# Channel ID for populate_stats.py refresh trigger
+REFRESH_TRIGGER_CHANNEL_ID = 1427929973125156924
+
 # Playlist types for per-playlist ranking
 PLAYLIST_TYPES = ["mlg_4v4", "team_hardcore", "double_team", "head_to_head"]
 
@@ -688,7 +691,35 @@ def get_all_players_sorted(sort_by: str = "rank") -> List[Tuple[str, dict]]:
 class StatsCommands(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-    
+
+    @commands.Cog.listener()
+    async def on_message(self, message):
+        """Listen for refresh trigger from populate_stats.py"""
+        # Ignore bot messages (but allow webhooks)
+        if message.author.bot and not message.webhook_id:
+            return
+
+        # Only listen in the trigger channel
+        if message.channel.id != REFRESH_TRIGGER_CHANNEL_ID:
+            return
+
+        # Check for trigger message
+        if message.content == "!refresh_ranks_trigger":
+            print("Received rank refresh trigger from populate_stats.py")
+            try:
+                # Get all players from rankstats
+                stats = load_json_file(RANKSTATS_FILE)
+                player_ids = [int(uid) for uid in stats.keys() if uid.isdigit()]
+
+                # Refresh all ranks
+                await refresh_all_ranks(message.guild, player_ids, send_dm=False)
+
+                # Delete the trigger message
+                await message.delete()
+                print("Rank refresh completed successfully")
+            except Exception as e:
+                print(f"Error during rank refresh: {e}")
+
     def has_admin_role():
         """Check if user has admin role"""
         async def predicate(interaction: discord.Interaction):
