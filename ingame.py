@@ -82,7 +82,6 @@ async def update_general_chat_embed(guild: discord.Guild, series):
             inline=True
         )
         embed.set_footer(text="Match in progress - voting in matchmaking channel")
-        embed.set_image(url=HEADER_IMAGE_URL)
         view = None
     
     # Check if test mode

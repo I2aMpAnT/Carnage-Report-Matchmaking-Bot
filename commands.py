@@ -494,31 +494,38 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                         await blue_vc.delete(reason="Match cancelled")
                     except:
                         pass
-            
+
             # Delete general chat embed
             try:
                 from ingame import delete_general_chat_embed
                 await delete_general_chat_embed(interaction.guild, series)
             except:
                 pass
-        
+
+            # Delete series message in queue channel
+            if series.series_message:
+                try:
+                    await series.series_message.delete()
+                except:
+                    pass
+
         # Clear state
         queue_state.current_series = None
         queue_state.queue.clear()
         queue_state.test_mode = False
         queue_state.testers = []
-        
+
         # Clear saved state
         try:
             import state_manager
             state_manager.clear_state()
         except:
             pass
-        
+
         channel = interaction.guild.get_channel(QUEUE_CHANNEL_ID)
         if channel:
             await update_queue_embed(channel)
-        
+
         await interaction.followup.send(f"✅ {match_type}{match_number} has been cancelled!", ephemeral=True)
     
     @bot.tree.command(name="cancelcurrent", description="[STAFF] Cancel the current active match (any type)")
@@ -597,37 +604,159 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                         await blue_vc.delete(reason="Match cancelled")
                     except:
                         pass
-            
+
             # Delete general chat embed
             try:
                 from ingame import delete_general_chat_embed
                 await delete_general_chat_embed(interaction.guild, series)
             except:
                 pass
-        
+
+            # Delete series message in queue channel
+            if series.series_message:
+                try:
+                    await series.series_message.delete()
+                except:
+                    pass
+
         # Clear all state
         queue_state.current_series = None
         queue_state.queue.clear()
         queue_state.test_mode = False
         queue_state.testers = []
-        
+
         # Clear saved state
         try:
             import state_manager
             state_manager.clear_state()
         except:
             pass
-        
+
         channel = interaction.guild.get_channel(QUEUE_CHANNEL_ID)
         if channel:
             await update_queue_embed(channel)
-        
+
         if has_series:
             match_type = "Test" if queue_state.current_series is None and has_series else "Match"
             await interaction.followup.send(f"✅ Match cancelled!", ephemeral=True)
         else:
             await interaction.followup.send(f"✅ Pregame cancelled!", ephemeral=True)
-    
+
+    @bot.tree.command(name="cancelmatch", description="[STAFF] Delete a match from history by playlist and match number")
+    @has_staff_role()
+    @app_commands.describe(
+        playlist="Which playlist's match to delete",
+        match_number="The match number to delete"
+    )
+    @app_commands.choices(playlist=[
+        app_commands.Choice(name="MLG 4v4", value="mlg_4v4"),
+        app_commands.Choice(name="Team Hardcore", value="team_hardcore"),
+        app_commands.Choice(name="Double Team", value="double_team"),
+        app_commands.Choice(name="Head to Head", value="head_to_head"),
+    ])
+    async def cancel_match(interaction: discord.Interaction, playlist: str, match_number: int):
+        """Delete a match from history by playlist and match number"""
+        import json
+        import os
+        from playlists import MATCH_HISTORY_FILE
+        from postgame import MATCH_HISTORY_FILE as MLG_HISTORY_FILE
+
+        await interaction.response.defer(ephemeral=True)
+
+        if playlist == "mlg_4v4":
+            # MLG 4v4 uses different history file
+            history_file = MLG_HISTORY_FILE
+            if not os.path.exists(history_file):
+                await interaction.followup.send("❌ No match history found!", ephemeral=True)
+                return
+
+            with open(history_file, 'r') as f:
+                history = json.load(f)
+
+            # Find match by match number
+            found_idx = None
+            found_match = None
+            for i, match in enumerate(history):
+                if match.get('match_number') == match_number:
+                    found_idx = i
+                    found_match = match
+                    break
+
+            if found_idx is None:
+                await interaction.followup.send(f"❌ Match #{match_number} not found in MLG 4v4 history!", ephemeral=True)
+                return
+
+            result = found_match.get('result', 'Unknown')
+            timestamp = found_match.get('timestamp', 'Unknown')
+
+            # Delete the match
+            history.pop(found_idx)
+            with open(history_file, 'w') as f:
+                json.dump(history, f, indent=2)
+
+            log_action(f"Staff {interaction.user.name} deleted MLG 4v4 Match #{match_number} from history")
+            await interaction.followup.send(
+                f"✅ Deleted **MLG 4v4 Match #{match_number}** from history\n"
+                f"Result: {result}\n"
+                f"Timestamp: {timestamp}",
+                ephemeral=True
+            )
+        else:
+            # Playlist matches
+            if not os.path.exists(MATCH_HISTORY_FILE):
+                await interaction.followup.send("❌ No match history found!", ephemeral=True)
+                return
+
+            with open(MATCH_HISTORY_FILE, 'r') as f:
+                history = json.load(f)
+
+            playlist_key = playlist
+            if playlist_key not in history:
+                await interaction.followup.send(f"❌ No matches found for {playlist}!", ephemeral=True)
+                return
+
+            # Find match by match number
+            found_idx = None
+            found_match = None
+            for i, match in enumerate(history[playlist_key]):
+                if match.get('match_number') == match_number:
+                    found_idx = i
+                    found_match = match
+                    break
+
+            if found_idx is None:
+                playlist_names = {
+                    "team_hardcore": "Team Hardcore",
+                    "double_team": "Double Team",
+                    "head_to_head": "Head to Head"
+                }
+                playlist_name = playlist_names.get(playlist, playlist)
+                await interaction.followup.send(f"❌ Match #{match_number} not found in {playlist_name} history!", ephemeral=True)
+                return
+
+            result = found_match.get('result', 'Unknown')
+            timestamp = found_match.get('timestamp', 'Unknown')
+
+            # Delete the match
+            history[playlist_key].pop(found_idx)
+            with open(MATCH_HISTORY_FILE, 'w') as f:
+                json.dump(history, f, indent=2)
+
+            playlist_names = {
+                "team_hardcore": "Team Hardcore",
+                "double_team": "Double Team",
+                "head_to_head": "Head to Head"
+            }
+            playlist_name = playlist_names.get(playlist, playlist)
+
+            log_action(f"Staff {interaction.user.name} deleted {playlist_name} Match #{match_number} from history")
+            await interaction.followup.send(
+                f"✅ Deleted **{playlist_name} Match #{match_number}** from history\n"
+                f"Result: {result}\n"
+                f"Timestamp: {timestamp}",
+                ephemeral=True
+            )
+
     @bot.tree.command(name="correctcurrent", description="[STAFF] Correct a game result in a match")
     @has_staff_role()
     @app_commands.describe(
@@ -2311,6 +2440,76 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             )
         else:
             await interaction.response.send_message("❌ No players in the selected queue(s)!", ephemeral=True)
+
+    @bot.tree.command(name='stop', description='[STAFF] Stop a matchmaking queue - pauses and clears all players')
+    @has_staff_role()
+    @app_commands.describe(playlist="Which playlist to stop (default: all)")
+    @app_commands.choices(playlist=[
+        app_commands.Choice(name="All Playlists", value="all"),
+        app_commands.Choice(name="MLG 4v4", value="mlg_4v4"),
+        app_commands.Choice(name="Team Hardcore", value="team_hardcore"),
+        app_commands.Choice(name="Double Team", value="double_team"),
+        app_commands.Choice(name="Head to Head", value="head_to_head"),
+    ])
+    async def stop_matchmaking(interaction: discord.Interaction, playlist: str = "all"):
+        """Stop matchmaking queue(s) - pauses and clears all players"""
+        from searchmatchmaking import queue_state, update_queue_embed, log_action
+
+        stopped_info = []
+
+        if playlist == "all" or playlist == "mlg_4v4":
+            count = len(queue_state.queue)
+            was_paused = queue_state.paused
+            # Pause the queue
+            queue_state.paused = True
+            # Hide player names
+            queue_state.hide_player_names = True
+            # Clear players
+            if count > 0:
+                queue_state.queue.clear()
+                queue_state.queue_join_times.clear()
+                queue_state.guests.clear()
+                queue_state.recent_action = None
+            if count > 0 or not was_paused:
+                stopped_info.append(f"MLG 4v4: {count} players removed, queue hidden")
+            if queue_state.queue_channel:
+                await update_queue_embed(queue_state.queue_channel)
+
+        # Stop other playlists
+        try:
+            import playlists
+            ptypes_to_stop = []
+            if playlist == "all":
+                ptypes_to_stop = [playlists.PlaylistType.TEAM_HARDCORE, playlists.PlaylistType.DOUBLE_TEAM, playlists.PlaylistType.HEAD_TO_HEAD]
+            elif playlist == "team_hardcore":
+                ptypes_to_stop = [playlists.PlaylistType.TEAM_HARDCORE]
+            elif playlist == "double_team":
+                ptypes_to_stop = [playlists.PlaylistType.DOUBLE_TEAM]
+            elif playlist == "head_to_head":
+                ptypes_to_stop = [playlists.PlaylistType.HEAD_TO_HEAD]
+
+            for ptype in ptypes_to_stop:
+                ps = playlists.get_playlist_state(ptype)
+                was_paused = ps.paused
+                count = playlists.clear_playlist_queue(ptype)
+                ps.paused = True
+                # Hide player names
+                playlists.set_playlist_hidden(ptype, True)
+                if count > 0 or not was_paused:
+                    stopped_info.append(f"{ps.name}: {count} players removed, queue hidden")
+                if ps.queue_channel:
+                    await playlists.update_playlist_embed(ps.queue_channel, ps)
+        except Exception as e:
+            log_action(f"Error stopping playlists: {e}")
+
+        if stopped_info:
+            log_action(f"Stopped by {interaction.user.display_name}: {', '.join(stopped_info)}")
+            await interaction.response.send_message(
+                f"🛑 **STOPPED:**\n" + "\n".join(f"• {info}" for info in stopped_info) + "\n\nUse `/unpause` to resume and `/showplayernames` to unhide.",
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message("🛑 Selected queue(s) already stopped (paused and hidden with no players)!", ephemeral=True)
 
     @bot.tree.command(name='adminarrange', description='[STAFF] Manually set teams and start a match')
     @app_commands.describe(

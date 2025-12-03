@@ -12,7 +12,7 @@ import random
 import json
 import os
 
-# Header image for embeds
+# Header image for embeds and DMs
 HEADER_IMAGE_URL = "https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/MessagefromCarnageReportHEADER.png"
 
 # Matchmaking progress images (1-8 players) - using 8-player images temporarily for all queues
@@ -233,25 +233,26 @@ def select_random_map_gametype(playlist_type: str) -> Tuple[str, str]:
 
 
 def get_queue_progress_image(player_count: int, max_players: int = 8) -> str:
-    """Get the queue progress image URL for current player count.
-    Temporarily using 8-player images for all queues - scales smaller queues to 8."""
-    # Scale to 8-player images temporarily
-    if max_players == 8:
-        scaled_count = player_count
-    elif max_players == 4:
-        # 2v2: 1->2, 2->4, 3->6, 4->8
-        scaled_count = player_count * 2
-    elif max_players == 2:
-        # 1v1: 1->4, 2->8
-        scaled_count = player_count * 4
-    else:
-        scaled_count = player_count
+    """Get the queue progress image URL for current player count."""
+    if player_count < 1:
+        return None  # No image for empty queue
 
-    if scaled_count < 1:
-        return f"{MATCHMAKING_IMAGE_BASE}/1outof8.png"
-    if scaled_count > 8:
-        scaled_count = 8
-    return f"{MATCHMAKING_IMAGE_BASE}/{scaled_count}outof8.png"
+    # Use actual images for each queue size
+    if max_players == 2:
+        # Head to Head 1v1 - use 1outof2.png and 2outof2.png
+        if player_count > 2:
+            player_count = 2
+        return f"{MATCHMAKING_IMAGE_BASE}/{player_count}outof2.png"
+    elif max_players == 4:
+        # Double Team 2v2 - use 1outof4.png through 4outof4.png
+        if player_count > 4:
+            player_count = 4
+        return f"{MATCHMAKING_IMAGE_BASE}/{player_count}outof4.png"
+    else:
+        # MLG 4v4 and Team Hardcore - use 8-player images
+        if player_count > 8:
+            player_count = 8
+        return f"{MATCHMAKING_IMAGE_BASE}/{player_count}outof8.png"
 
 
 def get_end_series_votes_needed(playlist_type: str) -> int:
@@ -743,7 +744,7 @@ async def start_playlist_match(channel: discord.TextChannel, playlist_state: Pla
                 except:
                     pass
     else:
-        # Create team voice channels for 2v2 or 4v4
+        # Create team voice channels for 2v2 or 4v4 with red/blue emojis
         team1_mmrs = [await get_player_mmr(uid) for uid in team1]
         team2_mmrs = [await get_player_mmr(uid) for uid in team2]
         team1_avg = int(sum(team1_mmrs) / len(team1_mmrs)) if team1_mmrs else 1500
@@ -752,12 +753,12 @@ async def start_playlist_match(channel: discord.TextChannel, playlist_state: Pla
         match_label = match.get_match_label()
 
         team1_vc = await guild.create_voice_channel(
-            name=f"Red {match_label} - {team1_avg} MMR",
+            name=f"🔴 Red {match_label} - {team1_avg} MMR",
             category=category,
             user_limit=ps.team_size + 2
         )
         team2_vc = await guild.create_voice_channel(
-            name=f"Blue {match_label} - {team2_avg} MMR",
+            name=f"🔵 Blue {match_label} - {team2_avg} MMR",
             category=category,
             user_limit=ps.team_size + 2
         )
@@ -819,7 +820,7 @@ async def show_playlist_match_embed(channel: discord.TextChannel, match: Playlis
             inline=False
         )
     else:
-        # Team format
+        # Team format with red/blue emojis
         team1_mentions = "\n".join([f"<@{uid}>" for uid in match.team1])
         team2_mentions = "\n".join([f"<@{uid}>" for uid in match.team2])
 
@@ -827,12 +828,12 @@ async def show_playlist_match_embed(channel: discord.TextChannel, match: Playlis
         team2_wins = match.games.count('TEAM2')
 
         embed.add_field(
-            name=f"Red Team - {team1_wins}",
+            name=f"🔴 Red Team - {team1_wins}",
             value=team1_mentions or "TBD",
             inline=True
         )
         embed.add_field(
-            name=f"Blue Team - {team2_wins}",
+            name=f"🔵 Blue Team - {team2_wins}",
             value=team2_mentions or "TBD",
             inline=True
         )
@@ -960,6 +961,19 @@ async def end_playlist_match(channel: discord.TextChannel, match: PlaylistMatch)
     # Save to history
     save_match_to_history(match, result)
 
+    # Move players to postgame voice channel before deleting VCs
+    POSTGAME_VC_ID = 1424845826362048643
+    postgame_vc = guild.get_channel(POSTGAME_VC_ID)
+    if postgame_vc:
+        all_players = match.team1 + match.team2
+        for uid in all_players:
+            member = guild.get_member(uid)
+            if member and member.voice:
+                try:
+                    await member.move_to(postgame_vc)
+                except:
+                    pass
+
     # Delete voice channels
     if match.shared_vc_id:
         vc = guild.get_channel(match.shared_vc_id)
@@ -989,6 +1003,21 @@ async def end_playlist_match(channel: discord.TextChannel, match: PlaylistMatch)
     if match.match_message:
         try:
             await match.match_message.delete()
+        except:
+            pass
+
+    # Delete general chat message if exists
+    if match.general_message:
+        try:
+            await match.general_message.delete()
+        except:
+            pass
+
+    # Delete ping message if exists
+    if ps.ping_message:
+        try:
+            await ps.ping_message.delete()
+            ps.ping_message = None
         except:
             pass
 
