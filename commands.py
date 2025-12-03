@@ -2119,14 +2119,9 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         with open(players_file, 'w') as f:
             json.dump(players, f, indent=2)
 
-        # Sync to GitHub
-        try:
-            import github_webhook
-            github_webhook.update_players_on_github()
-            github_status = "Synced to GitHub"
-        except Exception as e:
-            github_status = f"GitHub sync failed: {e}"
-            log_action(f"Failed to sync players.json to GitHub: {e}")
+        # Note: players.json is NOT synced to GitHub (contains confidential MAC addresses)
+        # It stays on the server only
+        github_status = "Saved locally (not synced to GitHub)"
 
         mac_count = len(players[user_id]["mac_addresses"])
         log_action(f"MAC linked by {interaction.user.name}: {player.display_name} (ID: {user_id}) -> {clean_mac}")

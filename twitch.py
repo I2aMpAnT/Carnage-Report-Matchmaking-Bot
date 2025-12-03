@@ -96,12 +96,8 @@ def save_players(players: Dict[str, Dict[str, str]]):
             json.dump(players, f, indent=2, ensure_ascii=False)
         logger.info("Saved players.json")
         
-        # Push to GitHub
-        try:
-            import github_webhook
-            github_webhook.update_players_on_github()
-        except Exception as e:
-            logger.warning(f"GitHub push failed for players.json: {e}")
+        # Note: players.json is NOT synced to GitHub (contains confidential data)
+        # It stays on the server only
     except Exception as e:
         logger.exception("Failed to save players.json")
 
