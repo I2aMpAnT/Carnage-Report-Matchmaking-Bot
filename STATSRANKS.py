@@ -315,7 +315,7 @@ def calculate_highest_rank(player_stats: dict) -> int:
     """Get the highest current rank across all playlists for a player.
 
     The website calculates this as: max(all playlist current ranks)
-    This is the CURRENT highest, not the all-time peak.
+    This is used for Discord role assignment.
 
     Returns highest_rank from data if set, otherwise finds max of playlist ranks."""
     # First, check if highest_rank is already set by the website
@@ -327,8 +327,8 @@ def calculate_highest_rank(player_stats: dict) -> int:
     playlists = player_stats.get("playlists", {})
 
     for ptype, pdata in playlists.items():
-        # Use current 'rank' field (not highest_rank which is peak for that playlist)
-        playlist_rank = pdata.get("rank", 1)
+        # highest_rank in each playlist is the current rank for that playlist
+        playlist_rank = pdata.get("highest_rank", 1)
         if playlist_rank > highest:
             highest = playlist_rank
 
@@ -336,26 +336,26 @@ def calculate_highest_rank(player_stats: dict) -> int:
 
 
 def get_playlist_rank(user_id: int, playlist_type: str) -> int:
-    """Get a player's highest_rank for a specific playlist (read from website data)"""
+    """Get a player's current rank for a specific playlist (read from website data)"""
     player_stats = get_player_stats(user_id)
     playlists = player_stats.get("playlists", {})
 
     if playlist_type in playlists:
-        # Read highest_rank directly - website calculates this
+        # Read highest_rank - this is the current rank in this playlist
         return playlists[playlist_type].get("highest_rank", 1)
 
     return 1
 
 
 def get_all_playlist_ranks(user_id: int) -> dict:
-    """Get all playlist highest_ranks for a player (read from website data)"""
+    """Get all playlist current ranks for a player (read from website data)"""
     player_stats = get_player_stats(user_id)
     playlists = player_stats.get("playlists", {})
 
     ranks = {}
     for ptype in PLAYLIST_TYPES:
         if ptype in playlists:
-            # Read highest_rank directly - website calculates this
+            # Read highest_rank - this is the current rank in this playlist
             ranks[ptype] = playlists[ptype].get("highest_rank", 1)
         else:
             ranks[ptype] = 1
