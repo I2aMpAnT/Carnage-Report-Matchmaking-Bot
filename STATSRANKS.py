@@ -37,14 +37,14 @@ ADMIN_ROLES = ["Overlord", "Staff", "Server Support"]
 # Channel ID for populate_stats.py refresh trigger
 REFRESH_TRIGGER_CHANNEL_ID = 1427929973125156924
 
-# Playlist types for per-playlist ranking
-PLAYLIST_TYPES = ["mlg_4v4", "team_hardcore", "double_team", "head_to_head"]
+# Playlist types for per-playlist ranking (display names as used by website)
+PLAYLIST_TYPES = ["MLG 4v4", "Team Hardcore", "Double Team", "Head to Head"]
 
-# Default playlist stats structure
-def get_default_playlist_stats() -> dict:
-    """Get default playlist stats for a new player"""
+# Default playlists structure (matches website format)
+def get_default_playlists() -> dict:
+    """Get default playlists structure for a new player"""
     return {
-        ptype: {"xp": 0, "wins": 0, "losses": 0, "series_wins": 0, "series_losses": 0}
+        ptype: {"rank": 1, "highest_rank": 1, "xp": 0, "wins": 0, "losses": 0}
         for ptype in PLAYLIST_TYPES
     }
 
@@ -171,15 +171,17 @@ def get_player_stats(user_id: int, skip_github: bool = False) -> dict:
             "total_games": 0,
             "total_series": 0,
             "mmr": 1500,  # Default MMR
-            "playlist_stats": get_default_playlist_stats(),
-            "highest_rank": 1
+            "rank": 1,
+            "highest_rank": 1,
+            "playlists": get_default_playlists()
         }
         save_json_file(RANKSTATS_FILE, stats, skip_github=skip_github)
     else:
-        # Ensure existing players have playlist_stats and highest_rank
-        if "playlist_stats" not in stats[user_key]:
-            stats[user_key]["playlist_stats"] = get_default_playlist_stats()
+        # Ensure existing players have playlists and highest_rank
+        if "playlists" not in stats[user_key]:
+            stats[user_key]["playlists"] = get_default_playlists()
             stats[user_key]["highest_rank"] = 1
+            stats[user_key]["rank"] = 1
             save_json_file(RANKSTATS_FILE, stats, skip_github=skip_github)
 
     return stats[user_key]
@@ -194,7 +196,8 @@ def get_existing_player_stats(user_id: int) -> dict:
     return None
 
 def update_player_stats(user_id: int, stats_update: dict):
-    """Update player stats - XP never goes below 0, recalculates highest_rank"""
+    """Update player stats - XP never goes below 0
+    Note: highest_rank is calculated by the website, not the bot"""
     stats = load_json_file(RANKSTATS_FILE)
     user_key = str(user_id)
 
@@ -208,12 +211,14 @@ def update_player_stats(user_id: int, stats_update: dict):
             "total_games": 0,
             "total_series": 0,
             "mmr": 1500,
-            "playlist_stats": get_default_playlist_stats(),
-            "highest_rank": 1
+            "rank": 1,
+            "highest_rank": 1,
+            "playlists": get_default_playlists()
         }
-    elif "playlist_stats" not in stats[user_key]:
-        stats[user_key]["playlist_stats"] = get_default_playlist_stats()
+    elif "playlists" not in stats[user_key]:
+        stats[user_key]["playlists"] = get_default_playlists()
         stats[user_key]["highest_rank"] = 1
+        stats[user_key]["rank"] = 1
 
     for key, value in stats_update.items():
         if key in stats[user_key]:
@@ -224,14 +229,15 @@ def update_player_stats(user_id: int, stats_update: dict):
     # Ensure XP never goes below 0
     stats[user_key]["xp"] = max(0, stats[user_key]["xp"])
 
-    # Recalculate highest rank after XP update
-    stats[user_key]["highest_rank"] = calculate_highest_rank(stats[user_key])
+    # Note: highest_rank is calculated by the website from playlist current ranks
+    # Bot does not recalculate it
 
     save_json_file(RANKSTATS_FILE, stats)
 
 
 def update_playlist_stats(user_id: int, playlist_type: str, stats_update: dict):
-    """Update player stats for a specific playlist - XP never goes below 0"""
+    """Update player stats for a specific playlist - XP never goes below 0
+    Note: Ranks are calculated by the website, not the bot"""
     stats = load_json_file(RANKSTATS_FILE)
     user_key = str(user_id)
 
@@ -246,30 +252,32 @@ def update_playlist_stats(user_id: int, playlist_type: str, stats_update: dict):
             "total_games": 0,
             "total_series": 0,
             "mmr": 1500,
-            "playlist_stats": get_default_playlist_stats(),
-            "highest_rank": 1
+            "rank": 1,
+            "highest_rank": 1,
+            "playlists": get_default_playlists()
         }
-    elif "playlist_stats" not in stats[user_key]:
-        stats[user_key]["playlist_stats"] = get_default_playlist_stats()
+    elif "playlists" not in stats[user_key]:
+        stats[user_key]["playlists"] = get_default_playlists()
         stats[user_key]["highest_rank"] = 1
+        stats[user_key]["rank"] = 1
 
-    # Ensure playlist exists in player's playlist_stats
-    if playlist_type not in stats[user_key]["playlist_stats"]:
-        stats[user_key]["playlist_stats"][playlist_type] = {
-            "xp": 0, "wins": 0, "losses": 0, "series_wins": 0, "series_losses": 0
+    # Ensure playlist exists in player's playlists
+    if playlist_type not in stats[user_key]["playlists"]:
+        stats[user_key]["playlists"][playlist_type] = {
+            "rank": 1, "highest_rank": 1, "xp": 0, "wins": 0, "losses": 0
         }
 
-    playlist_stats = stats[user_key]["playlist_stats"][playlist_type]
+    playlist_data = stats[user_key]["playlists"][playlist_type]
 
     # Update playlist-specific stats
     for key, value in stats_update.items():
-        if key in playlist_stats:
-            playlist_stats[key] += value
+        if key in playlist_data:
+            playlist_data[key] += value
         else:
-            playlist_stats[key] = value
+            playlist_data[key] = value
 
     # Ensure XP never goes below 0
-    playlist_stats["xp"] = max(0, playlist_stats["xp"])
+    playlist_data["xp"] = max(0, playlist_data["xp"])
 
     # Also update global stats for backwards compatibility
     for key in ["xp", "wins", "losses", "series_wins", "series_losses"]:
@@ -286,8 +294,8 @@ def update_playlist_stats(user_id: int, playlist_type: str, stats_update: dict):
     if "series_wins" in stats_update or "series_losses" in stats_update:
         stats[user_key]["total_series"] = stats[user_key].get("total_series", 0) + stats_update.get("series_wins", 0) + stats_update.get("series_losses", 0)
 
-    # Recalculate highest rank
-    stats[user_key]["highest_rank"] = calculate_highest_rank(stats[user_key])
+    # Note: highest_rank is calculated by the website from playlist current ranks
+    # Bot does not recalculate it
 
     save_json_file(RANKSTATS_FILE, stats)
     return stats[user_key]
@@ -304,63 +312,51 @@ def calculate_playlist_rank(xp: int) -> int:
 
 
 def calculate_highest_rank(player_stats: dict) -> int:
-    """Calculate the highest rank across all playlists for a player.
-    Returns the rank from whichever playlist they have the highest rank in.
-    Falls back to calculating from global wins/losses if no playlist XP exists."""
+    """Get the highest current rank across all playlists for a player.
+
+    The website calculates this as: max(all playlist current ranks)
+    This is the CURRENT highest, not the all-time peak.
+
+    Returns highest_rank from data if set, otherwise finds max of playlist ranks."""
+    # First, check if highest_rank is already set by the website
+    if "highest_rank" in player_stats and player_stats["highest_rank"] is not None:
+        return player_stats["highest_rank"]
+
+    # Fallback: find max of current playlist ranks
     highest = 1
+    playlists = player_stats.get("playlists", {})
 
-    # Check each playlist and find the highest rank
-    playlist_stats = player_stats.get("playlist_stats", {})
-    has_playlist_xp = False
-    for ptype, pstats in playlist_stats.items():
-        playlist_xp = pstats.get("xp", 0)
-        if playlist_xp > 0:
-            has_playlist_xp = True
-            rank = calculate_playlist_rank(playlist_xp)
-            if rank > highest:
-                highest = rank
-
-    # If no playlist XP found, calculate from global stats (wins/losses)
-    if not has_playlist_xp:
-        global_xp = player_stats.get("xp", 0)
-        if global_xp > 0:
-            highest = calculate_playlist_rank(global_xp)
-        else:
-            # Calculate XP from wins/losses if XP is 0
-            config = get_xp_config()
-            win_xp = config.get("game_win", 50)
-            loss_xp = config.get("game_loss", 10)
-            wins = player_stats.get("wins", 0)
-            losses = player_stats.get("losses", 0)
-            estimated_xp = (wins * win_xp) + (losses * loss_xp)
-            if estimated_xp > 0:
-                highest = calculate_playlist_rank(estimated_xp)
+    for ptype, pdata in playlists.items():
+        # Use current 'rank' field (not highest_rank which is peak for that playlist)
+        playlist_rank = pdata.get("rank", 1)
+        if playlist_rank > highest:
+            highest = playlist_rank
 
     return highest
 
 
 def get_playlist_rank(user_id: int, playlist_type: str) -> int:
-    """Get a player's rank for a specific playlist"""
+    """Get a player's highest_rank for a specific playlist (read from website data)"""
     player_stats = get_player_stats(user_id)
-    playlist_stats = player_stats.get("playlist_stats", {})
+    playlists = player_stats.get("playlists", {})
 
-    if playlist_type in playlist_stats:
-        xp = playlist_stats[playlist_type].get("xp", 0)
-        return calculate_playlist_rank(xp)
+    if playlist_type in playlists:
+        # Read highest_rank directly - website calculates this
+        return playlists[playlist_type].get("highest_rank", 1)
 
     return 1
 
 
 def get_all_playlist_ranks(user_id: int) -> dict:
-    """Get all playlist ranks for a player"""
+    """Get all playlist highest_ranks for a player (read from website data)"""
     player_stats = get_player_stats(user_id)
-    playlist_stats = player_stats.get("playlist_stats", {})
+    playlists = player_stats.get("playlists", {})
 
     ranks = {}
     for ptype in PLAYLIST_TYPES:
-        if ptype in playlist_stats:
-            xp = playlist_stats[ptype].get("xp", 0)
-            ranks[ptype] = calculate_playlist_rank(xp)
+        if ptype in playlists:
+            # Read highest_rank directly - website calculates this
+            ranks[ptype] = playlists[ptype].get("highest_rank", 1)
         else:
             ranks[ptype] = 1
 
@@ -769,26 +765,18 @@ class StatsCommands(commands.Cog):
 
         embed.add_field(name="\u200b", value="\u200b", inline=False)  # Spacer
 
-        # Per-Playlist Ranks section
-        playlist_names = {
-            "mlg_4v4": "MLG 4v4",
-            "team_hardcore": "Team Hardcore",
-            "double_team": "Double Team",
-            "head_to_head": "Head to Head"
-        }
-
-        # Get playlist-specific stats for display
-        playlist_stats = player_stats.get("playlist_stats", {})
+        # Per-Playlist Ranks section (using website data structure)
+        # PLAYLIST_TYPES already contains display names: "MLG 4v4", "Team Hardcore", etc.
+        playlists = player_stats.get("playlists", {})
 
         ranks_text = ""
         for ptype in PLAYLIST_TYPES:
-            pname = playlist_names.get(ptype, ptype)
-            prank = playlist_ranks.get(ptype, 1)
-            pstats = playlist_stats.get(ptype, {})
-            pxp = pstats.get("xp", 0)
-            pwins = pstats.get("wins", 0)
-            plosses = pstats.get("losses", 0)
-            ranks_text += f"**{pname}**: Level {prank} ({pxp} XP) - {pwins}W/{plosses}L\n"
+            pdata = playlists.get(ptype, {})
+            p_highest_rank = pdata.get("highest_rank", 1)
+            pxp = pdata.get("xp", 0)
+            pwins = pdata.get("wins", 0)
+            plosses = pdata.get("losses", 0)
+            ranks_text += f"**{ptype}**: Level {p_highest_rank} ({pxp} XP) - {pwins}W/{plosses}L\n"
 
         embed.add_field(
             name="📊 PLAYLIST RANKS",
@@ -858,12 +846,12 @@ class StatsCommands(commands.Cog):
         local_stats[user_id_str] = player_stats
         save_json_file(RANKSTATS_FILE, local_stats, skip_github=True)
 
-        # Get per-playlist ranks for display
-        playlist_stats = player_stats.get("playlist_stats", {})
+        # Get per-playlist ranks for display (using website data structure)
+        playlists = player_stats.get("playlists", {})
         ranks_display = "\n".join([
-            f"• **{ptype.replace('_', ' ').title()}**: Level {calculate_playlist_rank(pstats.get('xp', 0))}"
-            for ptype, pstats in playlist_stats.items()
-            if pstats.get('xp', 0) > 0
+            f"• **{ptype}**: Level {pdata.get('highest_rank', 1)}"
+            for ptype, pdata in playlists.items()
+            if pdata.get('highest_rank', 0) > 0
         ]) or "No playlist stats yet"
 
         await interaction.followup.send(

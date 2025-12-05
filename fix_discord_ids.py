@@ -18,7 +18,7 @@ except ImportError:
 
 # GitHub Configuration
 GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
-GITHUB_REPO = "I2aMpAnT/H2CarnageReport.com"
+GITHUB_REPO = "I2aMpAnT/CarnageReport.com"
 GITHUB_BRANCH = "main"
 
 # Corrections to make (wrong_id -> correct_id)
