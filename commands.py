@@ -659,7 +659,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         import json
         import os
         from playlists import MATCH_HISTORY_FILE
-        from postgame import MATCH_HISTORY_FILE as MLG_HISTORY_FILE
+        MLG_HISTORY_FILE = "matchhistory.json"  # MLG 4v4 match history
 
         await interaction.response.defer(ephemeral=True)
 
