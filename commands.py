@@ -3012,7 +3012,6 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
     async def restart_bot(interaction: discord.Interaction):
         """Restart the bot"""
         import sys
-        import os
 
         log_action(f"Bot restart initiated by {interaction.user.display_name}")
         await interaction.response.send_message("🔄 Restarting bot...", ephemeral=True)
@@ -3020,8 +3019,8 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         # Give time for the message to send
         await asyncio.sleep(1)
 
-        # Restart by replacing current process
-        os.execv(sys.executable, [sys.executable] + sys.argv)
+        # Exit and let pm2 restart the process
+        sys.exit(0)
 
     @bot.tree.command(name='botlogs', description='[ADMIN] View recent bot logs')
     @has_admin_role()
