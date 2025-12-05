@@ -1,7 +1,7 @@
 # commands.py - All Bot Commands
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.4.6"
+MODULE_VERSION = "1.4.7"
 
 import discord
 from discord import app_commands
@@ -3022,6 +3022,60 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             view=ManualMatchView(match_data, interaction.user.id),
             ephemeral=True
         )
+
+    @bot.tree.command(name='version', description='Show bot and module version numbers')
+    async def show_version(interaction: discord.Interaction):
+        """Show all bot and module versions"""
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            import HCRBot
+            bot_version = getattr(HCRBot, 'BOT_VERSION', 'unknown')
+            build_date = getattr(HCRBot, 'BOT_BUILD_DATE', 'unknown')
+        except:
+            bot_version = 'unknown'
+            build_date = 'unknown'
+
+        # Collect module versions
+        modules = [
+            ('commands', 'commands.py'),
+            ('searchmatchmaking', 'searchmatchmaking.py'),
+            ('pregame', 'pregame.py'),
+            ('ingame', 'ingame.py'),
+            ('postgame', 'postgame.py'),
+            ('STATSRANKS', 'STATSRANKS.py'),
+            ('twitch', 'twitch.py'),
+            ('state_manager', 'state_manager.py'),
+            ('playlists', 'playlists.py'),
+            ('stats_parser', 'stats_parser.py'),
+            ('github_webhook', 'github_webhook.py'),
+        ]
+
+        version_lines = []
+        for mod_name, display_name in modules:
+            try:
+                mod = __import__(mod_name)
+                version = getattr(mod, 'MODULE_VERSION', 'n/a')
+                version_lines.append(f"`{display_name:22}` v{version}")
+            except Exception as e:
+                version_lines.append(f"`{display_name:22}` (error: {e})")
+
+        embed = discord.Embed(
+            title="🤖 Bot Version Info",
+            color=discord.Color.blue()
+        )
+        embed.add_field(
+            name="HCR Bot",
+            value=f"**Version:** {bot_version}\n**Build Date:** {build_date}",
+            inline=False
+        )
+        embed.add_field(
+            name="Module Versions",
+            value="\n".join(version_lines),
+            inline=False
+        )
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
     @bot.tree.command(name='restart', description='[ADMIN] Restart the bot')
     @has_admin_role()
