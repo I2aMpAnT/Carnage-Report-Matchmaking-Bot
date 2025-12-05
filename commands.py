@@ -1,7 +1,7 @@
 # commands.py - All Bot Commands
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.4.8"
+MODULE_VERSION = "1.4.9"
 
 import discord
 from discord import app_commands
@@ -3138,5 +3138,106 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             )
         except Exception as e:
             await interaction.followup.send(f"❌ Error reading logs: {e}", ephemeral=True)
+
+    @bot.tree.command(name='playlistsync', description='[STAFF] Sync game results from website for active matches')
+    @has_staff_role()
+    @app_commands.describe(
+        playlist="Playlist to sync (or 'all' for all playlists)"
+    )
+    @app_commands.choices(playlist=[
+        app_commands.Choice(name="All Playlists", value="all"),
+        app_commands.Choice(name="MLG 4v4", value="mlg_4v4"),
+        app_commands.Choice(name="Team Hardcore", value="team_hardcore"),
+        app_commands.Choice(name="Double Team", value="double_team"),
+        app_commands.Choice(name="Head to Head", value="head_to_head"),
+    ])
+    async def playlist_sync(interaction: discord.Interaction, playlist: str = "all"):
+        """Pull game winner data from website for active matches"""
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            import playlists
+            from playlists import PLAYLIST_HISTORY_FILES, get_playlist_state, show_playlist_match_embed
+        except ImportError as e:
+            await interaction.followup.send(f"❌ Import error: {e}", ephemeral=True)
+            return
+
+        results = []
+        playlists_to_sync = PLAYLIST_HISTORY_FILES.keys() if playlist == "all" else [playlist]
+
+        for ptype in playlists_to_sync:
+            history_file = PLAYLIST_HISTORY_FILES.get(ptype)
+            if not history_file:
+                continue
+
+            # Pull from GitHub
+            try:
+                github_data = await github_webhook.async_pull_file_from_github(history_file)
+            except Exception as e:
+                results.append(f"❌ {ptype}: Failed to pull from GitHub - {e}")
+                continue
+
+            if not github_data:
+                results.append(f"⚠️ {ptype}: No data on GitHub")
+                continue
+
+            # Get active matches from website data
+            website_active = github_data.get("active_matches", [])
+
+            if not website_active:
+                results.append(f"✓ {ptype}: No active matches on website")
+                continue
+
+            # Get the current match in memory
+            ps = get_playlist_state(ptype)
+            if not ps.current_match:
+                results.append(f"✓ {ptype}: No active match locally")
+                continue
+
+            match = ps.current_match
+
+            # Find matching match on website by match_number
+            website_match = None
+            for wm in website_active:
+                if wm.get("match_number") == match.match_number:
+                    website_match = wm
+                    break
+
+            if not website_match:
+                results.append(f"✓ {ptype}: Match #{match.match_number} not found on website")
+                continue
+
+            # Sync game results from website
+            website_games = website_match.get("games", [])
+            games_synced = 0
+
+            if len(website_games) > len(match.games):
+                # Website has more game results - sync them
+                for i in range(len(match.games), len(website_games)):
+                    match.games.append(website_games[i])
+                    games_synced += 1
+
+                # Update match embed
+                if match.match_message:
+                    channel = interaction.guild.get_channel(ps.config["channel_id"])
+                    if channel:
+                        await show_playlist_match_embed(channel, match)
+
+                # Update the history file
+                playlists.update_active_match_in_history(match)
+
+                results.append(f"✅ {ptype}: Synced {games_synced} game result(s) for match #{match.match_number}")
+            else:
+                results.append(f"✓ {ptype}: Match #{match.match_number} up to date")
+
+        if not results:
+            results.append("No playlists to sync")
+
+        await interaction.followup.send(
+            f"**Playlist Sync Results:**\n" + "\n".join(results),
+            ephemeral=True
+        )
+
+        log_action(f"Playlist sync by {interaction.user.display_name}: {playlist}")
 
     return bot
