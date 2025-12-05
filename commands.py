@@ -3006,5 +3006,68 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             view=ManualMatchView(match_data, interaction.user.id),
             ephemeral=True
         )
-    
+
+    @bot.tree.command(name='restart', description='[ADMIN] Restart the bot')
+    @has_admin_role()
+    async def restart_bot(interaction: discord.Interaction):
+        """Restart the bot"""
+        import sys
+        import os
+
+        log_action(f"Bot restart initiated by {interaction.user.display_name}")
+        await interaction.response.send_message("🔄 Restarting bot...", ephemeral=True)
+
+        # Give time for the message to send
+        await asyncio.sleep(1)
+
+        # Restart by replacing current process
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+
+    @bot.tree.command(name='botlogs', description='[ADMIN] View recent bot logs')
+    @has_admin_role()
+    @app_commands.describe(
+        lines="Number of log lines to show (default: 50, max: 100)"
+    )
+    async def bot_logs(interaction: discord.Interaction, lines: int = 50):
+        """View recent bot logs"""
+        import os
+
+        await interaction.response.defer(ephemeral=True)
+
+        # Cap at 100 lines
+        lines = min(lines, 100)
+
+        log_file = 'log.txt'
+        if not os.path.exists(log_file):
+            await interaction.followup.send("❌ No log file found!", ephemeral=True)
+            return
+
+        try:
+            with open(log_file, 'r') as f:
+                all_lines = f.readlines()
+
+            # Get last N lines
+            recent_lines = all_lines[-lines:] if len(all_lines) >= lines else all_lines
+            log_content = ''.join(recent_lines)
+
+            if not log_content.strip():
+                await interaction.followup.send("📋 Log file is empty!", ephemeral=True)
+                return
+
+            # Discord message limit is 2000 chars, account for formatting
+            if len(log_content) > 1900:
+                log_content = log_content[-1900:]
+                # Find first newline to start at a complete line
+                first_newline = log_content.find('\n')
+                if first_newline != -1:
+                    log_content = log_content[first_newline + 1:]
+                log_content = f"... (truncated)\n{log_content}"
+
+            await interaction.followup.send(
+                f"📋 **Last {lines} log entries:**\n```\n{log_content}\n```",
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error reading logs: {e}", ephemeral=True)
+
     return bot
