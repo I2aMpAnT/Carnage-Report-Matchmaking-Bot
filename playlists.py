@@ -1,7 +1,7 @@
 # playlists.py - Multi-Playlist Queue System
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.1.2"
+MODULE_VERSION = "1.1.3"
 
 import discord
 from discord.ui import View, Button

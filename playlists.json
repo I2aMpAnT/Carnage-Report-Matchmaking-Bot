@@ -1,8 +1,36 @@
 {
   "playlists": [
-    "MLG 4v4",
-    "Team Hardcore",
-    "Double Team",
-    "Head to Head"
+    {
+      "id": "mlg_4v4",
+      "name": "MLG 4v4",
+      "team_size": 4,
+      "max_players": 8,
+      "ranked": true,
+      "description": "Classic 4v4 MLG matchmaking with team selection vote"
+    },
+    {
+      "id": "team_hardcore",
+      "name": "Team Hardcore",
+      "team_size": 4,
+      "max_players": 8,
+      "ranked": true,
+      "description": "4v4 auto-balanced teams based on MMR"
+    },
+    {
+      "id": "double_team",
+      "name": "Double Team",
+      "team_size": 2,
+      "max_players": 4,
+      "ranked": true,
+      "description": "2v2 auto-balanced teams based on MMR"
+    },
+    {
+      "id": "head_to_head",
+      "name": "Head to Head",
+      "team_size": 1,
+      "max_players": 2,
+      "ranked": true,
+      "description": "1v1 matchmaking"
+    }
   ]
 }
