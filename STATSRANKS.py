@@ -723,20 +723,46 @@ class StatsCommands(commands.Cog):
     @app_commands.command(name="playerstats", description="View player matchmaking statistics")
     @app_commands.describe(user="User to view stats for (optional)")
     async def playerstats(self, interaction: discord.Interaction, user: discord.User = None):
-        """Show player stats with per-playlist ranks"""
+        """Show player stats with per-playlist ranks - pulls live data from carnagereport.com"""
+        await interaction.response.defer()
+
+        import github_webhook
+
         target_user = user or interaction.user
 
-        # Get stats
-        player_stats = get_player_stats(target_user.id)
+        # Pull live data from GitHub (carnagereport.com source)
+        all_stats = await github_webhook.async_pull_rankstats_from_github()
 
-        # Get highest rank and per-playlist ranks
-        highest_rank = player_stats.get("highest_rank", 1)
-        playlist_ranks = get_all_playlist_ranks(target_user.id)
+        if not all_stats:
+            await interaction.followup.send("❌ Could not fetch stats from carnagereport.com", ephemeral=True)
+            return
+
+        user_key = str(target_user.id)
+        player_stats = all_stats.get(user_key)
+
+        if not player_stats:
+            await interaction.followup.send(f"❌ No stats found for {target_user.name}. They may not have played any ranked games yet.", ephemeral=True)
+            return
+
+        # Get highest rank - use stored or calculate
+        highest_rank = player_stats.get("highest_rank")
+        if highest_rank is None or highest_rank < 1:
+            highest_rank = calculate_highest_rank(player_stats)
+
+        # Calculate per-playlist ranks from the pulled data
+        playlist_stats = player_stats.get("playlist_stats", {})
+        playlist_ranks = {}
+        for ptype in PLAYLIST_TYPES:
+            if ptype in playlist_stats:
+                xp = playlist_stats[ptype].get("xp", 0)
+                playlist_ranks[ptype] = calculate_playlist_rank(xp)
+            else:
+                playlist_ranks[ptype] = 1
 
         # Calculate win rate
-        total_games = player_stats["total_games"]
-        wins = player_stats["wins"]
-        losses = player_stats["losses"]
+        wins = player_stats.get("wins", 0)
+        losses = player_stats.get("losses", 0)
+        total_games = player_stats.get("total_games", wins + losses)
         win_rate = (wins / total_games * 100) if total_games > 0 else 0
 
         # Get MMR
@@ -745,6 +771,7 @@ class StatsCommands(commands.Cog):
         # Create embed
         embed = discord.Embed(
             title=f"{target_user.name}'s Matchmaking Stats",
+            description="*Live data from carnagereport.com*",
             color=discord.Color.from_rgb(0, 112, 192)
         )
 
@@ -776,9 +803,6 @@ class StatsCommands(commands.Cog):
             "double_team": "Double Team",
             "head_to_head": "Head to Head"
         }
-
-        # Get playlist-specific stats for display
-        playlist_stats = player_stats.get("playlist_stats", {})
 
         ranks_text = ""
         for ptype in PLAYLIST_TYPES:
@@ -820,10 +844,16 @@ class StatsCommands(commands.Cog):
         )
 
         embed.set_thumbnail(url=target_user.display_avatar.url)
-        embed.set_footer(text=f"Total Games: {total_games} | Series W/L: {player_stats['series_wins']}/{player_stats['series_losses']}")
-        
-        await interaction.response.send_message(embed=embed)
-    
+        embed.set_footer(text=f"Total Games: {total_games} | Series W/L: {player_stats.get('series_wins', 0)}/{player_stats.get('series_losses', 0)}")
+
+        await interaction.followup.send(embed=embed)
+
+    @app_commands.command(name="stats", description="View player matchmaking statistics (alias for /playerstats)")
+    @app_commands.describe(user="User to view stats for (optional)")
+    async def stats(self, interaction: discord.Interaction, user: discord.User = None):
+        """Alias for /playerstats - pulls live data from carnagereport.com"""
+        await self.playerstats(interaction, user)
+
     @app_commands.command(name="verifystats", description="Update your rank role based on your current stats")
     async def verifystats(self, interaction: discord.Interaction):
         """Verify and update your own rank - pulls from GitHub (source of truth)"""
@@ -1114,64 +1144,89 @@ class StatsCommands(commands.Cog):
         app_commands.Choice(name="MMR", value="mmr")
     ])
     async def leaderboard(self, interaction: discord.Interaction, sort_by: str = "rank", page: int = 1):
-        """Show leaderboard"""
-        # Get all players sorted
-        players = get_all_players_sorted(sort_by)
-        
-        if not players:
-            await interaction.response.send_message("No players have stats yet!", ephemeral=True)
+        """Show leaderboard - pulls live data from carnagereport.com"""
+        await interaction.response.defer()
+
+        import github_webhook
+
+        # Pull live data from GitHub (carnagereport.com source)
+        stats = await github_webhook.async_pull_rankstats_from_github()
+
+        if not stats:
+            await interaction.followup.send("❌ Could not fetch leaderboard data from carnagereport.com", ephemeral=True)
             return
-        
+
+        # Build players list with calculated ranks
+        players = []
+        for user_id, player_stats in stats.items():
+            player_stats["rank"] = calculate_rank(player_stats.get("xp", 0))
+            players.append((user_id, player_stats))
+
+        if not players:
+            await interaction.followup.send("No players have stats yet!", ephemeral=True)
+            return
+
+        # Sort based on criteria
+        if sort_by == "rank":
+            players.sort(key=lambda x: (x[1]["rank"], x[1].get("xp", 0)), reverse=True)
+        elif sort_by == "wins":
+            players.sort(key=lambda x: x[1].get("wins", 0), reverse=True)
+        elif sort_by == "series_wins":
+            players.sort(key=lambda x: x[1].get("series_wins", 0), reverse=True)
+        elif sort_by == "mmr":
+            players.sort(key=lambda x: x[1].get("mmr", 1500), reverse=True)
+
         # Pagination
         per_page = 10
         total_pages = math.ceil(len(players) / per_page)
         page = max(1, min(page, total_pages))
-        
+
         start_idx = (page - 1) * per_page
         end_idx = start_idx + per_page
         page_players = players[start_idx:end_idx]
-        
+
         # Create embed
         embed = discord.Embed(
             title="🏆 Halo 2 Matchmaking Leaderboard",
-            description=f"Sorted by: **{sort_by.replace('_', ' ').title()}**",
+            description=f"Sorted by: **{sort_by.replace('_', ' ').title()}**\n*Live data from carnagereport.com*",
             color=discord.Color.from_rgb(0, 112, 192)
         )
-        
+
         # Add players
         leaderboard_text = ""
-        for i, (user_id, stats) in enumerate(page_players, start=start_idx + 1):
+        for i, (user_id, pstats) in enumerate(page_players, start=start_idx + 1):
             try:
                 user = await self.bot.fetch_user(int(user_id))
                 name = user.name
             except:
                 name = f"User {user_id}"
-            
-            rank = stats["rank"]
-            xp = stats["xp"]
-            wins = stats["wins"]
-            losses = stats["losses"]
-            mmr = stats.get("mmr", 1500)
-            win_rate = (wins / stats["total_games"] * 100) if stats["total_games"] > 0 else 0
-            
+
+            rank = pstats["rank"]
+            xp = pstats.get("xp", 0)
+            wins = pstats.get("wins", 0)
+            losses = pstats.get("losses", 0)
+            mmr = pstats.get("mmr", 1500)
+            total_games = pstats.get("total_games", wins + losses)
+            win_rate = (wins / total_games * 100) if total_games > 0 else 0
+
             if sort_by == "rank":
                 leaderboard_text += f"`{i}.` **{name}** - Level {rank} ({xp} XP)\n"
             elif sort_by == "wins":
                 leaderboard_text += f"`{i}.` **{name}** - {wins}W / {losses}L ({win_rate:.1f}%)\n"
             elif sort_by == "series_wins":
-                leaderboard_text += f"`{i}.` **{name}** - {stats['series_wins']}W / {stats['series_losses']}L (Series)\n"
+                leaderboard_text += f"`{i}.` **{name}** - {pstats.get('series_wins', 0)}W / {pstats.get('series_losses', 0)}L (Series)\n"
             elif sort_by == "mmr":
                 leaderboard_text += f"`{i}.` **{name}** - MMR: {mmr}\n"
-        
+
         embed.description += f"\n\n{leaderboard_text}"
         embed.set_footer(text=f"Page {page}/{total_pages} • {len(players)} total players")
-        
+
         # Add navigation buttons if needed
         if total_pages > 1:
             view = LeaderboardView(sort_by, page, total_pages, self.bot)
-            await interaction.response.send_message(embed=embed, view=view)
+            await interaction.followup.send(embed=embed, view=view)
         else:
-            await interaction.response.send_message(embed=embed)
+            await interaction.followup.send(embed=embed)
 
 class LeaderboardView(discord.ui.View):
     def __init__(self, sort_by: str, current_page: int, total_pages: int, bot):
