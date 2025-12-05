@@ -1,7 +1,7 @@
 # commands.py - All Bot Commands
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.4.7"
+MODULE_VERSION = "1.4.8"
 
 import discord
 from discord import app_commands
@@ -664,8 +664,8 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             import os
 
             # File paths for match history
-            MLG_HISTORY_FILE = "matchhistory.json"  # MLG 4v4 match history
-            PLAYLIST_HISTORY_FILE = "match_history.json"  # Other playlists
+            MLG_HISTORY_FILE = "MLG4v4.json"  # MLG 4v4 match history
+            # Other playlists use per-playlist files via playlists.get_playlist_history_file()
 
             playlist_names = {
                 "mlg_4v4": "MLG 4v4",
@@ -714,27 +714,26 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                     ephemeral=True
                 )
             else:
-                # Other playlists use playlist history file
-                if not os.path.exists(PLAYLIST_HISTORY_FILE):
-                    await interaction.followup.send(f"❌ No {playlist_name} match history found! (file does not exist)", ephemeral=True)
+                # Other playlists use per-playlist history files
+                from playlists import get_playlist_history_file
+                history_file = get_playlist_history_file(playlist)
+
+                if not os.path.exists(history_file):
+                    await interaction.followup.send(f"❌ No {playlist_name} match history found! (file {history_file} does not exist)", ephemeral=True)
                     return
 
-                with open(PLAYLIST_HISTORY_FILE, 'r') as f:
+                with open(history_file, 'r') as f:
                     history = json.load(f)
 
-                playlist_key = playlist
-                if playlist_key not in history:
-                    await interaction.followup.send(f"❌ No matches found for {playlist_name}! (no matches recorded yet)", ephemeral=True)
-                    return
-
-                if len(history[playlist_key]) == 0:
+                matches = history.get("matches", [])
+                if len(matches) == 0:
                     await interaction.followup.send(f"❌ No matches found for {playlist_name}! (match list is empty)", ephemeral=True)
                     return
 
                 # Find match by match number
                 found_idx = None
                 found_match = None
-                for i, match in enumerate(history[playlist_key]):
+                for i, match in enumerate(matches):
                     if match.get('match_number') == match_number:
                         found_idx = i
                         found_match = match
@@ -742,7 +741,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
 
                 if found_idx is None:
                     # List available match numbers for helpfulness
-                    available = [m.get('match_number') for m in history[playlist_key] if m.get('match_number')]
+                    available = [m.get('match_number') for m in matches if m.get('match_number')]
                     if available:
                         await interaction.followup.send(
                             f"❌ Match #{match_number} not found in {playlist_name} history!\n"
@@ -757,11 +756,12 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                 timestamp = found_match.get('timestamp', 'Unknown')
 
                 # Delete the match
-                history[playlist_key].pop(found_idx)
-                with open(PLAYLIST_HISTORY_FILE, 'w') as f:
+                history["matches"].pop(found_idx)
+                history["total_matches"] = len(history["matches"])
+                with open(history_file, 'w') as f:
                     json.dump(history, f, indent=2)
 
-                log_action(f"Staff {interaction.user.name} deleted {playlist_name} Match #{match_number} from history")
+                log_action(f"Staff {interaction.user.name} deleted {playlist_name} Match #{match_number} from {history_file}")
                 await interaction.followup.send(
                     f"✅ Deleted **{playlist_name} Match #{match_number}** from history\n"
                     f"Result: {result}\n"
