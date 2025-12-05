@@ -1,7 +1,7 @@
 # commands.py - All Bot Commands
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.4.5"
+MODULE_VERSION = "1.4.6"
 
 import discord
 from discord import app_commands
@@ -656,106 +656,122 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
     ])
     async def delete_match(interaction: discord.Interaction, playlist: str, match_number: int):
         """Delete a match from history by playlist and match number"""
-        import json
-        import os
-        from playlists import MATCH_HISTORY_FILE
-        MLG_HISTORY_FILE = "matchhistory.json"  # MLG 4v4 match history
-
+        # IMPORTANT: defer() must be called FIRST before any code that could fail
         await interaction.response.defer(ephemeral=True)
 
-        if playlist == "mlg_4v4":
-            # MLG 4v4 uses different history file
-            history_file = MLG_HISTORY_FILE
-            if not os.path.exists(history_file):
-                await interaction.followup.send("❌ No match history found!", ephemeral=True)
-                return
+        try:
+            import json
+            import os
 
-            with open(history_file, 'r') as f:
-                history = json.load(f)
-
-            # Find match by match number
-            found_idx = None
-            found_match = None
-            for i, match in enumerate(history):
-                if match.get('match_number') == match_number:
-                    found_idx = i
-                    found_match = match
-                    break
-
-            if found_idx is None:
-                await interaction.followup.send(f"❌ Match #{match_number} not found in MLG 4v4 history!", ephemeral=True)
-                return
-
-            result = found_match.get('result', 'Unknown')
-            timestamp = found_match.get('timestamp', 'Unknown')
-
-            # Delete the match
-            history.pop(found_idx)
-            with open(history_file, 'w') as f:
-                json.dump(history, f, indent=2)
-
-            log_action(f"Staff {interaction.user.name} deleted MLG 4v4 Match #{match_number} from history")
-            await interaction.followup.send(
-                f"✅ Deleted **MLG 4v4 Match #{match_number}** from history\n"
-                f"Result: {result}\n"
-                f"Timestamp: {timestamp}",
-                ephemeral=True
-            )
-        else:
-            # Playlist matches
-            if not os.path.exists(MATCH_HISTORY_FILE):
-                await interaction.followup.send("❌ No match history found!", ephemeral=True)
-                return
-
-            with open(MATCH_HISTORY_FILE, 'r') as f:
-                history = json.load(f)
-
-            playlist_key = playlist
-            if playlist_key not in history:
-                await interaction.followup.send(f"❌ No matches found for {playlist}!", ephemeral=True)
-                return
-
-            # Find match by match number
-            found_idx = None
-            found_match = None
-            for i, match in enumerate(history[playlist_key]):
-                if match.get('match_number') == match_number:
-                    found_idx = i
-                    found_match = match
-                    break
-
-            if found_idx is None:
-                playlist_names = {
-                    "team_hardcore": "Team Hardcore",
-                    "double_team": "Double Team",
-                    "head_to_head": "Head to Head"
-                }
-                playlist_name = playlist_names.get(playlist, playlist)
-                await interaction.followup.send(f"❌ Match #{match_number} not found in {playlist_name} history!", ephemeral=True)
-                return
-
-            result = found_match.get('result', 'Unknown')
-            timestamp = found_match.get('timestamp', 'Unknown')
-
-            # Delete the match
-            history[playlist_key].pop(found_idx)
-            with open(MATCH_HISTORY_FILE, 'w') as f:
-                json.dump(history, f, indent=2)
+            # File paths for match history
+            MLG_HISTORY_FILE = "matchhistory.json"  # MLG 4v4 match history
+            PLAYLIST_HISTORY_FILE = "match_history.json"  # Other playlists
 
             playlist_names = {
+                "mlg_4v4": "MLG 4v4",
                 "team_hardcore": "Team Hardcore",
                 "double_team": "Double Team",
                 "head_to_head": "Head to Head"
             }
             playlist_name = playlist_names.get(playlist, playlist)
 
-            log_action(f"Staff {interaction.user.name} deleted {playlist_name} Match #{match_number} from history")
-            await interaction.followup.send(
-                f"✅ Deleted **{playlist_name} Match #{match_number}** from history\n"
-                f"Result: {result}\n"
-                f"Timestamp: {timestamp}",
-                ephemeral=True
-            )
+            if playlist == "mlg_4v4":
+                # MLG 4v4 uses different history file
+                history_file = MLG_HISTORY_FILE
+                if not os.path.exists(history_file):
+                    await interaction.followup.send(f"❌ No {playlist_name} match history found!", ephemeral=True)
+                    return
+
+                with open(history_file, 'r') as f:
+                    history = json.load(f)
+
+                # Find match by match number
+                found_idx = None
+                found_match = None
+                for i, match in enumerate(history):
+                    if match.get('match_number') == match_number:
+                        found_idx = i
+                        found_match = match
+                        break
+
+                if found_idx is None:
+                    await interaction.followup.send(f"❌ Match #{match_number} not found in {playlist_name} history!", ephemeral=True)
+                    return
+
+                result = found_match.get('result', 'Unknown')
+                timestamp = found_match.get('timestamp', 'Unknown')
+
+                # Delete the match
+                history.pop(found_idx)
+                with open(history_file, 'w') as f:
+                    json.dump(history, f, indent=2)
+
+                log_action(f"Staff {interaction.user.name} deleted {playlist_name} Match #{match_number} from history")
+                await interaction.followup.send(
+                    f"✅ Deleted **{playlist_name} Match #{match_number}** from history\n"
+                    f"Result: {result}\n"
+                    f"Timestamp: {timestamp}",
+                    ephemeral=True
+                )
+            else:
+                # Other playlists use playlist history file
+                if not os.path.exists(PLAYLIST_HISTORY_FILE):
+                    await interaction.followup.send(f"❌ No {playlist_name} match history found! (file does not exist)", ephemeral=True)
+                    return
+
+                with open(PLAYLIST_HISTORY_FILE, 'r') as f:
+                    history = json.load(f)
+
+                playlist_key = playlist
+                if playlist_key not in history:
+                    await interaction.followup.send(f"❌ No matches found for {playlist_name}! (no matches recorded yet)", ephemeral=True)
+                    return
+
+                if len(history[playlist_key]) == 0:
+                    await interaction.followup.send(f"❌ No matches found for {playlist_name}! (match list is empty)", ephemeral=True)
+                    return
+
+                # Find match by match number
+                found_idx = None
+                found_match = None
+                for i, match in enumerate(history[playlist_key]):
+                    if match.get('match_number') == match_number:
+                        found_idx = i
+                        found_match = match
+                        break
+
+                if found_idx is None:
+                    # List available match numbers for helpfulness
+                    available = [m.get('match_number') for m in history[playlist_key] if m.get('match_number')]
+                    if available:
+                        await interaction.followup.send(
+                            f"❌ Match #{match_number} not found in {playlist_name} history!\n"
+                            f"Available match numbers: {', '.join(map(str, sorted(available)))}",
+                            ephemeral=True
+                        )
+                    else:
+                        await interaction.followup.send(f"❌ Match #{match_number} not found in {playlist_name} history!", ephemeral=True)
+                    return
+
+                result = found_match.get('result', 'Unknown')
+                timestamp = found_match.get('timestamp', 'Unknown')
+
+                # Delete the match
+                history[playlist_key].pop(found_idx)
+                with open(PLAYLIST_HISTORY_FILE, 'w') as f:
+                    json.dump(history, f, indent=2)
+
+                log_action(f"Staff {interaction.user.name} deleted {playlist_name} Match #{match_number} from history")
+                await interaction.followup.send(
+                    f"✅ Deleted **{playlist_name} Match #{match_number}** from history\n"
+                    f"Result: {result}\n"
+                    f"Timestamp: {timestamp}",
+                    ephemeral=True
+                )
+
+        except Exception as e:
+            log_action(f"Error in /deletematch: {e}")
+            await interaction.followup.send(f"❌ Error deleting match: {e}", ephemeral=True)
 
     @bot.tree.command(name="correctcurrent", description="[STAFF] Correct a game result in a match")
     @has_staff_role()
