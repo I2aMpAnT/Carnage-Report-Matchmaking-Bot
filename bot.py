@@ -4,52 +4,74 @@
 import os
 import sys
 import subprocess
+import shutil
+
+# JSON data files to preserve (not overwritten by git)
+DATA_FILES = [
+    "rankstats.json",
+    "matchhistory.json",
+    "testmatchhistory.json",
+    "gamestats.json",
+    "queue_config.json",
+    "xp_config.json",
+    "matchmakingstate.json",
+    "players.json"
+]
 
 def pull_from_github():
-    """Pull latest code from GitHub before starting"""
+    """Pull latest code from GitHub before starting - ALWAYS uses latest code"""
     print("📥 Pulling latest code from GitHub...")
     try:
-        # First, stash any local changes (like JSON data files)
-        stash_result = subprocess.run(
-            ["git", "stash", "--include-untracked"],
+        # Backup JSON data files first
+        backups = {}
+        for filename in DATA_FILES:
+            if os.path.exists(filename):
+                backup_name = f"{filename}.backup"
+                shutil.copy2(filename, backup_name)
+                backups[filename] = backup_name
+
+        if backups:
+            print(f"📦 Backed up {len(backups)} data files")
+
+        # Fetch latest from origin
+        fetch_result = subprocess.run(
+            ["git", "fetch", "origin", "main"],
             capture_output=True,
             text=True,
             timeout=30
         )
-        had_changes = "No local changes" not in stash_result.stdout
-        if had_changes:
-            print("📦 Stashed local changes")
+        if fetch_result.returncode != 0:
+            print(f"⚠️ Git fetch warning: {fetch_result.stderr}")
 
-        # Now pull the latest code
-        result = subprocess.run(
-            ["git", "pull", "origin", "main"],
+        # Hard reset to origin/main - ALWAYS gets latest code
+        reset_result = subprocess.run(
+            ["git", "reset", "--hard", "origin/main"],
             capture_output=True,
             text=True,
             timeout=30
         )
-        if result.returncode == 0:
-            if "Already up to date" in result.stdout:
-                print("✅ Already up to date")
-            else:
-                print("✅ Updated from GitHub:")
-                print(result.stdout)
-        else:
-            print(f"⚠️ Git pull warning: {result.stderr}")
-
-        # Restore stashed changes (preserves local JSON data)
-        if had_changes:
-            pop_result = subprocess.run(
-                ["git", "stash", "pop"],
+        if reset_result.returncode == 0:
+            print("✅ Updated to latest code from GitHub")
+            # Show what commit we're on
+            log_result = subprocess.run(
+                ["git", "log", "-1", "--oneline"],
                 capture_output=True,
                 text=True,
-                timeout=30
+                timeout=10
             )
-            if pop_result.returncode == 0:
-                print("📦 Restored local data files")
-            else:
-                # If pop fails due to conflicts, keep the stash and warn
-                print("⚠️ Could not auto-restore local changes (may have conflicts)")
-                print("   Run 'git stash pop' manually if needed")
+            if log_result.returncode == 0:
+                print(f"   Commit: {log_result.stdout.strip()}")
+        else:
+            print(f"⚠️ Git reset warning: {reset_result.stderr}")
+
+        # Restore JSON data files from backup
+        for filename, backup_name in backups.items():
+            if os.path.exists(backup_name):
+                shutil.copy2(backup_name, filename)
+                os.remove(backup_name)
+
+        if backups:
+            print(f"📦 Restored {len(backups)} data files")
 
     except subprocess.TimeoutExpired:
         print("⚠️ Git pull timed out - continuing with existing files")
