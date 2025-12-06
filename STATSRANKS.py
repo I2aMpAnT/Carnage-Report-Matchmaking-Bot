@@ -834,10 +834,10 @@ class StatsCommands(commands.Cog):
                 break
         games_pct = (games_rank / total_players * 100) if total_players > 0 else 0
 
-        # Get rank emoji
+        # Get rank emoji (emoji name is just the rank number, e.g., :15:)
         rank_emoji = None
         if interaction.guild:
-            emoji = discord.utils.get(interaction.guild.emojis, name=f"Level{highest_rank}")
+            emoji = discord.utils.get(interaction.guild.emojis, name=str(highest_rank))
             if emoji:
                 rank_emoji = str(emoji)
 
@@ -1152,9 +1152,9 @@ class LeaderboardView(discord.ui.View):
         ))
 
     def get_rank_emoji(self, level: int) -> str:
-        """Get the custom rank emoji for a level (e.g., :Level15:)"""
+        """Get the custom rank emoji for a level (e.g., :15:)"""
         if self.guild:
-            emoji = discord.utils.get(self.guild.emojis, name=f"Level{level}")
+            emoji = discord.utils.get(self.guild.emojis, name=str(level))
             if emoji:
                 return str(emoji)
         # Fallback to text display
@@ -1272,15 +1272,15 @@ class LeaderboardView(discord.ui.View):
 
                 rank_emoji = self.get_rank_emoji(p["level"])
 
-                # Format: name + rank emoji on right (no position numbers)
+                # Format: position. name + rank emoji on right
                 if self.current_sort == "Level":
-                    line = f"{name} {rank_emoji}"
+                    line = f"{i}. {name} {rank_emoji}"
                 elif self.current_sort == "Wins":
-                    line = f"{name} • **{p['wins']}W** {rank_emoji}"
+                    line = f"{i}. {name} • **{p['wins']}W** {rank_emoji}"
                 elif self.current_sort == "K/D":
-                    line = f"{name} • **{p['kd']:.2f}** {rank_emoji}"
+                    line = f"{i}. {name} • **{p['kd']:.2f}** {rank_emoji}"
                 else:
-                    line = f"{name} {rank_emoji}"
+                    line = f"{i}. {name} {rank_emoji}"
 
                 leaderboard_lines.append(line)
 
