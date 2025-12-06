@@ -2067,27 +2067,21 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
     async def link_mac(interaction: discord.Interaction, player: discord.Member, mac_address: str):
         """Link a player's Discord ID to their MAC address"""
         from searchmatchmaking import log_action
-        import json
-        import os
-        
+        import twitch
+
         # Clean up MAC address - remove extra spaces, normalize format
         mac_address = mac_address.strip().upper()
-        
+
         # Basic validation - MAC should have colons or dashes
         # Accept various formats: AA:BB:CC:DD:EE:FF or AA-BB-CC-DD-EE-FF or AABBCCDDEEFF
         clean_mac = mac_address.replace("-", ":").replace(" ", "")
-        
+
         # If no colons, try to format it
         if ":" not in clean_mac and len(clean_mac) == 12:
             clean_mac = ":".join(clean_mac[i:i+2] for i in range(0, 12, 2))
-        
-        # Load players.json
-        players_file = "players.json"
-        if os.path.exists(players_file):
-            with open(players_file, 'r') as f:
-                players = json.load(f)
-        else:
-            players = {}
+
+        # Load players.json using centralized cache
+        players = twitch.load_players()
         
         user_id = str(player.id)
         
@@ -2131,18 +2125,8 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         # Also save discord username
         players[user_id]["discord_name"] = player.name
 
-        # Save players.json
-        with open(players_file, 'w') as f:
-            json.dump(players, f, indent=2)
-
-        # Sync to GitHub
-        try:
-            import github_webhook
-            github_webhook.update_players_on_github()
-            github_status = "Synced to GitHub"
-        except Exception as e:
-            github_status = f"GitHub sync failed: {e}"
-            log_action(f"Failed to sync players.json to GitHub: {e}")
+        # Save players.json using centralized cache (also syncs to GitHub)
+        twitch.save_players(players)
 
         mac_count = len(players[user_id]["mac_addresses"])
         log_action(f"MAC linked by {interaction.user.name}: {player.display_name} (ID: {user_id}) -> {clean_mac}")
@@ -2151,8 +2135,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             f"✅ Linked MAC address to **{player.display_name}**\n"
             f"**Discord ID:** `{user_id}`\n"
             f"**MAC:** `{clean_mac}`\n"
-            f"**Total MACs linked:** {mac_count}\n"
-            f"**{github_status}**",
+            f"**Total MACs linked:** {mac_count}",
             ephemeral=True
         )
     
@@ -2165,16 +2148,10 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
     async def unlink_mac(interaction: discord.Interaction, player: discord.Member, mac_address: str):
         """Remove a MAC address from a player"""
         from searchmatchmaking import log_action
-        import json
-        import os
-        
-        players_file = "players.json"
-        if not os.path.exists(players_file):
-            await interaction.response.send_message("❌ No player data found!", ephemeral=True)
-            return
-        
-        with open(players_file, 'r') as f:
-            players = json.load(f)
+        import twitch
+
+        # Load players.json using centralized cache
+        players = twitch.load_players()
         
         user_id = str(player.id)
         
@@ -2196,10 +2173,10 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         if mac_address.lower() == "all":
             count = len(players[user_id]["mac_addresses"])
             players[user_id]["mac_addresses"] = []
-            
-            with open(players_file, 'w') as f:
-                json.dump(players, f, indent=2)
-            
+
+            # Save using centralized cache (also syncs to GitHub)
+            twitch.save_players(players)
+
             log_action(f"All MACs unlinked from {player.display_name} ({count} removed)")
             
             await interaction.response.send_message(
@@ -2221,10 +2198,10 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             return
         
         players[user_id]["mac_addresses"].remove(clean_mac)
-        
-        with open(players_file, 'w') as f:
-            json.dump(players, f, indent=2)
-        
+
+        # Save using centralized cache (also syncs to GitHub)
+        twitch.save_players(players)
+
         remaining = len(players[user_id]["mac_addresses"])
         log_action(f"MAC unlinked from {player.display_name}: {clean_mac}")
         
@@ -2239,16 +2216,10 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
     @has_staff_role()
     async def check_mac(interaction: discord.Interaction, player: discord.Member):
         """Check what MAC addresses are linked to a player"""
-        import json
-        import os
-        
-        players_file = "players.json"
-        if not os.path.exists(players_file):
-            await interaction.response.send_message("❌ No player data found!", ephemeral=True)
-            return
-        
-        with open(players_file, 'r') as f:
-            players = json.load(f)
+        import twitch
+
+        # Load players.json using centralized cache
+        players = twitch.load_players()
         
         user_id = str(player.id)
         
