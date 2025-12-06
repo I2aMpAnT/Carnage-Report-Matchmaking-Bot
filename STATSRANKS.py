@@ -1098,15 +1098,18 @@ class StatsCommands(commands.Cog):
         await interaction.response.send_message(embed=embed, view=view)
 
 class LeaderboardView(discord.ui.View):
-    """Leaderboard with tabs for Overall and each playlist"""
+    """Leaderboard with tabs for Overall and each playlist, plus sort options"""
 
     # View options: Overall + each playlist
     VIEWS = ["Overall", "MLG 4v4", "Team Hardcore", "Double Team", "Head to Head"]
+    # Sort options
+    SORTS = ["Level", "Wins", "W/L %", "Games"]
 
     def __init__(self, bot):
         super().__init__(timeout=300)
         self.bot = bot
         self.current_view = "Overall"  # Default view
+        self.current_sort = "Level"    # Default sort
         self.current_page = 1
         self.total_pages = 1
         self.per_page = 10
@@ -1122,35 +1125,39 @@ class LeaderboardView(discord.ui.View):
         else:
             return f"`{position}.`"
 
-    def get_rank_display(self, level: int) -> str:
-        """Get rank icon display - shows level with icon"""
-        # Use rank icon URL format for reference, but display as text with visual
+    def get_rank_icon(self, level: int) -> str:
+        """Get rank icon for level"""
         if level >= 45:
-            return f"<:rank{level}:> **{level}**" if level <= 50 else f"⭐ **{level}**"
+            return "⭐"
         elif level >= 35:
-            return f"🔷 **{level}**"
+            return "🔷"
         elif level >= 25:
-            return f"🔶 **{level}**"
+            return "🔶"
         elif level >= 15:
-            return f"⬜ **{level}**"
+            return "⬜"
         else:
-            return f"⬛ **{level}**"
+            return "⬛"
 
     async def get_players_for_view(self) -> list:
-        """Get sorted players based on current view"""
+        """Get sorted players based on current view and sort"""
         stats = load_json_file(RANKSTATS_FILE)
 
         if self.current_view == "Overall":
-            # Sort by highest_rank (highest first)
             players = []
             for user_id, data in stats.items():
                 highest = calculate_highest_rank(data)
                 wins = data.get("wins", 0)
                 losses = data.get("losses", 0)
-                players.append((user_id, highest, wins, losses, data))
-            # Sort by rank descending, then wins descending
-            players.sort(key=lambda x: (x[1], x[2]), reverse=True)
-            return players
+                games = wins + losses
+                wl_pct = (wins / games * 100) if games > 0 else 0
+                players.append({
+                    "user_id": user_id,
+                    "level": highest,
+                    "wins": wins,
+                    "losses": losses,
+                    "games": games,
+                    "wl_pct": wl_pct
+                })
         else:
             # Playlist-specific view
             playlist_name = self.current_view
@@ -1159,15 +1166,33 @@ class LeaderboardView(discord.ui.View):
                 playlists = data.get("playlists", {})
                 if playlist_name in playlists:
                     pdata = playlists[playlist_name]
-                    rank = pdata.get("highest_rank", 1)
+                    level = pdata.get("highest_rank", 1)
                     wins = pdata.get("wins", 0)
                     losses = pdata.get("losses", 0)
+                    games = wins + losses
                     # Only include players who have played this playlist
-                    if wins > 0 or losses > 0:
-                        players.append((user_id, rank, wins, losses, data))
-            # Sort by rank descending, then wins descending
-            players.sort(key=lambda x: (x[1], x[2]), reverse=True)
-            return players
+                    if games > 0:
+                        wl_pct = (wins / games * 100) if games > 0 else 0
+                        players.append({
+                            "user_id": user_id,
+                            "level": level,
+                            "wins": wins,
+                            "losses": losses,
+                            "games": games,
+                            "wl_pct": wl_pct
+                        })
+
+        # Sort based on current_sort
+        if self.current_sort == "Level":
+            players.sort(key=lambda x: (x["level"], x["wins"]), reverse=True)
+        elif self.current_sort == "Wins":
+            players.sort(key=lambda x: (x["wins"], x["level"]), reverse=True)
+        elif self.current_sort == "W/L %":
+            players.sort(key=lambda x: (x["wl_pct"], x["wins"]), reverse=True)
+        elif self.current_sort == "Games":
+            players.sort(key=lambda x: (x["games"], x["wins"]), reverse=True)
+
+        return players
 
     async def build_embed(self) -> discord.Embed:
         """Build the leaderboard embed for current view"""
@@ -1184,14 +1209,12 @@ class LeaderboardView(discord.ui.View):
         # Create embed with view-specific title
         if self.current_view == "Overall":
             title = "🏆 Overall Leaderboard"
-            desc = "Ranked by highest level across all playlists"
         else:
             title = f"🏆 {self.current_view} Leaderboard"
-            desc = f"Ranked by level in {self.current_view}"
 
         embed = discord.Embed(
             title=title,
-            description=desc,
+            description=f"Sorted by: **{self.current_sort}**",
             color=discord.Color.from_rgb(0, 112, 192)
         )
 
@@ -1200,23 +1223,35 @@ class LeaderboardView(discord.ui.View):
         else:
             # Build leaderboard text
             leaderboard_lines = []
-            for i, (user_id, rank, wins, losses, _) in enumerate(page_players, start=start_idx + 1):
+            for i, p in enumerate(page_players, start=start_idx + 1):
+                # Always fetch Discord name from API
                 try:
-                    user = await self.bot.fetch_user(int(user_id))
+                    user = await self.bot.fetch_user(int(p["user_id"]))
                     name = user.display_name
                 except:
-                    name = f"User {user_id[:8]}..."
+                    name = f"Unknown"
 
                 position = self.get_position_display(i)
-                rank_display = self.get_rank_display(rank)
+                rank_icon = self.get_rank_icon(p["level"])
 
-                # Format: position | rank icon | name | W/L
-                leaderboard_lines.append(f"{position} {rank_display} **{name}** • {wins}W/{losses}L")
+                # Format based on sort - Level sort shows just icon + name
+                if self.current_sort == "Level":
+                    line = f"{position} {rank_icon} **{p['level']}** {name}"
+                elif self.current_sort == "Wins":
+                    line = f"{position} {rank_icon} **{p['level']}** {name} • **{p['wins']}W**"
+                elif self.current_sort == "W/L %":
+                    line = f"{position} {rank_icon} **{p['level']}** {name} • **{p['wl_pct']:.0f}%** ({p['wins']}W/{p['losses']}L)"
+                elif self.current_sort == "Games":
+                    line = f"{position} {rank_icon} **{p['level']}** {name} • **{p['games']}** games"
+                else:
+                    line = f"{position} {rank_icon} **{p['level']}** {name}"
+
+                leaderboard_lines.append(line)
 
             embed.add_field(name="\u200b", value="\n".join(leaderboard_lines), inline=False)
 
         # Footer with pagination and view info
-        embed.set_footer(text=f"Page {self.current_page}/{self.total_pages} • {len(players)} players • View: {self.current_view}")
+        embed.set_footer(text=f"Page {self.current_page}/{self.total_pages} • {len(players)} players • {self.current_view}")
 
         # Set thumbnail to rank 50 icon for flair
         embed.set_thumbnail(url=get_rank_icon_url(50))
@@ -1228,7 +1263,6 @@ class LeaderboardView(discord.ui.View):
 
     def update_buttons(self):
         """Update button disabled states"""
-        # Navigation buttons
         for item in self.children:
             if hasattr(item, 'custom_id'):
                 if item.custom_id == "lb_prev":
@@ -1236,6 +1270,7 @@ class LeaderboardView(discord.ui.View):
                 elif item.custom_id == "lb_next":
                     item.disabled = self.current_page >= self.total_pages
 
+    # Row 0: Navigation
     @discord.ui.button(label="◀", style=discord.ButtonStyle.secondary, custom_id="lb_prev", row=0)
     async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.current_page = max(1, self.current_page - 1)
@@ -1248,6 +1283,29 @@ class LeaderboardView(discord.ui.View):
         embed = await self.build_embed()
         await interaction.response.edit_message(embed=embed, view=self)
 
+    # Row 0: Sort options
+    @discord.ui.button(label="Level", style=discord.ButtonStyle.primary, custom_id="lb_sort_level", row=0)
+    async def sort_level(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_sort = "Level"
+        self.current_page = 1
+        embed = await self.build_embed()
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="Wins", style=discord.ButtonStyle.secondary, custom_id="lb_sort_wins", row=0)
+    async def sort_wins(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_sort = "Wins"
+        self.current_page = 1
+        embed = await self.build_embed()
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="W/L %", style=discord.ButtonStyle.secondary, custom_id="lb_sort_wl", row=0)
+    async def sort_wl(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_sort = "W/L %"
+        self.current_page = 1
+        embed = await self.build_embed()
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    # Row 1: Playlist tabs
     @discord.ui.button(label="Overall", style=discord.ButtonStyle.primary, custom_id="lb_overall", row=1)
     async def view_overall(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.current_view = "Overall"
@@ -1269,14 +1327,14 @@ class LeaderboardView(discord.ui.View):
         embed = await self.build_embed()
         await interaction.response.edit_message(embed=embed, view=self)
 
-    @discord.ui.button(label="Doubles", style=discord.ButtonStyle.secondary, custom_id="lb_doubles", row=2)
+    @discord.ui.button(label="Doubles", style=discord.ButtonStyle.secondary, custom_id="lb_doubles", row=1)
     async def view_doubles(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.current_view = "Double Team"
         self.current_page = 1
         embed = await self.build_embed()
         await interaction.response.edit_message(embed=embed, view=self)
 
-    @discord.ui.button(label="1v1", style=discord.ButtonStyle.secondary, custom_id="lb_1v1", row=2)
+    @discord.ui.button(label="1v1", style=discord.ButtonStyle.secondary, custom_id="lb_1v1", row=1)
     async def view_1v1(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.current_view = "Head to Head"
         self.current_page = 1
