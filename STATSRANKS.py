@@ -7,7 +7,7 @@ Import this module in bot.py with:
     await bot.load_extension('STATSRANKS')
 """
 
-MODULE_VERSION = "1.3.3"
+MODULE_VERSION = "1.3.4"
 
 import discord
 from discord import app_commands
@@ -1200,11 +1200,6 @@ class LeaderboardView(discord.ui.View):
         # Fallback - return empty string if no emoji (don't show text)
         return ""
 
-    def get_position_display(self, position: int) -> str:
-        """Get position number"""
-        return f"**{position}.**"
-
-
     async def get_players_for_view(self) -> list:
         """Get sorted players based on current view and sort.
 
@@ -1307,20 +1302,15 @@ class LeaderboardView(discord.ui.View):
                 except:
                     name = f"Unknown"
 
-                position = self.get_position_display(i)
                 rank_emoji = self.get_rank_emoji(p["level"])
 
-                # Format based on sort - name first, then stats, rank emoji on right
+                # Format: name + rank emoji on right (no position numbers)
                 if self.current_sort == "Level":
-                    line = f"{position} {name} {rank_emoji}"
+                    line = f"{name} {rank_emoji}"
                 elif self.current_sort == "Wins":
-                    line = f"{position} {name} • **{p['wins']}W** {rank_emoji}"
-                elif self.current_sort == "W/L %":
-                    line = f"{position} {name} • **{p['wl_pct']:.0f}%** {rank_emoji}"
-                elif self.current_sort == "Games":
-                    line = f"{position} {name} • **{p['games']}** games {rank_emoji}"
+                    line = f"{name} • **{p['wins']}W** {rank_emoji}"
                 else:
-                    line = f"{position} {name} {rank_emoji}"
+                    line = f"{name} {rank_emoji}"
 
                 leaderboard_lines.append(line)
 
