@@ -7,7 +7,7 @@ Import this module in bot.py with:
     await bot.load_extension('STATSRANKS')
 """
 
-MODULE_VERSION = "1.3.4"
+MODULE_VERSION = "1.3.5"
 
 import discord
 from discord import app_commands
@@ -1197,8 +1197,8 @@ class LeaderboardView(discord.ui.View):
             emoji = discord.utils.get(self.guild.emojis, name=f"Level{level}")
             if emoji:
                 return str(emoji)
-        # Fallback - return empty string if no emoji (don't show text)
-        return ""
+        # Fallback to text display
+        return f"Lv{level}"
 
     async def get_players_for_view(self) -> list:
         """Get sorted players based on current view and sort.
@@ -1208,6 +1208,8 @@ class LeaderboardView(discord.ui.View):
         - ranks.json[discord_id].playlists["MLG 4v4"].rank - rank per playlist
         """
         ranks = await async_load_ranks_from_github()
+        # Load rankstats for MMR data
+        rankstats = load_json_file(RANKSTATS_FILE)
 
         if self.current_view == "Overall":
             players = []
@@ -1222,13 +1224,16 @@ class LeaderboardView(discord.ui.View):
                     total_losses += pdata.get("losses", 0)
                 games = total_wins + total_losses
                 wl_pct = (total_wins / games * 100) if games > 0 else 0
+                # Get MMR from rankstats
+                mmr = rankstats.get(user_id, {}).get("mmr", 1500)
                 players.append({
                     "user_id": user_id,
                     "level": highest,
                     "wins": total_wins,
                     "losses": total_losses,
                     "games": games,
-                    "wl_pct": wl_pct
+                    "wl_pct": wl_pct,
+                    "mmr": mmr
                 })
         else:
             # Playlist-specific view
@@ -1245,13 +1250,15 @@ class LeaderboardView(discord.ui.View):
                     # Only include players who have played this playlist
                     if games > 0:
                         wl_pct = (wins / games * 100) if games > 0 else 0
+                        mmr = rankstats.get(user_id, {}).get("mmr", 1500)
                         players.append({
                             "user_id": user_id,
                             "level": level,
                             "wins": wins,
                             "losses": losses,
                             "games": games,
-                            "wl_pct": wl_pct
+                            "wl_pct": wl_pct,
+                            "mmr": mmr
                         })
 
         # Sort based on current_sort
@@ -1259,10 +1266,8 @@ class LeaderboardView(discord.ui.View):
             players.sort(key=lambda x: (x["level"], x["wins"]), reverse=True)
         elif self.current_sort == "Wins":
             players.sort(key=lambda x: (x["wins"], x["level"]), reverse=True)
-        elif self.current_sort == "W/L %":
-            players.sort(key=lambda x: (x["wl_pct"], x["wins"]), reverse=True)
-        elif self.current_sort == "Games":
-            players.sort(key=lambda x: (x["games"], x["wins"]), reverse=True)
+        elif self.current_sort == "MMR":
+            players.sort(key=lambda x: (x["mmr"], x["level"]), reverse=True)
 
         return players
 
@@ -1309,6 +1314,8 @@ class LeaderboardView(discord.ui.View):
                     line = f"{name} {rank_emoji}"
                 elif self.current_sort == "Wins":
                     line = f"{name} • **{p['wins']}W** {rank_emoji}"
+                elif self.current_sort == "MMR":
+                    line = f"{name} • **{p['mmr']}** {rank_emoji}"
                 else:
                     line = f"{name} {rank_emoji}"
 
@@ -1341,58 +1348,65 @@ class LeaderboardView(discord.ui.View):
         embed = await self.build_embed()
         await interaction.response.edit_message(embed=embed, view=self)
 
-    @discord.ui.button(label="4v4", style=discord.ButtonStyle.secondary, custom_id="lb_mlg", row=0)
+    @discord.ui.button(label="MLG 4v4", style=discord.ButtonStyle.secondary, custom_id="lb_mlg", row=0)
     async def view_mlg(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.current_view = "MLG 4v4"
         self.current_page = 1
         embed = await self.build_embed()
         await interaction.response.edit_message(embed=embed, view=self)
 
-    @discord.ui.button(label="Hardcore", style=discord.ButtonStyle.secondary, custom_id="lb_hardcore", row=0)
+    @discord.ui.button(label="Team Hardcore", style=discord.ButtonStyle.secondary, custom_id="lb_hardcore", row=0)
     async def view_hardcore(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.current_view = "Team Hardcore"
         self.current_page = 1
         embed = await self.build_embed()
         await interaction.response.edit_message(embed=embed, view=self)
 
-    @discord.ui.button(label="Doubles", style=discord.ButtonStyle.secondary, custom_id="lb_doubles", row=0)
+    @discord.ui.button(label="Double Team", style=discord.ButtonStyle.secondary, custom_id="lb_doubles", row=0)
     async def view_doubles(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.current_view = "Double Team"
         self.current_page = 1
         embed = await self.build_embed()
         await interaction.response.edit_message(embed=embed, view=self)
 
-    @discord.ui.button(label="1v1", style=discord.ButtonStyle.secondary, custom_id="lb_1v1", row=0)
+    @discord.ui.button(label="Head to Head", style=discord.ButtonStyle.secondary, custom_id="lb_1v1", row=0)
     async def view_1v1(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.current_view = "Head to Head"
         self.current_page = 1
         embed = await self.build_embed()
         await interaction.response.edit_message(embed=embed, view=self)
 
-    # Row 1: Pagination and sort
-    @discord.ui.button(label="Prev", style=discord.ButtonStyle.secondary, custom_id="lb_prev", row=1)
-    async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.current_page = max(1, self.current_page - 1)
-        embed = await self.build_embed()
-        await interaction.response.edit_message(embed=embed, view=self)
-
-    @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary, custom_id="lb_next", row=1)
-    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.current_page = min(self.total_pages, self.current_page + 1)
-        embed = await self.build_embed()
-        await interaction.response.edit_message(embed=embed, view=self)
-
-    @discord.ui.button(label="By Level", style=discord.ButtonStyle.primary, custom_id="lb_sort_level", row=1)
+    # Row 1: Sort options
+    @discord.ui.button(label="Level", style=discord.ButtonStyle.primary, custom_id="lb_sort_level", row=1)
     async def sort_level(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.current_sort = "Level"
         self.current_page = 1
         embed = await self.build_embed()
         await interaction.response.edit_message(embed=embed, view=self)
 
-    @discord.ui.button(label="By Wins", style=discord.ButtonStyle.secondary, custom_id="lb_sort_wins", row=1)
+    @discord.ui.button(label="Wins", style=discord.ButtonStyle.secondary, custom_id="lb_sort_wins", row=1)
     async def sort_wins(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.current_sort = "Wins"
         self.current_page = 1
+        embed = await self.build_embed()
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="MMR", style=discord.ButtonStyle.secondary, custom_id="lb_sort_mmr", row=1)
+    async def sort_mmr(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_sort = "MMR"
+        self.current_page = 1
+        embed = await self.build_embed()
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="◀", style=discord.ButtonStyle.secondary, custom_id="lb_prev", row=1)
+    async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_page = max(1, self.current_page - 1)
+        embed = await self.build_embed()
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="▶", style=discord.ButtonStyle.secondary, custom_id="lb_next", row=1)
+    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_page = min(self.total_pages, self.current_page + 1)
         embed = await self.build_embed()
         await interaction.response.edit_message(embed=embed, view=self)
 
