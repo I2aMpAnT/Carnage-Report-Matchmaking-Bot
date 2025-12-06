@@ -1203,7 +1203,9 @@ class LeaderboardView(discord.ui.View):
             if emoji:
                 return str(emoji)
             # Debug: print available emojis if not found
-            # print(f"[EMOJI] Could not find :{emoji_name}: - Available: {[e.name for e in self.guild.emojis[:10]]}")
+            print(f"[EMOJI] Could not find :{emoji_name}: in guild {self.guild.name} - Total emojis: {len(self.guild.emojis)}")
+        else:
+            print(f"[EMOJI] No guild available for emoji lookup")
         # Fallback to text display
         return f"Lv{level}"
 
