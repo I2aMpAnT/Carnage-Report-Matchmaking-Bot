@@ -19,13 +19,14 @@ from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 import math
 
-# Import GitHub functions for pulling ranks.json
+# Import GitHub functions for pulling ranks.json and emblems.json
 try:
-    from github_webhook import async_pull_ranks_from_github
+    from github_webhook import async_pull_ranks_from_github, async_pull_emblems_from_github
     GITHUB_AVAILABLE = True
 except ImportError:
     GITHUB_AVAILABLE = False
     async_pull_ranks_from_github = None
+    async_pull_emblems_from_github = None
 
 # Map and Gametype Configuration
 MAP_GAMETYPES = {
@@ -796,6 +797,14 @@ class StatsCommands(commands.Cog):
         ranks = await async_load_ranks_from_github()
         user_key = str(target_user.id)
 
+        # Load emblems from GitHub
+        emblems = {}
+        if GITHUB_AVAILABLE and async_pull_emblems_from_github:
+            try:
+                emblems = await async_pull_emblems_from_github() or {}
+            except Exception as e:
+                print(f"[EMBLEMS] Failed to load emblems: {e}")
+
         if user_key not in ranks:
             await interaction.followup.send(
                 f"{target_user.display_name} hasn't played any ranked games yet!",
@@ -930,12 +939,13 @@ class StatsCommands(commands.Cog):
         # Set thumbnail to rank icon PNG
         embed.set_thumbnail(url=get_rank_icon_url(highest_rank))
 
-        # Set emblem as main image if available
-        emblem_url = player_data.get("emblem_url")
-        if emblem_url:
-            emblem_png = get_emblem_png_url(emblem_url)
-            if emblem_png:
-                embed.set_image(url=emblem_png)
+        # Set emblem as main image if available (from emblems.json)
+        if user_key in emblems:
+            emblem_url = emblems[user_key].get("emblem_url") if isinstance(emblems[user_key], dict) else emblems[user_key]
+            if emblem_url:
+                emblem_png = get_emblem_png_url(emblem_url)
+                if emblem_png:
+                    embed.set_image(url=emblem_png)
 
         embed.set_footer(text=f"#{placement} of {total_players} players • {total_games} games")
 
