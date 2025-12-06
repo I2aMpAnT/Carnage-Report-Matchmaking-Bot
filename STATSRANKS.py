@@ -7,7 +7,7 @@ Import this module in bot.py with:
     await bot.load_extension('STATSRANKS')
 """
 
-MODULE_VERSION = "1.2.7"
+MODULE_VERSION = "1.2.8"
 
 import discord
 from discord import app_commands
@@ -1175,15 +1175,8 @@ class LeaderboardView(discord.ui.View):
         return f"**Lv {level}**"
 
     def get_position_display(self, position: int) -> str:
-        """Get medal emoji or position number"""
-        if position == 1:
-            return "🥇"
-        elif position == 2:
-            return "🥈"
-        elif position == 3:
-            return "🥉"
-        else:
-            return f"`{position}.`"
+        """Get position number (no medals)"""
+        return f"`{position}.`"
 
 
     async def get_players_for_view(self) -> list:
@@ -1282,17 +1275,17 @@ class LeaderboardView(discord.ui.View):
                 position = self.get_position_display(i)
                 rank_emoji = self.get_rank_emoji(p["level"])
 
-                # Format based on sort - show rank emoji + name, extra stat if not Level sort
+                # Format based on sort - name first, then stats, rank emoji on right
                 if self.current_sort == "Level":
-                    line = f"{position} {rank_emoji} {name}"
+                    line = f"{position} {name} {rank_emoji}"
                 elif self.current_sort == "Wins":
-                    line = f"{position} {rank_emoji} {name} • **{p['wins']}W**"
+                    line = f"{position} {name} • **{p['wins']}W** {rank_emoji}"
                 elif self.current_sort == "W/L %":
-                    line = f"{position} {rank_emoji} {name} • **{p['wl_pct']:.0f}%** ({p['wins']}W/{p['losses']}L)"
+                    line = f"{position} {name} • **{p['wl_pct']:.0f}%** {rank_emoji}"
                 elif self.current_sort == "Games":
-                    line = f"{position} {rank_emoji} {name} • **{p['games']}** games"
+                    line = f"{position} {name} • **{p['games']}** games {rank_emoji}"
                 else:
-                    line = f"{position} {rank_emoji} {name}"
+                    line = f"{position} {name} {rank_emoji}"
 
                 leaderboard_lines.append(line)
 
