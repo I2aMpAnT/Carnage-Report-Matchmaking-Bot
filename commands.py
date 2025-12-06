@@ -1,7 +1,7 @@
 # commands.py - All Bot Commands
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.4.7"
+MODULE_VERSION = "1.4.9"
 
 import discord
 from discord import app_commands
@@ -664,8 +664,8 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             import os
 
             # File paths for match history
-            MLG_HISTORY_FILE = "matchhistory.json"  # MLG 4v4 match history
-            PLAYLIST_HISTORY_FILE = "match_history.json"  # Other playlists
+            MLG_HISTORY_FILE = "MLG4v4.json"  # MLG 4v4 match history
+            # Other playlists use per-playlist files via playlists.get_playlist_history_file()
 
             playlist_names = {
                 "mlg_4v4": "MLG 4v4",
@@ -714,27 +714,26 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                     ephemeral=True
                 )
             else:
-                # Other playlists use playlist history file
-                if not os.path.exists(PLAYLIST_HISTORY_FILE):
-                    await interaction.followup.send(f"❌ No {playlist_name} match history found! (file does not exist)", ephemeral=True)
+                # Other playlists use per-playlist history files
+                from playlists import get_playlist_history_file
+                history_file = get_playlist_history_file(playlist)
+
+                if not os.path.exists(history_file):
+                    await interaction.followup.send(f"❌ No {playlist_name} match history found! (file {history_file} does not exist)", ephemeral=True)
                     return
 
-                with open(PLAYLIST_HISTORY_FILE, 'r') as f:
+                with open(history_file, 'r') as f:
                     history = json.load(f)
 
-                playlist_key = playlist
-                if playlist_key not in history:
-                    await interaction.followup.send(f"❌ No matches found for {playlist_name}! (no matches recorded yet)", ephemeral=True)
-                    return
-
-                if len(history[playlist_key]) == 0:
+                matches = history.get("matches", [])
+                if len(matches) == 0:
                     await interaction.followup.send(f"❌ No matches found for {playlist_name}! (match list is empty)", ephemeral=True)
                     return
 
                 # Find match by match number
                 found_idx = None
                 found_match = None
-                for i, match in enumerate(history[playlist_key]):
+                for i, match in enumerate(matches):
                     if match.get('match_number') == match_number:
                         found_idx = i
                         found_match = match
@@ -742,7 +741,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
 
                 if found_idx is None:
                     # List available match numbers for helpfulness
-                    available = [m.get('match_number') for m in history[playlist_key] if m.get('match_number')]
+                    available = [m.get('match_number') for m in matches if m.get('match_number')]
                     if available:
                         await interaction.followup.send(
                             f"❌ Match #{match_number} not found in {playlist_name} history!\n"
@@ -757,11 +756,12 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                 timestamp = found_match.get('timestamp', 'Unknown')
 
                 # Delete the match
-                history[playlist_key].pop(found_idx)
-                with open(PLAYLIST_HISTORY_FILE, 'w') as f:
+                history["matches"].pop(found_idx)
+                history["total_matches"] = len(history["matches"])
+                with open(history_file, 'w') as f:
                     json.dump(history, f, indent=2)
 
-                log_action(f"Staff {interaction.user.name} deleted {playlist_name} Match #{match_number} from history")
+                log_action(f"Staff {interaction.user.name} deleted {playlist_name} Match #{match_number} from {history_file}")
                 await interaction.followup.send(
                     f"✅ Deleted **{playlist_name} Match #{match_number}** from history\n"
                     f"Result: {result}\n"
@@ -3138,5 +3138,106 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             )
         except Exception as e:
             await interaction.followup.send(f"❌ Error reading logs: {e}", ephemeral=True)
+
+    @bot.tree.command(name='playlistsync', description='[STAFF] Sync game results from website for active matches')
+    @has_staff_role()
+    @app_commands.describe(
+        playlist="Playlist to sync (or 'all' for all playlists)"
+    )
+    @app_commands.choices(playlist=[
+        app_commands.Choice(name="All Playlists", value="all"),
+        app_commands.Choice(name="MLG 4v4", value="mlg_4v4"),
+        app_commands.Choice(name="Team Hardcore", value="team_hardcore"),
+        app_commands.Choice(name="Double Team", value="double_team"),
+        app_commands.Choice(name="Head to Head", value="head_to_head"),
+    ])
+    async def playlist_sync(interaction: discord.Interaction, playlist: str = "all"):
+        """Pull game winner data from website for active matches"""
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            import playlists
+            from playlists import PLAYLIST_HISTORY_FILES, get_playlist_state, show_playlist_match_embed
+        except ImportError as e:
+            await interaction.followup.send(f"❌ Import error: {e}", ephemeral=True)
+            return
+
+        results = []
+        playlists_to_sync = PLAYLIST_HISTORY_FILES.keys() if playlist == "all" else [playlist]
+
+        for ptype in playlists_to_sync:
+            history_file = PLAYLIST_HISTORY_FILES.get(ptype)
+            if not history_file:
+                continue
+
+            # Pull from GitHub
+            try:
+                github_data = await github_webhook.async_pull_file_from_github(history_file)
+            except Exception as e:
+                results.append(f"❌ {ptype}: Failed to pull from GitHub - {e}")
+                continue
+
+            if not github_data:
+                results.append(f"⚠️ {ptype}: No data on GitHub")
+                continue
+
+            # Get active matches from website data
+            website_active = github_data.get("active_matches", [])
+
+            if not website_active:
+                results.append(f"✓ {ptype}: No active matches on website")
+                continue
+
+            # Get the current match in memory
+            ps = get_playlist_state(ptype)
+            if not ps.current_match:
+                results.append(f"✓ {ptype}: No active match locally")
+                continue
+
+            match = ps.current_match
+
+            # Find matching match on website by match_number
+            website_match = None
+            for wm in website_active:
+                if wm.get("match_number") == match.match_number:
+                    website_match = wm
+                    break
+
+            if not website_match:
+                results.append(f"✓ {ptype}: Match #{match.match_number} not found on website")
+                continue
+
+            # Sync game results from website
+            website_games = website_match.get("games", [])
+            games_synced = 0
+
+            if len(website_games) > len(match.games):
+                # Website has more game results - sync them
+                for i in range(len(match.games), len(website_games)):
+                    match.games.append(website_games[i])
+                    games_synced += 1
+
+                # Update match embed
+                if match.match_message:
+                    channel = interaction.guild.get_channel(ps.config["channel_id"])
+                    if channel:
+                        await show_playlist_match_embed(channel, match)
+
+                # Update the history file
+                playlists.update_active_match_in_history(match)
+
+                results.append(f"✅ {ptype}: Synced {games_synced} game result(s) for match #{match.match_number}")
+            else:
+                results.append(f"✓ {ptype}: Match #{match.match_number} up to date")
+
+        if not results:
+            results.append("No playlists to sync")
+
+        await interaction.followup.send(
+            f"**Playlist Sync Results:**\n" + "\n".join(results),
+            ephemeral=True
+        )
+
+        log_action(f"Playlist sync by {interaction.user.display_name}: {playlist}")
 
     return bot
