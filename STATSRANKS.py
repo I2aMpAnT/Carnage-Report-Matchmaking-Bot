@@ -7,7 +7,7 @@ Import this module in bot.py with:
     await bot.load_extension('STATSRANKS')
 """
 
-MODULE_VERSION = "1.2.8"
+MODULE_VERSION = "1.2.9"
 
 import discord
 from discord import app_commands
@@ -51,6 +51,7 @@ def get_default_playlists() -> dict:
 # File paths
 GAMESTATS_FILE = "gamestats.json"
 RANKSTATS_FILE = "rankstats.json"
+RANKS_FILE = "ranks.json"  # Simple ranks file from website (discord_id -> rank per playlist)
 XP_CONFIG_FILE = "xp_config.json"
 
 # Rank icon URLs (for DMs)
@@ -66,6 +67,40 @@ def load_json_file(filepath: str) -> dict:
         with open(filepath, 'r') as f:
             return json.load(f)
     return {}
+
+
+def get_player_rank_from_ranks_file(user_id: int, playlist: str = None) -> int:
+    """Get player rank from ranks.json (website source of truth)
+
+    Args:
+        user_id: Discord user ID
+        playlist: Optional playlist name (e.g., "MLG 4v4"). If None, returns highest_rank.
+
+    Returns:
+        Rank level (1-50), defaults to 1 if not found
+    """
+    ranks = load_json_file(RANKS_FILE)
+    user_key = str(user_id)
+
+    if user_key not in ranks:
+        return 1
+
+    player_data = ranks[user_key]
+
+    if playlist:
+        # Get rank for specific playlist
+        playlists = player_data.get("playlists", {})
+        if playlist in playlists:
+            return playlists[playlist].get("rank", 1)
+        return 1
+    else:
+        # Get overall highest rank
+        return player_data.get("highest_rank", 1)
+
+
+def get_all_players_from_ranks_file() -> dict:
+    """Get all players from ranks.json with their rank data"""
+    return load_json_file(RANKS_FILE)
 
 def save_json_file(filepath: str, data: dict, skip_github: bool = False):
     """Save data to JSON file and optionally push to GitHub"""
@@ -1180,22 +1215,32 @@ class LeaderboardView(discord.ui.View):
 
 
     async def get_players_for_view(self) -> list:
-        """Get sorted players based on current view and sort"""
-        stats = load_json_file(RANKSTATS_FILE)
+        """Get sorted players based on current view and sort.
+
+        Reads from ranks.json (website source of truth):
+        - ranks.json[discord_id].highest_rank - overall highest rank
+        - ranks.json[discord_id].playlists["MLG 4v4"].rank - rank per playlist
+        """
+        ranks = load_json_file(RANKS_FILE)
 
         if self.current_view == "Overall":
             players = []
-            for user_id, data in stats.items():
-                highest = calculate_highest_rank(data)
-                wins = data.get("wins", 0)
-                losses = data.get("losses", 0)
-                games = wins + losses
-                wl_pct = (wins / games * 100) if games > 0 else 0
+            for user_id, data in ranks.items():
+                highest = data.get("highest_rank", 1)
+                # Sum wins/losses across all playlists
+                total_wins = 0
+                total_losses = 0
+                playlists = data.get("playlists", {})
+                for pdata in playlists.values():
+                    total_wins += pdata.get("wins", 0)
+                    total_losses += pdata.get("losses", 0)
+                games = total_wins + total_losses
+                wl_pct = (total_wins / games * 100) if games > 0 else 0
                 players.append({
                     "user_id": user_id,
                     "level": highest,
-                    "wins": wins,
-                    "losses": losses,
+                    "wins": total_wins,
+                    "losses": total_losses,
                     "games": games,
                     "wl_pct": wl_pct
                 })
@@ -1203,11 +1248,11 @@ class LeaderboardView(discord.ui.View):
             # Playlist-specific view
             playlist_name = self.current_view
             players = []
-            for user_id, data in stats.items():
+            for user_id, data in ranks.items():
                 playlists = data.get("playlists", {})
                 if playlist_name in playlists:
                     pdata = playlists[playlist_name]
-                    level = pdata.get("highest_rank", 1)
+                    level = pdata.get("rank", 1)
                     wins = pdata.get("wins", 0)
                     losses = pdata.get("losses", 0)
                     games = wins + losses
