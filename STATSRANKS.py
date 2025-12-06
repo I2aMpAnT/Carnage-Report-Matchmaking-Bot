@@ -7,7 +7,7 @@ Import this module in bot.py with:
     await bot.load_extension('STATSRANKS')
 """
 
-MODULE_VERSION = "1.3.4"
+MODULE_VERSION = "1.4.0"
 
 import discord
 from discord import app_commands
@@ -19,13 +19,14 @@ from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 import math
 
-# Import GitHub functions for pulling ranks.json
+# Import GitHub functions for pulling ranks.json and emblems.json
 try:
-    from github_webhook import async_pull_ranks_from_github
+    from github_webhook import async_pull_ranks_from_github, async_pull_emblems_from_github
     GITHUB_AVAILABLE = True
 except ImportError:
     GITHUB_AVAILABLE = False
     async_pull_ranks_from_github = None
+    async_pull_emblems_from_github = None
 
 # Map and Gametype Configuration
 MAP_GAMETYPES = {
@@ -58,16 +59,49 @@ def get_default_playlists() -> dict:
 
 # File paths
 GAMESTATS_FILE = "gamestats.json"
-RANKSTATS_FILE = "rankstats.json"
-RANKS_FILE = "ranks.json"  # Simple ranks file from website (discord_id -> rank per playlist)
+RANKS_FILE = "ranks.json"  # Website source of truth (discord_id -> rank data)
 XP_CONFIG_FILE = "xp_config.json"
+# Note: rankstats.json has been removed - all stats come from ranks.json
 
 # Rank icon URLs (for DMs)
 RANK_ICON_BASE = "https://r2-cdn.insignia.live/h2-rank"
 
+# Emblem VPS server for rendering emblem PNGs
+EMBLEM_VPS_BASE = "http://104.207.143.249:3001"
+
 def get_rank_icon_url(level: int) -> str:
     """Get the rank icon URL for a given level"""
     return f"{RANK_ICON_BASE}/{level}.png"
+
+def get_emblem_png_url(emblem_url: str) -> str:
+    """Convert emblem HTML URL to VPS PNG URL.
+
+    Converts: https://carnagereport.com/emblem.html?P=1&S=0&EP=1&ES=0&EF=2&EB=25&ET=0
+    To: http://104.207.143.249:3001/P1-S0-EP1-ES0-EF2-EB25-ET0.png
+    """
+    if not emblem_url:
+        return None
+
+    try:
+        # Parse URL parameters
+        from urllib.parse import urlparse, parse_qs
+        parsed = urlparse(emblem_url)
+        params = parse_qs(parsed.query)
+
+        # Extract values (default to 0 if missing)
+        p = params.get('P', ['0'])[0]
+        s = params.get('S', ['0'])[0]
+        ep = params.get('EP', ['0'])[0]
+        es = params.get('ES', ['0'])[0]
+        ef = params.get('EF', ['0'])[0]
+        eb = params.get('EB', ['0'])[0]
+        et = params.get('ET', ['0'])[0]
+
+        # Build VPS URL
+        return f"{EMBLEM_VPS_BASE}/P{p}-S{s}-EP{ep}-ES{es}-EF{ef}-EB{eb}-ET{et}.png"
+    except Exception as e:
+        print(f"[EMBLEM] Failed to parse emblem URL: {e}")
+        return None
 
 def load_json_file(filepath: str) -> dict:
     """Load JSON file, create if doesn't exist"""
@@ -130,20 +164,23 @@ async def async_load_ranks_from_github() -> dict:
 
 
 def save_json_file(filepath: str, data: dict, skip_github: bool = False):
-    """Save data to JSON file and optionally push to GitHub"""
+    """Save data to JSON file and optionally push to GitHub
+
+    Note: ranks.json is managed by the website - bot only reads it.
+    Bot can still push gamestats.json and xp_config.json.
+    """
     with open(filepath, 'w') as f:
         json.dump(data, f, indent=2)
-    
+
     # Push to GitHub unless skipped
     if not skip_github:
         try:
             import github_webhook
-            if filepath == RANKSTATS_FILE:
-                github_webhook.update_rankstats_on_github()
-            elif filepath == GAMESTATS_FILE:
+            if filepath == GAMESTATS_FILE:
                 github_webhook.update_gamestats_on_github()
             elif filepath == XP_CONFIG_FILE:
                 github_webhook.update_xp_config_on_github()
+            # Note: ranks.json is managed by the website, not the bot
         except Exception as e:
             print(f"GitHub push failed for {filepath}: {e}")
 
@@ -219,148 +256,105 @@ def get_rank_thresholds() -> dict:
     return {int(k): tuple(v) for k, v in thresholds.items()}
 
 def get_player_stats(user_id: int, skip_github: bool = False) -> dict:
-    """Get player stats from rankstats.json"""
-    stats = load_json_file(RANKSTATS_FILE)
+    """Get player stats from ranks.json (website source of truth)
+
+    Note: This now reads from ranks.json instead of rankstats.json.
+    The website calculates and stores all stats in ranks.json.
+    """
+    ranks = load_json_file(RANKS_FILE)
     user_key = str(user_id)
 
-    if user_key not in stats:
-        stats[user_key] = {
+    if user_key not in ranks:
+        # Return default stats if player not found
+        return {
             "xp": 0,
             "wins": 0,
             "losses": 0,
+            "kills": 0,
+            "deaths": 0,
             "series_wins": 0,
             "series_losses": 0,
             "total_games": 0,
             "total_series": 0,
-            "mmr": 1500,  # Default MMR
             "rank": 1,
             "highest_rank": 1,
             "playlists": get_default_playlists()
         }
-        save_json_file(RANKSTATS_FILE, stats, skip_github=skip_github)
-    else:
-        # Ensure existing players have playlists and highest_rank
-        if "playlists" not in stats[user_key]:
-            stats[user_key]["playlists"] = get_default_playlists()
-            stats[user_key]["highest_rank"] = 1
-            stats[user_key]["rank"] = 1
-            save_json_file(RANKSTATS_FILE, stats, skip_github=skip_github)
 
-    return stats[user_key]
+    # Convert ranks.json format to expected format
+    player_data = ranks[user_key]
+    wins = player_data.get("wins", 0)
+    losses = player_data.get("losses", 0)
+    series_wins = player_data.get("series_wins", 0)
+    series_losses = player_data.get("series_losses", 0)
+
+    return {
+        "xp": 0,  # XP not tracked in ranks.json
+        "wins": wins,
+        "losses": losses,
+        "kills": player_data.get("kills", 0),
+        "deaths": player_data.get("deaths", 0),
+        "series_wins": series_wins,
+        "series_losses": series_losses,
+        "total_games": wins + losses,
+        "total_series": series_wins + series_losses,
+        "rank": player_data.get("rank", 1),
+        "highest_rank": player_data.get("highest_rank", 1),
+        "playlists": player_data.get("playlists", get_default_playlists())
+    }
 
 def get_existing_player_stats(user_id: int) -> dict:
-    """Get player stats ONLY if they already exist (don't create new entry)"""
-    stats = load_json_file(RANKSTATS_FILE)
+    """Get player stats ONLY if they already exist (don't create new entry)
+
+    Now reads from ranks.json (website source of truth).
+    """
+    ranks = load_json_file(RANKS_FILE)
     user_key = str(user_id)
-    
-    if user_key in stats:
-        return stats[user_key]
+
+    if user_key in ranks:
+        player_data = ranks[user_key]
+        wins = player_data.get("wins", 0)
+        losses = player_data.get("losses", 0)
+        series_wins = player_data.get("series_wins", 0)
+        series_losses = player_data.get("series_losses", 0)
+
+        return {
+            "xp": 0,
+            "wins": wins,
+            "losses": losses,
+            "kills": player_data.get("kills", 0),
+            "deaths": player_data.get("deaths", 0),
+            "series_wins": series_wins,
+            "series_losses": series_losses,
+            "total_games": wins + losses,
+            "total_series": series_wins + series_losses,
+            "rank": player_data.get("rank", 1),
+            "highest_rank": player_data.get("highest_rank", 1),
+            "playlists": player_data.get("playlists", {})
+        }
     return None
 
 def update_player_stats(user_id: int, stats_update: dict):
-    """Update player stats - XP never goes below 0
-    Note: highest_rank is calculated by the website, not the bot"""
-    stats = load_json_file(RANKSTATS_FILE)
-    user_key = str(user_id)
+    """DEPRECATED: Stats are now managed by the website via ranks.json.
 
-    if user_key not in stats:
-        stats[user_key] = {
-            "xp": 0,
-            "wins": 0,
-            "losses": 0,
-            "series_wins": 0,
-            "series_losses": 0,
-            "total_games": 0,
-            "total_series": 0,
-            "mmr": 1500,
-            "rank": 1,
-            "highest_rank": 1,
-            "playlists": get_default_playlists()
-        }
-    elif "playlists" not in stats[user_key]:
-        stats[user_key]["playlists"] = get_default_playlists()
-        stats[user_key]["highest_rank"] = 1
-        stats[user_key]["rank"] = 1
-
-    for key, value in stats_update.items():
-        if key in stats[user_key]:
-            stats[user_key][key] += value
-        else:
-            stats[user_key][key] = value
-
-    # Ensure XP never goes below 0
-    stats[user_key]["xp"] = max(0, stats[user_key]["xp"])
-
-    # Note: highest_rank is calculated by the website from playlist current ranks
-    # Bot does not recalculate it
-
-    save_json_file(RANKSTATS_FILE, stats)
+    This function is kept for backwards compatibility but does nothing.
+    The website (populate_stats.py) calculates stats from xlsx files
+    and updates ranks.json directly.
+    """
+    # Stats are handled by the website - this is now a no-op
+    print(f"[STATS] update_player_stats called for {user_id} - stats managed by website")
 
 
 def update_playlist_stats(user_id: int, playlist_type: str, stats_update: dict):
-    """Update player stats for a specific playlist - XP never goes below 0
-    Note: Ranks are calculated by the website, not the bot"""
-    stats = load_json_file(RANKSTATS_FILE)
-    user_key = str(user_id)
+    """DEPRECATED: Stats are now managed by the website via ranks.json.
 
-    # Initialize player if doesn't exist
-    if user_key not in stats:
-        stats[user_key] = {
-            "xp": 0,
-            "wins": 0,
-            "losses": 0,
-            "series_wins": 0,
-            "series_losses": 0,
-            "total_games": 0,
-            "total_series": 0,
-            "mmr": 1500,
-            "rank": 1,
-            "highest_rank": 1,
-            "playlists": get_default_playlists()
-        }
-    elif "playlists" not in stats[user_key]:
-        stats[user_key]["playlists"] = get_default_playlists()
-        stats[user_key]["highest_rank"] = 1
-        stats[user_key]["rank"] = 1
-
-    # Ensure playlist exists in player's playlists
-    if playlist_type not in stats[user_key]["playlists"]:
-        stats[user_key]["playlists"][playlist_type] = {
-            "rank": 1, "highest_rank": 1, "xp": 0, "wins": 0, "losses": 0
-        }
-
-    playlist_data = stats[user_key]["playlists"][playlist_type]
-
-    # Update playlist-specific stats
-    for key, value in stats_update.items():
-        if key in playlist_data:
-            playlist_data[key] += value
-        else:
-            playlist_data[key] = value
-
-    # Ensure XP never goes below 0
-    playlist_data["xp"] = max(0, playlist_data["xp"])
-
-    # Also update global stats for backwards compatibility
-    for key in ["xp", "wins", "losses", "series_wins", "series_losses"]:
-        if key in stats_update:
-            if key in stats[user_key]:
-                stats[user_key][key] += stats_update[key]
-            else:
-                stats[user_key][key] = stats_update[key]
-    stats[user_key]["xp"] = max(0, stats[user_key]["xp"])
-
-    # Increment global counters
-    if "wins" in stats_update or "losses" in stats_update:
-        stats[user_key]["total_games"] = stats[user_key].get("total_games", 0) + stats_update.get("wins", 0) + stats_update.get("losses", 0)
-    if "series_wins" in stats_update or "series_losses" in stats_update:
-        stats[user_key]["total_series"] = stats[user_key].get("total_series", 0) + stats_update.get("series_wins", 0) + stats_update.get("series_losses", 0)
-
-    # Note: highest_rank is calculated by the website from playlist current ranks
-    # Bot does not recalculate it
-
-    save_json_file(RANKSTATS_FILE, stats)
-    return stats[user_key]
+    This function is kept for backwards compatibility but does nothing.
+    The website (populate_stats.py) calculates stats from xlsx files
+    and updates ranks.json directly.
+    """
+    # Stats are handled by the website - this is now a no-op
+    print(f"[STATS] update_playlist_stats called for {user_id} ({playlist_type}) - stats managed by website")
+    return get_player_stats(user_id)  # Return current stats from ranks.json
 
 
 def calculate_playlist_rank(xp: int) -> int:
@@ -447,13 +441,6 @@ def get_rank_progress(xp: int) -> Tuple[int, int, int]:
     xp_for_next = next_min - xp
     
     return rank, xp_in_rank, xp_for_next
-
-# Rank icon URLs (for DMs)
-RANK_ICON_BASE = "https://r2-cdn.insignia.live/h2-rank"
-
-def get_rank_icon_url(level: int) -> str:
-    """Get the rank icon URL for a given level"""
-    return f"{RANK_ICON_BASE}/{level}.png"
 
 def get_rank_role_name(level: int) -> str:
     """Get the role name for a rank level"""
@@ -634,24 +621,33 @@ async def refresh_playlist_ranks(guild: discord.Guild, player_ids: List[int], pl
         await update_player_rank_role(guild, user_id, highest, send_dm=send_dm)
 
 def get_all_players_sorted(sort_by: str = "rank") -> List[Tuple[str, dict]]:
-    """Get all players sorted by specified criteria"""
-    stats = load_json_file(RANKSTATS_FILE)
-    
+    """Get all players sorted by specified criteria - reads from local ranks.json"""
+    ranks = load_json_file(RANKS_FILE)
+
     players = []
-    for user_id, player_stats in stats.items():
-        player_stats["rank"] = calculate_rank(player_stats["xp"])
-        players.append((user_id, player_stats))
-    
+    for user_id, player_data in ranks.items():
+        # Create a stats dict compatible with old format
+        stats = {
+            "rank": player_data.get("highest_rank", 1),
+            "wins": player_data.get("wins", 0),
+            "losses": player_data.get("losses", 0),
+            "kills": player_data.get("kills", 0),
+            "deaths": player_data.get("deaths", 0),
+            "series_wins": player_data.get("series_wins", 0),
+            "series_losses": player_data.get("series_losses", 0)
+        }
+        players.append((user_id, stats))
+
     # Sort based on criteria
     if sort_by == "rank":
-        players.sort(key=lambda x: (x[1]["rank"], x[1]["xp"]), reverse=True)
+        players.sort(key=lambda x: (x[1]["rank"], x[1]["wins"]), reverse=True)
     elif sort_by == "wins":
         players.sort(key=lambda x: x[1]["wins"], reverse=True)
     elif sort_by == "series_wins":
         players.sort(key=lambda x: x[1]["series_wins"], reverse=True)
-    elif sort_by == "mmr":
-        players.sort(key=lambda x: x[1].get("mmr", 1500), reverse=True)
-    
+    elif sort_by == "kd":
+        players.sort(key=lambda x: (x[1]["kills"] / x[1]["deaths"]) if x[1]["deaths"] > 0 else x[1]["kills"], reverse=True)
+
     return players
 
 class StatsCommands(commands.Cog):
@@ -792,26 +788,50 @@ class StatsCommands(commands.Cog):
     @app_commands.command(name="playerstats", description="View player matchmaking statistics")
     @app_commands.describe(user="User to view stats for (optional)")
     async def playerstats(self, interaction: discord.Interaction, user: discord.User = None):
-        """Show player stats with placement ranking"""
+        """Show player stats with placement ranking - reads from ranks.json"""
+        await interaction.response.defer()
+
         target_user = user or interaction.user
 
-        # Get stats
-        player_stats = get_player_stats(target_user.id)
+        # Get stats from GitHub ranks.json (website source of truth)
+        ranks = await async_load_ranks_from_github()
+        user_key = str(target_user.id)
 
-        # Get highest rank level
-        highest_rank = calculate_highest_rank(player_stats)
+        # Load emblems from GitHub
+        emblems = {}
+        if GITHUB_AVAILABLE and async_pull_emblems_from_github:
+            try:
+                emblems = await async_pull_emblems_from_github() or {}
+            except Exception as e:
+                print(f"[EMBLEMS] Failed to load emblems: {e}")
 
-        # Calculate win rate
-        total_games = player_stats["total_games"]
-        wins = player_stats["wins"]
-        losses = player_stats["losses"]
+        if user_key not in ranks:
+            await interaction.followup.send(
+                f"{target_user.display_name} hasn't played any ranked games yet!",
+                ephemeral=True
+            )
+            return
+
+        player_data = ranks[user_key]
+
+        # Get data from ranks.json
+        highest_rank = player_data.get("highest_rank", 1)
+        wins = player_data.get("wins", 0)
+        losses = player_data.get("losses", 0)
+        kills = player_data.get("kills", 0)
+        deaths = player_data.get("deaths", 0)
+        series_wins = player_data.get("series_wins", 0)
+        series_losses = player_data.get("series_losses", 0)
+        total_games = wins + losses
+
+        # Calculate win rate and K/D
         win_rate = (wins / total_games * 100) if total_games > 0 else 0
+        kd_ratio = (kills / deaths) if deaths > 0 else kills
 
         # Calculate placement among all players (sorted by highest_rank)
-        all_stats = load_json_file(RANKSTATS_FILE)
         all_players = []
-        for uid, data in all_stats.items():
-            p_rank = calculate_highest_rank(data)
+        for uid, data in ranks.items():
+            p_rank = data.get("highest_rank", 1)
             p_wins = data.get("wins", 0)
             all_players.append((uid, p_rank, p_wins))
 
@@ -822,7 +842,7 @@ class StatsCommands(commands.Cog):
         # Find this player's placement
         placement = 1
         for i, (uid, _, _) in enumerate(all_players, 1):
-            if uid == str(target_user.id):
+            if uid == user_key:
                 placement = i
                 break
 
@@ -832,7 +852,7 @@ class StatsCommands(commands.Cog):
         placement_pct_display = placement_pct if placement_pct <= 50 else (100 - placement_pct)
 
         # Wins percentile (higher is better)
-        wins_sorted = sorted([d.get("wins", 0) for d in all_stats.values()], reverse=True)
+        wins_sorted = sorted([d.get("wins", 0) for d in ranks.values()], reverse=True)
         wins_rank = 1
         for i, w in enumerate(wins_sorted, 1):
             if w <= wins:
@@ -841,7 +861,7 @@ class StatsCommands(commands.Cog):
         wins_pct = (wins_rank / total_players * 100) if total_players > 0 else 0
 
         # Games percentile
-        games_sorted = sorted([d.get("wins", 0) + d.get("losses", 0) for d in all_stats.values()], reverse=True)
+        games_sorted = sorted([d.get("wins", 0) + d.get("losses", 0) for d in ranks.values()], reverse=True)
         games_rank = 1
         for i, g in enumerate(games_sorted, 1):
             if g <= total_games:
@@ -849,10 +869,10 @@ class StatsCommands(commands.Cog):
                 break
         games_pct = (games_rank / total_players * 100) if total_players > 0 else 0
 
-        # Get rank emoji
+        # Get rank emoji (emoji name is just the rank number, e.g., :15:)
         rank_emoji = None
         if interaction.guild:
-            emoji = discord.utils.get(interaction.guild.emojis, name=f"Level{highest_rank}")
+            emoji = discord.utils.get(interaction.guild.emojis, name=str(highest_rank))
             if emoji:
                 rank_emoji = str(emoji)
 
@@ -878,7 +898,7 @@ class StatsCommands(commands.Cog):
 
         embed.add_field(name="\u200b", value="\u200b", inline=True)  # Spacer
 
-        # Row 2: RANK | WINRATE | GAMES
+        # Row 2: RANK | WINRATE | K/D
         embed.add_field(
             name="RANK",
             value=f"**#{placement}**\n{placement_label} {placement_pct_display:.0f}%",
@@ -892,12 +912,12 @@ class StatsCommands(commands.Cog):
         )
 
         embed.add_field(
-            name="GAMES",
-            value=f"**{total_games}**\nTOP {games_pct:.0f}%",
+            name="K/D",
+            value=f"**{kd_ratio:.2f}**\n{kills}K / {deaths}D",
             inline=True
         )
 
-        # Row 3: WINS | LOSSES
+        # Row 3: WINS | LOSSES | SERIES
         embed.add_field(
             name="WINS",
             value=f"**{wins}**\nTOP {wins_pct:.0f}%",
@@ -910,12 +930,24 @@ class StatsCommands(commands.Cog):
             inline=True
         )
 
-        embed.add_field(name="\u200b", value="\u200b", inline=True)  # Spacer
+        embed.add_field(
+            name="SERIES",
+            value=f"**{series_wins}W - {series_losses}L**",
+            inline=True
+        )
 
         # Set thumbnail to rank icon PNG
         embed.set_thumbnail(url=get_rank_icon_url(highest_rank))
 
-        embed.set_footer(text=f"#{placement} of {total_players} players")
+        # Set emblem as main image if available (from emblems.json)
+        if user_key in emblems:
+            emblem_url = emblems[user_key].get("emblem_url") if isinstance(emblems[user_key], dict) else emblems[user_key]
+            if emblem_url:
+                emblem_png = get_emblem_png_url(emblem_url)
+                if emblem_png:
+                    embed.set_image(url=emblem_png)
+
+        embed.set_footer(text=f"#{placement} of {total_players} players • {total_games} games")
 
         # Add website link button
         view = discord.ui.View()
@@ -925,7 +957,7 @@ class StatsCommands(commands.Cog):
             style=discord.ButtonStyle.link
         ))
 
-        await interaction.response.send_message(embed=embed, view=view)
+        await interaction.followup.send(embed=embed, view=view)
     
     @app_commands.command(name="verifystats", description="Update your rank role based on your current stats")
     async def verifystats(self, interaction: discord.Interaction):
@@ -1114,49 +1146,20 @@ class StatsCommands(commands.Cog):
         )
         print(f"[SILENT VERIFY] Synced {updated_count} ranks (new L1: {level1_count}), skipped {skipped_count}, {error_count} errors")
 
-    @app_commands.command(name="mmr", description="[ADMIN] Set a player's MMR")
+    @app_commands.command(name="mmr", description="[DEPRECATED] MMR is no longer tracked")
     @has_admin_role()
     @app_commands.describe(
         player="Player to set MMR for",
         value="MMR value (e.g., 1500)"
     )
     async def set_mmr(self, interaction: discord.Interaction, player: discord.User, value: int):
-        """Set player MMR (Admin only)"""
-        # Validate MMR value
-        if value < 0 or value > 10000:
-            await interaction.response.send_message(
-                "❌ MMR must be between 0 and 10000!",
-                ephemeral=True
-            )
-            return
-        
-        # Get player stats
-        stats = load_json_file(RANKSTATS_FILE)
-        user_key = str(player.id)
-        
-        # Initialize if doesn't exist
-        if user_key not in stats:
-            stats[user_key] = {
-                "xp": 0,
-                "wins": 0,
-                "losses": 0,
-                "series_wins": 0,
-                "series_losses": 0,
-                "total_games": 0,
-                "total_series": 0,
-                "mmr": value
-            }
-        else:
-            stats[user_key]["mmr"] = value
-        
-        # Save
-        save_json_file(RANKSTATS_FILE, stats)
-        
+        """DEPRECATED - MMR is no longer tracked separately"""
         await interaction.response.send_message(
-            f"✅ Set {player.mention}'s MMR to **{value}**",
+            "MMR is no longer tracked separately.\n"
+            "Player rankings are now based on Level from ranks.json (managed by the website).\n"
+            "Use `/playerstats` to view a player's current stats.",
             ephemeral=True
         )
-        print(f"[MMR] {interaction.user.name} set {player.name}'s MMR to {value}")
     
     @app_commands.command(name="leaderboard", description="View the matchmaking leaderboard")
     async def leaderboard(self, interaction: discord.Interaction):
@@ -1170,8 +1173,8 @@ class LeaderboardView(discord.ui.View):
 
     # View options: Overall + each playlist
     VIEWS = ["Overall", "MLG 4v4", "Team Hardcore", "Double Team", "Head to Head"]
-    # Sort options
-    SORTS = ["Level", "Wins", "W/L %", "Games"]
+    # Sort options (K/D replaces MMR since ranks.json has kills/deaths)
+    SORTS = ["Level", "Wins", "K/D"]
 
     def __init__(self, bot, guild: discord.Guild = None):
         super().__init__(timeout=300)
@@ -1192,13 +1195,13 @@ class LeaderboardView(discord.ui.View):
         ))
 
     def get_rank_emoji(self, level: int) -> str:
-        """Get the custom rank emoji for a level (e.g., :Level15:)"""
+        """Get the custom rank emoji for a level (e.g., :15:)"""
         if self.guild:
-            emoji = discord.utils.get(self.guild.emojis, name=f"Level{level}")
+            emoji = discord.utils.get(self.guild.emojis, name=str(level))
             if emoji:
                 return str(emoji)
-        # Fallback - return empty string if no emoji (don't show text)
-        return ""
+        # Fallback to text display
+        return f"Lv{level}"
 
     async def get_players_for_view(self) -> list:
         """Get sorted players based on current view and sort.
@@ -1206,6 +1209,7 @@ class LeaderboardView(discord.ui.View):
         Reads from GitHub ranks.json (website source of truth):
         - ranks.json[discord_id].highest_rank - overall highest rank
         - ranks.json[discord_id].playlists["MLG 4v4"].rank - rank per playlist
+        - ranks.json[discord_id].kills/deaths - for K/D ratio
         """
         ranks = await async_load_ranks_from_github()
 
@@ -1213,22 +1217,24 @@ class LeaderboardView(discord.ui.View):
             players = []
             for user_id, data in ranks.items():
                 highest = data.get("highest_rank", 1)
-                # Sum wins/losses across all playlists
-                total_wins = 0
-                total_losses = 0
-                playlists = data.get("playlists", {})
-                for pdata in playlists.values():
-                    total_wins += pdata.get("wins", 0)
-                    total_losses += pdata.get("losses", 0)
+                # Get overall wins/losses from top-level data
+                total_wins = data.get("wins", 0)
+                total_losses = data.get("losses", 0)
+                kills = data.get("kills", 0)
+                deaths = data.get("deaths", 0)
                 games = total_wins + total_losses
                 wl_pct = (total_wins / games * 100) if games > 0 else 0
+                kd_ratio = (kills / deaths) if deaths > 0 else kills
                 players.append({
                     "user_id": user_id,
                     "level": highest,
                     "wins": total_wins,
                     "losses": total_losses,
                     "games": games,
-                    "wl_pct": wl_pct
+                    "wl_pct": wl_pct,
+                    "kills": kills,
+                    "deaths": deaths,
+                    "kd": kd_ratio
                 })
         else:
             # Playlist-specific view
@@ -1245,13 +1251,20 @@ class LeaderboardView(discord.ui.View):
                     # Only include players who have played this playlist
                     if games > 0:
                         wl_pct = (wins / games * 100) if games > 0 else 0
+                        # Use overall K/D for now (playlist-specific K/D not in ranks.json)
+                        kills = data.get("kills", 0)
+                        deaths = data.get("deaths", 0)
+                        kd_ratio = (kills / deaths) if deaths > 0 else kills
                         players.append({
                             "user_id": user_id,
                             "level": level,
                             "wins": wins,
                             "losses": losses,
                             "games": games,
-                            "wl_pct": wl_pct
+                            "wl_pct": wl_pct,
+                            "kills": kills,
+                            "deaths": deaths,
+                            "kd": kd_ratio
                         })
 
         # Sort based on current_sort
@@ -1259,10 +1272,8 @@ class LeaderboardView(discord.ui.View):
             players.sort(key=lambda x: (x["level"], x["wins"]), reverse=True)
         elif self.current_sort == "Wins":
             players.sort(key=lambda x: (x["wins"], x["level"]), reverse=True)
-        elif self.current_sort == "W/L %":
-            players.sort(key=lambda x: (x["wl_pct"], x["wins"]), reverse=True)
-        elif self.current_sort == "Games":
-            players.sort(key=lambda x: (x["games"], x["wins"]), reverse=True)
+        elif self.current_sort == "K/D":
+            players.sort(key=lambda x: (x["kd"], x["level"]), reverse=True)
 
         return players
 
@@ -1304,13 +1315,15 @@ class LeaderboardView(discord.ui.View):
 
                 rank_emoji = self.get_rank_emoji(p["level"])
 
-                # Format: name + rank emoji on right (no position numbers)
+                # Format: position. name + rank emoji on right
                 if self.current_sort == "Level":
-                    line = f"{name} {rank_emoji}"
+                    line = f"{i}. {name} {rank_emoji}"
                 elif self.current_sort == "Wins":
-                    line = f"{name} • **{p['wins']}W** {rank_emoji}"
+                    line = f"{i}. {name} • **{p['wins']}W** {rank_emoji}"
+                elif self.current_sort == "K/D":
+                    line = f"{i}. {name} • **{p['kd']:.2f}** {rank_emoji}"
                 else:
-                    line = f"{name} {rank_emoji}"
+                    line = f"{i}. {name} {rank_emoji}"
 
                 leaderboard_lines.append(line)
 
@@ -1341,58 +1354,65 @@ class LeaderboardView(discord.ui.View):
         embed = await self.build_embed()
         await interaction.response.edit_message(embed=embed, view=self)
 
-    @discord.ui.button(label="4v4", style=discord.ButtonStyle.secondary, custom_id="lb_mlg", row=0)
+    @discord.ui.button(label="MLG 4v4", style=discord.ButtonStyle.secondary, custom_id="lb_mlg", row=0)
     async def view_mlg(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.current_view = "MLG 4v4"
         self.current_page = 1
         embed = await self.build_embed()
         await interaction.response.edit_message(embed=embed, view=self)
 
-    @discord.ui.button(label="Hardcore", style=discord.ButtonStyle.secondary, custom_id="lb_hardcore", row=0)
+    @discord.ui.button(label="Team Hardcore", style=discord.ButtonStyle.secondary, custom_id="lb_hardcore", row=0)
     async def view_hardcore(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.current_view = "Team Hardcore"
         self.current_page = 1
         embed = await self.build_embed()
         await interaction.response.edit_message(embed=embed, view=self)
 
-    @discord.ui.button(label="Doubles", style=discord.ButtonStyle.secondary, custom_id="lb_doubles", row=0)
+    @discord.ui.button(label="Double Team", style=discord.ButtonStyle.secondary, custom_id="lb_doubles", row=0)
     async def view_doubles(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.current_view = "Double Team"
         self.current_page = 1
         embed = await self.build_embed()
         await interaction.response.edit_message(embed=embed, view=self)
 
-    @discord.ui.button(label="1v1", style=discord.ButtonStyle.secondary, custom_id="lb_1v1", row=0)
+    @discord.ui.button(label="Head to Head", style=discord.ButtonStyle.secondary, custom_id="lb_1v1", row=0)
     async def view_1v1(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.current_view = "Head to Head"
         self.current_page = 1
         embed = await self.build_embed()
         await interaction.response.edit_message(embed=embed, view=self)
 
-    # Row 1: Pagination and sort
-    @discord.ui.button(label="Prev", style=discord.ButtonStyle.secondary, custom_id="lb_prev", row=1)
-    async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.current_page = max(1, self.current_page - 1)
-        embed = await self.build_embed()
-        await interaction.response.edit_message(embed=embed, view=self)
-
-    @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary, custom_id="lb_next", row=1)
-    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.current_page = min(self.total_pages, self.current_page + 1)
-        embed = await self.build_embed()
-        await interaction.response.edit_message(embed=embed, view=self)
-
-    @discord.ui.button(label="By Level", style=discord.ButtonStyle.primary, custom_id="lb_sort_level", row=1)
+    # Row 1: Sort options
+    @discord.ui.button(label="Level", style=discord.ButtonStyle.primary, custom_id="lb_sort_level", row=1)
     async def sort_level(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.current_sort = "Level"
         self.current_page = 1
         embed = await self.build_embed()
         await interaction.response.edit_message(embed=embed, view=self)
 
-    @discord.ui.button(label="By Wins", style=discord.ButtonStyle.secondary, custom_id="lb_sort_wins", row=1)
+    @discord.ui.button(label="Wins", style=discord.ButtonStyle.secondary, custom_id="lb_sort_wins", row=1)
     async def sort_wins(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.current_sort = "Wins"
         self.current_page = 1
+        embed = await self.build_embed()
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="K/D", style=discord.ButtonStyle.secondary, custom_id="lb_sort_kd", row=1)
+    async def sort_kd(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_sort = "K/D"
+        self.current_page = 1
+        embed = await self.build_embed()
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="◀", style=discord.ButtonStyle.secondary, custom_id="lb_prev", row=1)
+    async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_page = max(1, self.current_page - 1)
+        embed = await self.build_embed()
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="▶", style=discord.ButtonStyle.secondary, custom_id="lb_next", row=1)
+    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_page = min(self.total_pages, self.current_page + 1)
         embed = await self.build_embed()
         await interaction.response.edit_message(embed=embed, view=self)
 
