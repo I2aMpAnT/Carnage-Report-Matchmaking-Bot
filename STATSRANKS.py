@@ -7,7 +7,7 @@ Import this module in bot.py with:
     await bot.load_extension('STATSRANKS')
 """
 
-MODULE_VERSION = "1.2.8"
+MODULE_VERSION = "1.3.0"
 
 import discord
 from discord import app_commands
@@ -51,6 +51,7 @@ def get_default_playlists() -> dict:
 # File paths
 GAMESTATS_FILE = "gamestats.json"
 RANKSTATS_FILE = "rankstats.json"
+RANKS_FILE = "ranks.json"  # Simple ranks file from website (discord_id -> rank per playlist)
 XP_CONFIG_FILE = "xp_config.json"
 
 # Rank icon URLs (for DMs)
@@ -66,6 +67,40 @@ def load_json_file(filepath: str) -> dict:
         with open(filepath, 'r') as f:
             return json.load(f)
     return {}
+
+
+def get_player_rank_from_ranks_file(user_id: int, playlist: str = None) -> int:
+    """Get player rank from ranks.json (website source of truth)
+
+    Args:
+        user_id: Discord user ID
+        playlist: Optional playlist name (e.g., "MLG 4v4"). If None, returns highest_rank.
+
+    Returns:
+        Rank level (1-50), defaults to 1 if not found
+    """
+    ranks = load_json_file(RANKS_FILE)
+    user_key = str(user_id)
+
+    if user_key not in ranks:
+        return 1
+
+    player_data = ranks[user_key]
+
+    if playlist:
+        # Get rank for specific playlist
+        playlists = player_data.get("playlists", {})
+        if playlist in playlists:
+            return playlists[playlist].get("rank", 1)
+        return 1
+    else:
+        # Get overall highest rank
+        return player_data.get("highest_rank", 1)
+
+
+def get_all_players_from_ranks_file() -> dict:
+    """Get all players from ranks.json with their rank data"""
+    return load_json_file(RANKS_FILE)
 
 def save_json_file(filepath: str, data: dict, skip_github: bool = False):
     """Save data to JSON file and optionally push to GitHub"""
@@ -646,6 +681,39 @@ class StatsCommands(commands.Cog):
             except Exception as e:
                 print(f"Error during rank refresh: {e}")
 
+    @commands.Cog.listener()
+    async def on_member_join(self, member: discord.Member):
+        """Automatically assign Level 1 role to new members"""
+        if member.bot:
+            return
+
+        # Check if member already has a Level role
+        for role in member.roles:
+            if role.name.startswith("Level "):
+                return  # Already has a level role
+
+        # Get rank from ranks.json, default to Level 1
+        ranks = load_json_file(RANKS_FILE)
+        user_id_str = str(member.id)
+
+        if user_id_str in ranks:
+            highest = ranks[user_id_str].get("highest_rank", 1)
+        else:
+            highest = 1  # Default: give Level 1 to all new members
+
+        # Assign the role
+        role_name = get_rank_role_name(highest)
+        role = discord.utils.get(member.guild.roles, name=role_name)
+
+        if role:
+            try:
+                await member.add_roles(role, reason=f"New member - auto-assigned {role_name}")
+                print(f"[AUTO] Assigned {role_name} to new member {member.display_name}")
+            except Exception as e:
+                print(f"❌ Failed to assign {role_name} to {member.display_name}: {e}")
+        else:
+            print(f"⚠️ Role '{role_name}' not found in guild")
+
     def has_admin_role():
         """Check if user has admin role"""
         async def predicate(interaction: discord.Interaction):
@@ -856,44 +924,34 @@ class StatsCommands(commands.Cog):
     
     @app_commands.command(name="verifystats", description="Update your rank role based on your current stats")
     async def verifystats(self, interaction: discord.Interaction):
-        """Verify and update your own rank - pulls from GitHub (source of truth)"""
+        """Verify and update your own rank - reads from ranks.json (website source of truth)"""
         await interaction.response.defer(ephemeral=True)
 
-        import github_webhook
-
-        # Pull latest stats from GitHub (source of truth) - use async version
-        github_stats = await github_webhook.async_pull_rankstats_from_github()
-
+        # Read from ranks.json (website source of truth)
+        ranks = load_json_file(RANKS_FILE)
         user_id_str = str(interaction.user.id)
 
-        if not github_stats or user_id_str not in github_stats:
+        if not ranks or user_id_str not in ranks:
             await interaction.followup.send(
-                "❌ Could not find your stats. You may not have played any ranked games yet.",
+                "❌ Could not find your stats in ranks.json. You may not have played any ranked games yet.",
                 ephemeral=True
             )
             return
 
-        player_stats = github_stats[user_id_str]
+        player_data = ranks[user_id_str]
 
-        # Use highest_rank from GitHub, fall back to calculating
-        highest = player_stats.get("highest_rank")
-        if highest is None or highest < 1:
-            highest = calculate_highest_rank(player_stats)
+        # Use highest_rank from ranks.json
+        highest = player_data.get("highest_rank", 1)
 
         # Update role based on highest rank (with DM notification)
         await update_player_rank_role(interaction.guild, interaction.user.id, highest, send_dm=True)
 
-        # Update local stats to match GitHub
-        local_stats = load_json_file(RANKSTATS_FILE)
-        local_stats[user_id_str] = player_stats
-        save_json_file(RANKSTATS_FILE, local_stats, skip_github=True)
-
-        # Get per-playlist ranks for display (using website data structure)
-        playlists = player_stats.get("playlists", {})
+        # Get per-playlist ranks for display
+        playlists = player_data.get("playlists", {})
         ranks_display = "\n".join([
-            f"• **{ptype}**: Level {pdata.get('highest_rank', 1)}"
+            f"• **{ptype}**: Level {pdata.get('rank', 1)}"
             for ptype, pdata in playlists.items()
-            if pdata.get('highest_rank', 0) > 0
+            if pdata.get('rank', 0) > 0
         ]) or "No playlist stats yet"
 
         await interaction.followup.send(
@@ -907,47 +965,29 @@ class StatsCommands(commands.Cog):
     @app_commands.command(name="verifystatsall", description="[ADMIN] Refresh all players' rank roles")
     @has_admin_role()
     async def verifystatsall(self, interaction: discord.Interaction):
-        """Refresh all ranks (Admin only) - pulls from GitHub (source of truth)"""
+        """Refresh all ranks (Admin only) - reads from ranks.json, gives Level 1 to members without rank"""
         await interaction.response.send_message(
-            "🔄 Pulling ranks from GitHub and syncing... This may take a while.",
+            "🔄 Syncing ranks from ranks.json... This may take a while.",
             ephemeral=True
         )
 
-        import github_webhook
-
         guild = interaction.guild
 
-        # Pull latest stats from GitHub (source of truth) - use async version
-        stats = await github_webhook.async_pull_rankstats_from_github()
-
-        if not stats:
-            await interaction.followup.send(
-                "❌ Could not pull stats from GitHub. Please try again later.",
-                ephemeral=True
-            )
-            return
+        # Read from ranks.json (website source of truth)
+        ranks = load_json_file(RANKS_FILE)
 
         updated_count = 0
         skipped_count = 0
         error_count = 0
-        not_found_count = 0
+        level1_count = 0
 
-        for user_id_str, player_stats in stats.items():
+        # Process ALL guild members
+        for member in guild.members:
+            if member.bot:
+                continue
+
             try:
-                user_id = int(user_id_str)
-                member = guild.get_member(user_id)
-
-                # Try to fetch if not in cache
-                if not member:
-                    try:
-                        member = await guild.fetch_member(user_id)
-                    except (discord.NotFound, discord.HTTPException):
-                        not_found_count += 1
-                        continue
-
-                if not member:
-                    not_found_count += 1
-                    continue
+                user_id_str = str(member.id)
 
                 # Get current Discord rank
                 current_rank = None
@@ -959,87 +999,70 @@ class StatsCommands(commands.Cog):
                         except:
                             pass
 
-                # Use highest_rank from GitHub, fall back to calculating
-                highest = player_stats.get("highest_rank")
-                if highest is None or highest < 1:
-                    highest = calculate_highest_rank(player_stats)
-                    print(f"  [DEBUG] {member.display_name}: highest_rank missing, calculated {highest} from stats: xp={player_stats.get('xp')}, wins={player_stats.get('wins')}")
+                # Get rank from ranks.json, default to 1 if not found
+                if user_id_str in ranks:
+                    highest = ranks[user_id_str].get("highest_rank", 1)
+                else:
+                    highest = 1  # Default: give Level 1 to all members
 
                 # Skip if already correct
                 if current_rank == highest:
                     skipped_count += 1
                     continue
 
-                print(f"  [SYNC] {member.display_name}: Discord={current_rank}, GitHub highest_rank={highest}")
-                await update_player_rank_role(guild, user_id, highest, send_dm=True)
+                if highest == 1 and current_rank is None:
+                    level1_count += 1
+                    print(f"  [NEW] {member.display_name}: Assigning Level 1")
+                else:
+                    print(f"  [SYNC] {member.display_name}: Discord={current_rank}, ranks.json={highest}")
+
+                await update_player_rank_role(guild, member.id, highest, send_dm=False)
                 updated_count += 1
-                print(f"  Updated {member.display_name}: Level {current_rank} → Level {highest}")
 
                 # Small delay to avoid rate limits
-                await asyncio.sleep(0.3)
+                await asyncio.sleep(0.2)
 
             except Exception as e:
-                print(f"❌ Error updating user {user_id_str}: {e}")
+                print(f"❌ Error updating {member.display_name}: {e}")
                 error_count += 1
-
-        # Update local stats to match GitHub
-        save_json_file(RANKSTATS_FILE, stats, skip_github=True)
 
         # Summary
         await interaction.followup.send(
             f"✅ Rank sync complete!\n"
             f"**Updated:** {updated_count}\n"
+            f"**New Level 1:** {level1_count}\n"
             f"**Already correct:** {skipped_count}\n"
-            f"**Not in server:** {not_found_count}\n"
             f"**Errors:** {error_count}",
             ephemeral=True
         )
-        print(f"[VERIFY ALL] Synced {updated_count} ranks, skipped {skipped_count}, not found {not_found_count}, {error_count} errors")
+        print(f"[VERIFY ALL] Updated {updated_count} ranks (new L1: {level1_count}), skipped {skipped_count}, {error_count} errors")
 
     @app_commands.command(name="silentverify", description="[ADMIN] Sync all ranks silently (no DMs)")
     @has_admin_role()
     async def silentverify(self, interaction: discord.Interaction):
-        """Refresh all ranks silently (Admin only) - NO DMs sent"""
+        """Refresh all ranks silently (Admin only) - reads from ranks.json, gives Level 1 to all"""
         await interaction.response.send_message(
-            "🔄 Silently syncing ranks from GitHub... (no DMs will be sent)",
+            "🔄 Silently syncing ranks from ranks.json... (no DMs will be sent)",
             ephemeral=True
         )
 
-        import github_webhook
-
         guild = interaction.guild
 
-        # Pull latest stats from GitHub (source of truth) - use async version
-        stats = await github_webhook.async_pull_rankstats_from_github()
-
-        if not stats:
-            await interaction.followup.send(
-                "❌ Could not pull stats from GitHub. Please try again later.",
-                ephemeral=True
-            )
-            return
+        # Read from ranks.json (website source of truth)
+        ranks = load_json_file(RANKS_FILE)
 
         updated_count = 0
         skipped_count = 0
         error_count = 0
-        not_found_count = 0
+        level1_count = 0
 
-        for user_id_str, player_stats in stats.items():
+        # Process ALL guild members
+        for member in guild.members:
+            if member.bot:
+                continue
+
             try:
-                user_id = int(user_id_str)
-                member = guild.get_member(user_id)
-
-                # Try to fetch if not in cache
-                if not member:
-                    try:
-                        member = await guild.fetch_member(user_id)
-                    except (discord.NotFound, discord.HTTPException):
-                        not_found_count += 1
-                        continue
-
-                if not member:
-                    not_found_count += 1
-                    continue
+                user_id_str = str(member.id)
 
                 # Get current Discord rank
                 current_rank = None
@@ -1051,42 +1074,40 @@ class StatsCommands(commands.Cog):
                         except:
                             pass
 
-                # Use highest_rank from GitHub, fall back to calculating
-                highest = player_stats.get("highest_rank")
-                if highest is None or highest < 1:
-                    highest = calculate_highest_rank(player_stats)
-                    print(f"  [DEBUG] {member.display_name}: highest_rank missing, calculated {highest} from stats: xp={player_stats.get('xp')}, wins={player_stats.get('wins')}")
+                # Get rank from ranks.json, default to 1 if not found
+                if user_id_str in ranks:
+                    highest = ranks[user_id_str].get("highest_rank", 1)
+                else:
+                    highest = 1  # Default: give Level 1 to all members
 
                 # Skip if already correct
                 if current_rank == highest:
                     skipped_count += 1
                     continue
 
-                print(f"  [SILENT SYNC] {member.display_name}: Discord={current_rank}, GitHub highest_rank={highest}")
-                await update_player_rank_role(guild, user_id, highest, send_dm=False)
+                if highest == 1 and current_rank is None:
+                    level1_count += 1
+
+                await update_player_rank_role(guild, member.id, highest, send_dm=False)
                 updated_count += 1
-                print(f"  [SILENT] Updated {member.display_name}: Level {current_rank} → Level {highest}")
 
                 # Small delay to avoid rate limits
-                await asyncio.sleep(0.3)
+                await asyncio.sleep(0.2)
 
             except Exception as e:
-                print(f"❌ Error updating user {user_id_str}: {e}")
+                print(f"❌ Error updating {member.display_name}: {e}")
                 error_count += 1
-
-        # Update local stats to match GitHub
-        save_json_file(RANKSTATS_FILE, stats, skip_github=True)
 
         # Summary
         await interaction.followup.send(
             f"✅ Silent rank sync complete!\n"
             f"**Updated:** {updated_count}\n"
+            f"**New Level 1:** {level1_count}\n"
             f"**Already correct:** {skipped_count}\n"
-            f"**Not in server:** {not_found_count}\n"
             f"**Errors:** {error_count}",
             ephemeral=True
         )
-        print(f"[SILENT VERIFY] Synced {updated_count} ranks, skipped {skipped_count}, not found {not_found_count}, {error_count} errors")
+        print(f"[SILENT VERIFY] Synced {updated_count} ranks (new L1: {level1_count}), skipped {skipped_count}, {error_count} errors")
 
     @app_commands.command(name="mmr", description="[ADMIN] Set a player's MMR")
     @has_admin_role()
@@ -1180,22 +1201,32 @@ class LeaderboardView(discord.ui.View):
 
 
     async def get_players_for_view(self) -> list:
-        """Get sorted players based on current view and sort"""
-        stats = load_json_file(RANKSTATS_FILE)
+        """Get sorted players based on current view and sort.
+
+        Reads from ranks.json (website source of truth):
+        - ranks.json[discord_id].highest_rank - overall highest rank
+        - ranks.json[discord_id].playlists["MLG 4v4"].rank - rank per playlist
+        """
+        ranks = load_json_file(RANKS_FILE)
 
         if self.current_view == "Overall":
             players = []
-            for user_id, data in stats.items():
-                highest = calculate_highest_rank(data)
-                wins = data.get("wins", 0)
-                losses = data.get("losses", 0)
-                games = wins + losses
-                wl_pct = (wins / games * 100) if games > 0 else 0
+            for user_id, data in ranks.items():
+                highest = data.get("highest_rank", 1)
+                # Sum wins/losses across all playlists
+                total_wins = 0
+                total_losses = 0
+                playlists = data.get("playlists", {})
+                for pdata in playlists.values():
+                    total_wins += pdata.get("wins", 0)
+                    total_losses += pdata.get("losses", 0)
+                games = total_wins + total_losses
+                wl_pct = (total_wins / games * 100) if games > 0 else 0
                 players.append({
                     "user_id": user_id,
                     "level": highest,
-                    "wins": wins,
-                    "losses": losses,
+                    "wins": total_wins,
+                    "losses": total_losses,
                     "games": games,
                     "wl_pct": wl_pct
                 })
@@ -1203,11 +1234,11 @@ class LeaderboardView(discord.ui.View):
             # Playlist-specific view
             playlist_name = self.current_view
             players = []
-            for user_id, data in stats.items():
+            for user_id, data in ranks.items():
                 playlists = data.get("playlists", {})
                 if playlist_name in playlists:
                     pdata = playlists[playlist_name]
-                    level = pdata.get("highest_rank", 1)
+                    level = pdata.get("rank", 1)
                     wins = pdata.get("wins", 0)
                     losses = pdata.get("losses", 0)
                     games = wins + losses
