@@ -869,36 +869,13 @@ class StatsCommands(commands.Cog):
                 break
         games_pct = (games_rank / total_players * 100) if total_players > 0 else 0
 
-        # Get rank emoji (emoji name is just the rank number, e.g., :15:)
-        rank_emoji = None
-        if interaction.guild:
-            emoji = discord.utils.get(interaction.guild.emojis, name=str(highest_rank))
-            if emoji:
-                rank_emoji = str(emoji)
-
         # Create embed
         embed = discord.Embed(
             title=f"{target_user.display_name}'s Stats",
             color=discord.Color.from_rgb(0, 112, 192)
         )
 
-        # Header row: PLAYER | LEVEL
-        embed.add_field(
-            name="PLAYER",
-            value=f"**{target_user.display_name}**",
-            inline=True
-        )
-
-        level_display = f"{rank_emoji}" if rank_emoji else f"**Level {highest_rank}**"
-        embed.add_field(
-            name="LEVEL",
-            value=level_display,
-            inline=True
-        )
-
-        embed.add_field(name="\u200b", value="\u200b", inline=True)  # Spacer
-
-        # Row 2: RANK | WINRATE | K/D
+        # Row 1: RANK | WINRATE | K/D
         embed.add_field(
             name="RANK",
             value=f"**#{placement}**\n{placement_label} {placement_pct_display:.0f}%",
