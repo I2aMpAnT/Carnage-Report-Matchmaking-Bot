@@ -869,36 +869,13 @@ class StatsCommands(commands.Cog):
                 break
         games_pct = (games_rank / total_players * 100) if total_players > 0 else 0
 
-        # Get rank emoji (emoji name is just the rank number, e.g., :15:)
-        rank_emoji = None
-        if interaction.guild:
-            emoji = discord.utils.get(interaction.guild.emojis, name=str(highest_rank))
-            if emoji:
-                rank_emoji = str(emoji)
-
         # Create embed
         embed = discord.Embed(
             title=f"{target_user.display_name}'s Stats",
             color=discord.Color.from_rgb(0, 112, 192)
         )
 
-        # Header row: PLAYER | LEVEL
-        embed.add_field(
-            name="PLAYER",
-            value=f"**{target_user.display_name}**",
-            inline=True
-        )
-
-        level_display = f"{rank_emoji}" if rank_emoji else f"**Level {highest_rank}**"
-        embed.add_field(
-            name="LEVEL",
-            value=level_display,
-            inline=True
-        )
-
-        embed.add_field(name="\u200b", value="\u200b", inline=True)  # Spacer
-
-        # Row 2: RANK | WINRATE | K/D
+        # Row 1: RANK | WINRATE | K/D
         embed.add_field(
             name="RANK",
             value=f"**#{placement}**\n{placement_label} {placement_pct_display:.0f}%",
@@ -952,8 +929,8 @@ class StatsCommands(commands.Cog):
         # Add website link button
         view = discord.ui.View()
         view.add_item(discord.ui.Button(
-            label="View Full Stats",
-            url="https://www.carnagereport.com/stats",
+            label="See more at CarnageReport.com",
+            url="https://www.carnagereport.com",
             style=discord.ButtonStyle.link
         ))
 
@@ -1189,21 +1166,30 @@ class LeaderboardView(discord.ui.View):
         # Add website link button (row 2)
         self.add_item(discord.ui.Button(
             label="See more at CarnageReport.com",
-            url="https://www.carnagereport.com/leaderboard",
+            url="https://www.carnagereport.com",
             style=discord.ButtonStyle.link,
             row=2
         ))
 
     def get_rank_emoji(self, level: int) -> str:
-        """Get the custom rank emoji for a level (e.g., :6:)"""
+        """Get the custom rank emoji for a level (e.g., :15: or :6_:)"""
         if self.guild:
             # Look for emoji with name matching the level number
             emoji_name = str(level)
             emoji = discord.utils.get(self.guild.emojis, name=emoji_name)
             if emoji:
                 return str(emoji)
-            # Debug: print available emojis if not found
-            print(f"[EMOJI] Could not find :{emoji_name}: in guild {self.guild.name} - Total emojis: {len(self.guild.emojis)}")
+            # For single-digit levels (1-9), also try with underscore suffix (e.g., "6_")
+            # Discord doesn't allow single-character emoji names
+            if level <= 9:
+                emoji_name_underscore = f"{level}_"
+                emoji = discord.utils.get(self.guild.emojis, name=emoji_name_underscore)
+                if emoji:
+                    return str(emoji)
+                print(f"[EMOJI] Could not find :{emoji_name}: or :{emoji_name_underscore}: in guild {self.guild.name}")
+            else:
+                # Debug: print available emojis if not found
+                print(f"[EMOJI] Could not find :{emoji_name}: in guild {self.guild.name} - Total emojis: {len(self.guild.emojis)}")
         else:
             print(f"[EMOJI] No guild available for emoji lookup")
         # Fallback to text display
