@@ -719,15 +719,14 @@ class StatsCommands(commands.Cog):
     @app_commands.command(name="playerstats", description="View player matchmaking statistics")
     @app_commands.describe(user="User to view stats for (optional)")
     async def playerstats(self, interaction: discord.Interaction, user: discord.User = None):
-        """Show player stats with per-playlist ranks"""
+        """Show player stats with placement ranking"""
         target_user = user or interaction.user
 
         # Get stats
         player_stats = get_player_stats(target_user.id)
 
-        # Get highest rank and per-playlist ranks
-        highest_rank = player_stats.get("highest_rank", 1)
-        playlist_ranks = get_all_playlist_ranks(target_user.id)
+        # Get highest rank level
+        highest_rank = calculate_highest_rank(player_stats)
 
         # Calculate win rate
         total_games = player_stats["total_games"]
@@ -735,81 +734,116 @@ class StatsCommands(commands.Cog):
         losses = player_stats["losses"]
         win_rate = (wins / total_games * 100) if total_games > 0 else 0
 
-        # Get MMR
-        mmr = player_stats.get("mmr", 1500)
+        # Calculate placement among all players (sorted by highest_rank)
+        all_stats = load_json_file(RANKSTATS_FILE)
+        all_players = []
+        for uid, data in all_stats.items():
+            p_rank = calculate_highest_rank(data)
+            p_wins = data.get("wins", 0)
+            all_players.append((uid, p_rank, p_wins))
+
+        # Sort by rank desc, then wins desc
+        all_players.sort(key=lambda x: (x[1], x[2]), reverse=True)
+        total_players = len(all_players)
+
+        # Find this player's placement
+        placement = 1
+        for i, (uid, _, _) in enumerate(all_players, 1):
+            if uid == str(target_user.id):
+                placement = i
+                break
+
+        # Calculate percentiles
+        placement_pct = (placement / total_players * 100) if total_players > 0 else 0
+        placement_label = "TOP" if placement_pct <= 50 else "BOTTOM"
+        placement_pct_display = placement_pct if placement_pct <= 50 else (100 - placement_pct)
+
+        # Wins percentile (higher is better)
+        wins_sorted = sorted([d.get("wins", 0) for d in all_stats.values()], reverse=True)
+        wins_rank = 1
+        for i, w in enumerate(wins_sorted, 1):
+            if w <= wins:
+                wins_rank = i
+                break
+        wins_pct = (wins_rank / total_players * 100) if total_players > 0 else 0
+
+        # Games percentile
+        games_sorted = sorted([d.get("wins", 0) + d.get("losses", 0) for d in all_stats.values()], reverse=True)
+        games_rank = 1
+        for i, g in enumerate(games_sorted, 1):
+            if g <= total_games:
+                games_rank = i
+                break
+        games_pct = (games_rank / total_players * 100) if total_players > 0 else 0
+
+        # Get rank emoji
+        rank_emoji = None
+        if interaction.guild:
+            emoji = discord.utils.get(interaction.guild.emojis, name=f"Level{highest_rank}")
+            if emoji:
+                rank_emoji = str(emoji)
 
         # Create embed
         embed = discord.Embed(
-            title=f"{target_user.name}'s Matchmaking Stats",
+            title=f"{target_user.display_name}'s Stats",
             color=discord.Color.from_rgb(0, 112, 192)
         )
 
-        # Header with player name and MMR
+        # Header row: PLAYER | LEVEL
         embed.add_field(
             name="PLAYER",
-            value=f"**{target_user.name}**",
+            value=f"**{target_user.display_name}**",
             inline=True
         )
 
+        level_display = f"{rank_emoji}" if rank_emoji else f"**Level {highest_rank}**"
         embed.add_field(
-            name="MMR",
-            value=f"**{mmr:.1f}**",
+            name="LEVEL",
+            value=level_display,
             inline=True
         )
 
+        embed.add_field(name="\u200b", value="\u200b", inline=True)  # Spacer
+
+        # Row 2: RANK | WINRATE | GAMES
         embed.add_field(
-            name="HIGHEST RANK",
-            value=f"**Level {highest_rank}**",
+            name="RANK",
+            value=f"**#{placement}**\n{placement_label} {placement_pct_display:.0f}%",
             inline=True
         )
 
-        embed.add_field(name="\u200b", value="\u200b", inline=False)  # Spacer
-
-        # Per-Playlist Ranks section (using website data structure)
-        # PLAYLIST_TYPES already contains display names: "MLG 4v4", "Team Hardcore", etc.
-        playlists = player_stats.get("playlists", {})
-
-        ranks_text = ""
-        for ptype in PLAYLIST_TYPES:
-            pdata = playlists.get(ptype, {})
-            p_highest_rank = pdata.get("highest_rank", 1)
-            pxp = pdata.get("xp", 0)
-            pwins = pdata.get("wins", 0)
-            plosses = pdata.get("losses", 0)
-            ranks_text += f"**{ptype}**: Level {p_highest_rank} ({pxp} XP) - {pwins}W/{plosses}L\n"
-
-        embed.add_field(
-            name="📊 PLAYLIST RANKS",
-            value=ranks_text.strip() if ranks_text else "No playlist data yet",
-            inline=False
-        )
-
-        embed.add_field(name="\u200b", value="\u200b", inline=False)  # Spacer
-
-        # Win Rate
         embed.add_field(
             name="WINRATE",
             value=f"**{win_rate:.0f}%**",
             inline=True
         )
 
-        # Wins
         embed.add_field(
-            name="WINS",
-            value=f"**{wins}**",
+            name="GAMES",
+            value=f"**{total_games}**\nTOP {games_pct:.0f}%",
             inline=True
         )
 
-        # Losses
+        # Row 3: WINS | LOSSES
+        embed.add_field(
+            name="WINS",
+            value=f"**{wins}**\nTOP {wins_pct:.0f}%",
+            inline=True
+        )
+
         embed.add_field(
             name="LOSSES",
             value=f"**{losses}**",
             inline=True
         )
 
-        embed.set_thumbnail(url=target_user.display_avatar.url)
-        embed.set_footer(text=f"Total Games: {total_games} | Series W/L: {player_stats['series_wins']}/{player_stats['series_losses']}")
-        
+        embed.add_field(name="\u200b", value="\u200b", inline=True)  # Spacer
+
+        # Set thumbnail to rank icon PNG
+        embed.set_thumbnail(url=get_rank_icon_url(highest_rank))
+
+        embed.set_footer(text=f"#{placement} of {total_players} players")
+
         await interaction.response.send_message(embed=embed)
     
     @app_commands.command(name="verifystats", description="Update your rank role based on your current stats")
