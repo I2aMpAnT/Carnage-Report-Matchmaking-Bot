@@ -3211,4 +3211,105 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
 
         log_action(f"Playlist sync by {interaction.user.display_name}: {playlist}")
 
+    @bot.tree.command(name='botdiag', description='[STAFF] Diagnostic check - verify bot has access to all required files')
+    @has_staff_role()
+    async def bot_diag(interaction: discord.Interaction):
+        """Check if bot has access to all required files and modules"""
+        await interaction.response.defer(ephemeral=True)
+
+        import os
+        import json
+
+        results = []
+
+        # Required JSON files
+        json_files = [
+            ("rankstats.json", "Player stats and ranks"),
+            ("players.json", "MAC addresses and aliases"),
+            ("gamestats.json", "Game statistics"),
+            ("matchhistory.json", "MLG 4v4 match history (legacy)"),
+            ("MLG4v4.json", "MLG 4v4 match history"),
+            ("team_hardcore.json", "Team Hardcore match history"),
+            ("double_team.json", "Double Team match history"),
+            ("head_to_head.json", "Head to Head match history"),
+            ("xp_config.json", "XP configuration"),
+            ("playlists.json", "Playlist configuration"),
+            ("queue_config.json", "Queue configuration"),
+        ]
+
+        results.append("**📁 File Access:**")
+        for filename, description in json_files:
+            if os.path.exists(filename):
+                try:
+                    with open(filename, 'r') as f:
+                        data = json.load(f)
+                    count = len(data) if isinstance(data, (dict, list)) else "N/A"
+                    results.append(f"✅ `{filename}` - {count} entries")
+                except json.JSONDecodeError as e:
+                    results.append(f"⚠️ `{filename}` - Invalid JSON: {e}")
+                except Exception as e:
+                    results.append(f"❌ `{filename}` - Read error: {e}")
+            else:
+                results.append(f"❌ `{filename}` - Not found")
+
+        # Check modules
+        results.append("\n**📦 Modules:**")
+        modules_to_check = [
+            "twitch",
+            "github_webhook",
+            "STATSRANKS",
+            "playlists",
+            "searchmatchmaking",
+            "pregame",
+            "ingame",
+            "postgame",
+        ]
+
+        for module in modules_to_check:
+            try:
+                mod = __import__(module)
+                version = getattr(mod, 'MODULE_VERSION', 'N/A')
+                results.append(f"✅ `{module}` v{version}")
+            except ImportError as e:
+                results.append(f"❌ `{module}` - Import failed: {e}")
+            except Exception as e:
+                results.append(f"⚠️ `{module}` - Error: {e}")
+
+        # Check twitch cache
+        results.append("\n**🔧 Cache Status:**")
+        try:
+            import twitch
+            cache = twitch._PLAYERS_CACHE
+            if cache is not None:
+                results.append(f"✅ Players cache: {len(cache)} players loaded")
+            else:
+                results.append(f"⚠️ Players cache: Not loaded yet")
+        except Exception as e:
+            results.append(f"❌ Players cache: Error - {e}")
+
+        # Check GitHub connectivity
+        results.append("\n**🌐 GitHub:**")
+        try:
+            import github_webhook
+            test_data = github_webhook.pull_rankstats_from_github()
+            if test_data:
+                results.append(f"✅ GitHub pull: {len(test_data)} players in rankstats")
+            else:
+                results.append(f"⚠️ GitHub pull: No data returned")
+        except Exception as e:
+            results.append(f"❌ GitHub pull: {e}")
+
+        # Check custom emojis
+        results.append("\n**😀 Custom Emojis:**")
+        if interaction.guild:
+            level_emojis = [e for e in interaction.guild.emojis if e.name.startswith("Level")]
+            results.append(f"✅ Level emojis found: {len(level_emojis)}")
+        else:
+            results.append(f"⚠️ Not in a guild context")
+
+        # Working directory
+        results.append(f"\n**📂 Working Directory:**\n`{os.getcwd()}`")
+
+        await interaction.followup.send("\n".join(results), ephemeral=True)
+
     return bot
