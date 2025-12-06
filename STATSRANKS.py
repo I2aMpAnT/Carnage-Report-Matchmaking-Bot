@@ -1195,15 +1195,24 @@ class LeaderboardView(discord.ui.View):
         ))
 
     def get_rank_emoji(self, level: int) -> str:
-        """Get the custom rank emoji for a level (e.g., :6:)"""
+        """Get the custom rank emoji for a level (e.g., :15: or :6_:)"""
         if self.guild:
             # Look for emoji with name matching the level number
             emoji_name = str(level)
             emoji = discord.utils.get(self.guild.emojis, name=emoji_name)
             if emoji:
                 return str(emoji)
-            # Debug: print available emojis if not found
-            print(f"[EMOJI] Could not find :{emoji_name}: in guild {self.guild.name} - Total emojis: {len(self.guild.emojis)}")
+            # For single-digit levels (1-9), also try with underscore suffix (e.g., "6_")
+            # Discord doesn't allow single-character emoji names
+            if level <= 9:
+                emoji_name_underscore = f"{level}_"
+                emoji = discord.utils.get(self.guild.emojis, name=emoji_name_underscore)
+                if emoji:
+                    return str(emoji)
+                print(f"[EMOJI] Could not find :{emoji_name}: or :{emoji_name_underscore}: in guild {self.guild.name}")
+            else:
+                # Debug: print available emojis if not found
+                print(f"[EMOJI] Could not find :{emoji_name}: in guild {self.guild.name} - Total emojis: {len(self.guild.emojis)}")
         else:
             print(f"[EMOJI] No guild available for emoji lookup")
         # Fallback to text display
