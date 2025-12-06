@@ -1294,9 +1294,6 @@ class LeaderboardView(discord.ui.View):
         # Footer with pagination and view info
         embed.set_footer(text=f"Page {self.current_page}/{self.total_pages} • {len(players)} players • {self.current_view}")
 
-        # Set thumbnail to rank 50 icon for flair
-        embed.set_thumbnail(url=get_rank_icon_url(50))
-
         # Update button states
         self.update_buttons()
 
