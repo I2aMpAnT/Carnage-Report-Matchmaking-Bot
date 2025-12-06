@@ -1195,11 +1195,15 @@ class LeaderboardView(discord.ui.View):
         ))
 
     def get_rank_emoji(self, level: int) -> str:
-        """Get the custom rank emoji for a level (e.g., :15:)"""
+        """Get the custom rank emoji for a level (e.g., :6:)"""
         if self.guild:
-            emoji = discord.utils.get(self.guild.emojis, name=str(level))
+            # Look for emoji with name matching the level number
+            emoji_name = str(level)
+            emoji = discord.utils.get(self.guild.emojis, name=emoji_name)
             if emoji:
                 return str(emoji)
+            # Debug: print available emojis if not found
+            # print(f"[EMOJI] Could not find :{emoji_name}: - Available: {[e.name for e in self.guild.emojis[:10]]}")
         # Fallback to text display
         return f"Lv{level}"
 
@@ -1227,6 +1231,7 @@ class LeaderboardView(discord.ui.View):
                 kd_ratio = (kills / deaths) if deaths > 0 else kills
                 players.append({
                     "user_id": user_id,
+                    "discord_name": data.get("discord_name", "Unknown"),
                     "level": highest,
                     "wins": total_wins,
                     "losses": total_losses,
@@ -1257,6 +1262,7 @@ class LeaderboardView(discord.ui.View):
                         kd_ratio = (kills / deaths) if deaths > 0 else kills
                         players.append({
                             "user_id": user_id,
+                            "discord_name": data.get("discord_name", "Unknown"),
                             "level": level,
                             "wins": wins,
                             "losses": losses,
@@ -1306,12 +1312,13 @@ class LeaderboardView(discord.ui.View):
             # Build leaderboard text
             leaderboard_lines = []
             for i, p in enumerate(page_players, start=start_idx + 1):
-                # Always fetch Discord name from API
+                # Use discord_name from ranks.json (fallback if API fails)
+                name = p.get("discord_name", "Unknown")
                 try:
                     user = await self.bot.fetch_user(int(p["user_id"]))
                     name = user.display_name
                 except:
-                    name = f"Unknown"
+                    pass  # Keep name from ranks.json
 
                 rank_emoji = self.get_rank_emoji(p["level"])
 
