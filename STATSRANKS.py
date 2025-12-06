@@ -844,7 +844,15 @@ class StatsCommands(commands.Cog):
 
         embed.set_footer(text=f"#{placement} of {total_players} players")
 
-        await interaction.response.send_message(embed=embed)
+        # Add website link button
+        view = discord.ui.View()
+        view.add_item(discord.ui.Button(
+            label="View Full Stats",
+            url="https://www.carnagereport.com/stats",
+            style=discord.ButtonStyle.link
+        ))
+
+        await interaction.response.send_message(embed=embed, view=view)
     
     @app_commands.command(name="verifystats", description="Update your rank role based on your current stats")
     async def verifystats(self, interaction: discord.Interaction):
@@ -1148,6 +1156,14 @@ class LeaderboardView(discord.ui.View):
         self.current_page = 1
         self.total_pages = 1
         self.per_page = 10
+
+        # Add website link button (row 2)
+        self.add_item(discord.ui.Button(
+            label="Website Leaderboard",
+            url="https://www.carnagereport.com/leaderboard",
+            style=discord.ButtonStyle.link,
+            row=2
+        ))
 
     def get_rank_emoji(self, level: int) -> str:
         """Get the custom rank emoji for a level (e.g., :Level15:)"""
