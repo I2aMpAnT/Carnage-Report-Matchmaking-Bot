@@ -1,7 +1,7 @@
 # playlists.py - Multi-Playlist Queue System
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.1.1"
+MODULE_VERSION = "1.1.4"
 
 import discord
 from discord.ui import View, Button
@@ -94,8 +94,17 @@ PLAYLIST_CONFIG = {
     },
 }
 
-# Match history file
-MATCH_HISTORY_FILE = "match_history.json"
+# Match history files - each playlist gets its own {playlistname}.json file
+PLAYLIST_HISTORY_FILES = {
+    "mlg_4v4": "MLG4v4.json",
+    "team_hardcore": "team_hardcore.json",
+    "double_team": "double_team.json",
+    "head_to_head": "head_to_head.json",
+}
+
+def get_playlist_history_file(playlist_type: str) -> str:
+    """Get the history file path for a playlist (e.g., MLG4v4.json, team_hardcore.json)"""
+    return PLAYLIST_HISTORY_FILES.get(playlist_type, f"{playlist_type}.json")
 
 
 def log_action(message: str):
@@ -314,22 +323,33 @@ async def balance_teams_by_mmr(players: List[int], team_size: int) -> Tuple[List
 
 
 def save_match_to_history(match: PlaylistMatch, result: str):
-    """Save match to history file"""
-    history = {}
-    if os.path.exists(MATCH_HISTORY_FILE):
-        try:
-            with open(MATCH_HISTORY_FILE, 'r') as f:
-                history = json.load(f)
-        except:
-            history = {}
+    """Save match to playlist-specific history file
 
-    playlist_key = match.playlist_type
-    if playlist_key not in history:
-        history[playlist_key] = []
+    Structure:
+    - active_matches: Currently in-progress matches
+    - matches: Completed matches
+    - total_matches: Count of completed matches
+    """
+    # Get the history file for this playlist
+    history_file = get_playlist_history_file(match.playlist_type)
+
+    # Load existing history or create new
+    history = {"total_matches": 0, "matches": [], "active_matches": []}
+    if os.path.exists(history_file):
+        try:
+            with open(history_file, 'r') as f:
+                history = json.load(f)
+                # Ensure active_matches exists (migration)
+                if "active_matches" not in history:
+                    history["active_matches"] = []
+        except:
+            history = {"total_matches": 0, "matches": [], "active_matches": []}
 
     match_data = {
         "match_number": match.match_number,
+        "playlist": match.playlist_type,
         "timestamp": match.start_time.isoformat(),
+        "timestamp_display": match.start_time.strftime('%Y-%m-%d %H:%M:%S'),
         "players": match.players,
         "team1": match.team1,
         "team2": match.team2,
@@ -339,12 +359,67 @@ def save_match_to_history(match: PlaylistMatch, result: str):
         "result": result,
     }
 
-    history[playlist_key].append(match_data)
+    if result == "STARTED":
+        # Add to active_matches
+        history["active_matches"].append(match_data)
+        log_action(f"Added {match.get_match_label()} to active_matches in {history_file}")
+    else:
+        # Remove from active_matches if present
+        history["active_matches"] = [
+            m for m in history["active_matches"]
+            if m.get("match_number") != match.match_number
+        ]
+        # Add to completed matches
+        history["matches"].append(match_data)
+        history["total_matches"] = len(history["matches"])
+        log_action(f"Completed {match.get_match_label()} in {history_file}")
 
-    with open(MATCH_HISTORY_FILE, 'w') as f:
+    with open(history_file, 'w') as f:
         json.dump(history, f, indent=2)
 
-    log_action(f"Saved {match.get_match_label()} to history")
+    # Sync to GitHub
+    try:
+        import github_webhook
+        github_webhook.push_file_to_github(history_file, history_file)
+    except Exception as e:
+        log_action(f"Failed to sync {history_file} to GitHub: {e}")
+
+
+def update_active_match_in_history(match: PlaylistMatch):
+    """Update an active match's data in the history file (e.g., game results)"""
+    history_file = get_playlist_history_file(match.playlist_type)
+
+    history = {"total_matches": 0, "matches": [], "active_matches": []}
+    if os.path.exists(history_file):
+        try:
+            with open(history_file, 'r') as f:
+                history = json.load(f)
+                if "active_matches" not in history:
+                    history["active_matches"] = []
+        except:
+            return
+
+    # Update the active match with current game data
+    for i, m in enumerate(history["active_matches"]):
+        if m.get("match_number") == match.match_number:
+            history["active_matches"][i]["games"] = match.games
+            history["active_matches"][i]["game_stats"] = {
+                str(k): {
+                    "map": v.get("map", ""),
+                    "gametype": v.get("gametype", "")
+                } for k, v in match.game_stats.items()
+            }
+            break
+
+    with open(history_file, 'w') as f:
+        json.dump(history, f, indent=2)
+
+    # Sync to GitHub
+    try:
+        import github_webhook
+        github_webhook.push_file_to_github(history_file, history_file)
+    except Exception as e:
+        log_action(f"Failed to sync {history_file} to GitHub: {e}")
 
 
 class PlaylistQueueView(View):
@@ -1166,16 +1241,20 @@ async def initialize_all_playlists(bot):
 __all__ = [
     'PlaylistType',
     'PLAYLIST_CONFIG',
+    'PLAYLIST_HISTORY_FILES',
     'PlaylistQueueView',
     'PlaylistPingJoinView',
     'PlaylistMatchView',
     'get_playlist_state',
     'get_playlist_by_channel',
     'get_all_playlists',
+    'get_playlist_history_file',
     'create_playlist_embed',
     'update_playlist_embed',
     'start_playlist_match',
     'end_playlist_match',
+    'save_match_to_history',
+    'update_active_match_in_history',
     'pause_playlist',
     'resume_playlist',
     'clear_playlist_queue',

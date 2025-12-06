@@ -30,12 +30,18 @@ GITHUB_BRANCH = "main"
 #   - matchmakingstate.json (internal bot state only)
 #   - players.json (confidential player data - stays on server only)
 JSON_FILES = {
-    "matchhistory.json": "matchhistory.json",
+    # Playlist match histories
+    "MLG4v4.json": "MLG4v4.json",
+    "team_hardcore.json": "team_hardcore.json",
+    "double_team.json": "double_team.json",
+    "head_to_head.json": "head_to_head.json",
     "testmatchhistory.json": "testmatchhistory.json",
+    # Stats and config
     "rankstats.json": "rankstats.json",
     "gamestats.json": "gamestats.json",
     "queue_config.json": "queue_config.json",
-    "xp_config.json": "xp_config.json"
+    "xp_config.json": "xp_config.json",
+    "playlists.json": "playlists.json"
 }
 
 def log_github_action(message: str):
@@ -212,8 +218,8 @@ def push_file_to_github(local_file: str, github_path: str, commit_message: str =
 
 # Convenience functions for each file type
 def update_matchhistory_on_github():
-    """Push matchhistory.json to GitHub"""
-    return push_file_to_github("matchhistory.json", "matchhistory.json")
+    """Push MLG4v4.json to GitHub (legacy name kept for compatibility)"""
+    return push_file_to_github("MLG4v4.json", "MLG4v4.json")
 
 def update_testmatchhistory_on_github():
     """Push testmatchhistory.json to GitHub"""
