@@ -134,6 +134,11 @@ async def async_pull_rankstats_from_github() -> dict:
     """Async version: Pull rankstats.json from GitHub"""
     return await async_pull_file_from_github("rankstats.json")
 
+
+async def async_pull_ranks_from_github() -> dict:
+    """Async version: Pull ranks.json from GitHub (website source of truth)"""
+    return await async_pull_file_from_github("ranks.json")
+
 def push_file_to_github(local_file: str, github_path: str, commit_message: str = None) -> bool:
     """
     Push a local file to GitHub repo

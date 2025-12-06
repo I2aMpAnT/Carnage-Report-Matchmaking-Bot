@@ -7,7 +7,7 @@ Import this module in bot.py with:
     await bot.load_extension('STATSRANKS')
 """
 
-MODULE_VERSION = "1.3.1"
+MODULE_VERSION = "1.3.2"
 
 import discord
 from discord import app_commands
@@ -18,6 +18,14 @@ import asyncio
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 import math
+
+# Import GitHub functions for pulling ranks.json
+try:
+    from github_webhook import async_pull_ranks_from_github
+    GITHUB_AVAILABLE = True
+except ImportError:
+    GITHUB_AVAILABLE = False
+    async_pull_ranks_from_github = None
 
 # Map and Gametype Configuration
 MAP_GAMETYPES = {
@@ -101,6 +109,25 @@ def get_player_rank_from_ranks_file(user_id: int, playlist: str = None) -> int:
 def get_all_players_from_ranks_file() -> dict:
     """Get all players from ranks.json with their rank data"""
     return load_json_file(RANKS_FILE)
+
+
+async def async_load_ranks_from_github() -> dict:
+    """Load ranks.json from GitHub (website source of truth)
+
+    Falls back to local file if GitHub pull fails.
+    """
+    if GITHUB_AVAILABLE and async_pull_ranks_from_github:
+        try:
+            ranks = await async_pull_ranks_from_github()
+            if ranks:
+                print(f"[RANKS] Loaded {len(ranks)} players from GitHub ranks.json")
+                return ranks
+        except Exception as e:
+            print(f"[RANKS] GitHub pull failed, using local: {e}")
+
+    # Fallback to local file
+    return load_json_file(RANKS_FILE)
+
 
 def save_json_file(filepath: str, data: dict, skip_github: bool = False):
     """Save data to JSON file and optionally push to GitHub"""
@@ -572,8 +599,8 @@ async def refresh_all_ranks(guild: discord.Guild, player_ids: List[int], send_dm
     """Refresh rank roles for all players - reads from ranks.json (website source of truth)"""
     from searchmatchmaking import queue_state
 
-    # Load ranks.json (website source of truth)
-    ranks = load_json_file(RANKS_FILE)
+    # Load ranks.json from GitHub (website source of truth)
+    ranks = await async_load_ranks_from_github()
 
     for user_id in player_ids:
         if user_id in queue_state.guests:
@@ -592,8 +619,8 @@ async def refresh_all_ranks(guild: discord.Guild, player_ids: List[int], send_dm
 
 async def refresh_playlist_ranks(guild: discord.Guild, player_ids: List[int], playlist_type: str, send_dm: bool = True):
     """Refresh rank roles for players after a playlist match - reads from ranks.json"""
-    # Load ranks.json (website source of truth)
-    ranks = load_json_file(RANKS_FILE)
+    # Load ranks.json from GitHub (website source of truth)
+    ranks = await async_load_ranks_from_github()
 
     for user_id in player_ids:
         user_key = str(user_id)
@@ -646,8 +673,8 @@ class StatsCommands(commands.Cog):
         if message.content == "!refresh_ranks_trigger":
             print("Received rank refresh trigger from populate_stats.py")
             try:
-                # Get all players from ranks.json (website source of truth)
-                ranks = load_json_file(RANKS_FILE)
+                # Get all players from GitHub ranks.json (website source of truth)
+                ranks = await async_load_ranks_from_github()
                 player_ids = [int(uid) for uid in ranks.keys() if uid.isdigit()]
 
                 # Refresh all ranks
@@ -670,8 +697,8 @@ class StatsCommands(commands.Cog):
             if role.name.startswith("Level "):
                 return  # Already has a level role
 
-        # Get rank from ranks.json, default to Level 1
-        ranks = load_json_file(RANKS_FILE)
+        # Get rank from GitHub ranks.json, default to Level 1
+        ranks = await async_load_ranks_from_github()
         user_id_str = str(member.id)
 
         if user_id_str in ranks:
@@ -905,8 +932,8 @@ class StatsCommands(commands.Cog):
         """Verify and update your own rank - reads from ranks.json (website source of truth)"""
         await interaction.response.defer(ephemeral=True)
 
-        # Read from ranks.json (website source of truth)
-        ranks = load_json_file(RANKS_FILE)
+        # Read from GitHub ranks.json (website source of truth)
+        ranks = await async_load_ranks_from_github()
         user_id_str = str(interaction.user.id)
 
         if not ranks or user_id_str not in ranks:
@@ -943,16 +970,16 @@ class StatsCommands(commands.Cog):
     @app_commands.command(name="verifystatsall", description="[ADMIN] Refresh all players' rank roles")
     @has_admin_role()
     async def verifystatsall(self, interaction: discord.Interaction):
-        """Refresh all ranks (Admin only) - reads from ranks.json, gives Level 1 to members without rank"""
+        """Refresh all ranks (Admin only) - reads from GitHub ranks.json, gives Level 1 to members without rank"""
         await interaction.response.send_message(
-            "🔄 Syncing ranks from ranks.json... This may take a while.",
+            "🔄 Syncing ranks from GitHub ranks.json... This may take a while.",
             ephemeral=True
         )
 
         guild = interaction.guild
 
-        # Read from ranks.json (website source of truth)
-        ranks = load_json_file(RANKS_FILE)
+        # Read from GitHub ranks.json (website source of truth)
+        ranks = await async_load_ranks_from_github()
 
         updated_count = 0
         skipped_count = 0
@@ -1018,16 +1045,16 @@ class StatsCommands(commands.Cog):
     @app_commands.command(name="silentverify", description="[ADMIN] Sync all ranks silently (no DMs)")
     @has_admin_role()
     async def silentverify(self, interaction: discord.Interaction):
-        """Refresh all ranks silently (Admin only) - reads from ranks.json, gives Level 1 to all"""
+        """Refresh all ranks silently (Admin only) - reads from GitHub ranks.json, gives Level 1 to all"""
         await interaction.response.send_message(
-            "🔄 Silently syncing ranks from ranks.json... (no DMs will be sent)",
+            "🔄 Silently syncing ranks from GitHub ranks.json... (no DMs will be sent)",
             ephemeral=True
         )
 
         guild = interaction.guild
 
-        # Read from ranks.json (website source of truth)
-        ranks = load_json_file(RANKS_FILE)
+        # Read from GitHub ranks.json (website source of truth)
+        ranks = await async_load_ranks_from_github()
 
         updated_count = 0
         skipped_count = 0
@@ -1181,11 +1208,11 @@ class LeaderboardView(discord.ui.View):
     async def get_players_for_view(self) -> list:
         """Get sorted players based on current view and sort.
 
-        Reads from ranks.json (website source of truth):
+        Reads from GitHub ranks.json (website source of truth):
         - ranks.json[discord_id].highest_rank - overall highest rank
         - ranks.json[discord_id].playlists["MLG 4v4"].rank - rank per playlist
         """
-        ranks = load_json_file(RANKS_FILE)
+        ranks = await async_load_ranks_from_github()
 
         if self.current_view == "Overall":
             players = []
