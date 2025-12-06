@@ -869,10 +869,11 @@ class StatsCommands(commands.Cog):
                 break
         games_pct = (games_rank / total_players * 100) if total_players > 0 else 0
 
-        # Get rank emoji (emoji name is just the rank number, e.g., :15:)
+        # Get rank emoji (single digits use trailing underscore: :6_:, double digits: :15:)
         rank_emoji = None
         if interaction.guild:
-            emoji = discord.utils.get(interaction.guild.emojis, name=str(highest_rank))
+            emoji_name = f"{highest_rank}_" if highest_rank < 10 else str(highest_rank)
+            emoji = discord.utils.get(interaction.guild.emojis, name=emoji_name)
             if emoji:
                 rank_emoji = str(emoji)
 
@@ -889,9 +890,10 @@ class StatsCommands(commands.Cog):
             inline=True
         )
 
-        level_display = f"{rank_emoji}" if rank_emoji else f"**Level {highest_rank}**"
+        # Show rank emoji (no "Level" text needed - emoji shows it)
+        level_display = f"{rank_emoji}" if rank_emoji else f"Lv{highest_rank}"
         embed.add_field(
-            name="LEVEL",
+            name="\u200b",
             value=level_display,
             inline=True
         )
@@ -952,8 +954,8 @@ class StatsCommands(commands.Cog):
         # Add website link button
         view = discord.ui.View()
         view.add_item(discord.ui.Button(
-            label="View Full Stats",
-            url="https://www.carnagereport.com/stats",
+            label="See more at CarnageReport.com",
+            url="https://carnagereport.com",
             style=discord.ButtonStyle.link
         ))
 
@@ -1189,7 +1191,7 @@ class LeaderboardView(discord.ui.View):
         # Add website link button (row 2)
         self.add_item(discord.ui.Button(
             label="See more at CarnageReport.com",
-            url="https://www.carnagereport.com/leaderboard",
+            url="https://carnagereport.com",
             style=discord.ButtonStyle.link,
             row=2
         ))
