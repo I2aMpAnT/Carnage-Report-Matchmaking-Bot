@@ -1203,7 +1203,11 @@ class LeaderboardView(discord.ui.View):
             if emoji:
                 return str(emoji)
             # Debug: print available emojis if not found
-            print(f"[EMOJI] Could not find :{emoji_name}: in guild {self.guild.name} - Total emojis: {len(self.guild.emojis)}")
+            emoji_names = [e.name for e in self.guild.emojis]
+            # Show emojis that look like they might be rank-related (contain digits)
+            numeric_emojis = [n for n in emoji_names if any(c.isdigit() for c in n)][:20]
+            print(f"[EMOJI] Could not find :{emoji_name}: in guild {self.guild.name}")
+            print(f"[EMOJI] Numeric-looking emojis: {numeric_emojis}")
         else:
             print(f"[EMOJI] No guild available for emoji lookup")
         # Fallback to text display
