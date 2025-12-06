@@ -952,8 +952,8 @@ class StatsCommands(commands.Cog):
         # Add website link button
         view = discord.ui.View()
         view.add_item(discord.ui.Button(
-            label="View Full Stats",
-            url="https://www.carnagereport.com/stats",
+            label="See more at CarnageReport.com",
+            url="https://www.carnagereport.com",
             style=discord.ButtonStyle.link
         ))
 
@@ -1189,7 +1189,7 @@ class LeaderboardView(discord.ui.View):
         # Add website link button (row 2)
         self.add_item(discord.ui.Button(
             label="See more at CarnageReport.com",
-            url="https://www.carnagereport.com/leaderboard",
+            url="https://www.carnagereport.com",
             style=discord.ButtonStyle.link,
             row=2
         ))
