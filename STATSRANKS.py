@@ -1093,7 +1093,7 @@ class StatsCommands(commands.Cog):
     @app_commands.command(name="leaderboard", description="View the matchmaking leaderboard")
     async def leaderboard(self, interaction: discord.Interaction):
         """Show leaderboard - starts with Overall view, use buttons to switch"""
-        view = LeaderboardView(self.bot)
+        view = LeaderboardView(self.bot, interaction.guild)
         embed = await view.build_embed()
         await interaction.response.send_message(embed=embed, view=view)
 
@@ -1105,14 +1105,24 @@ class LeaderboardView(discord.ui.View):
     # Sort options
     SORTS = ["Level", "Wins", "W/L %", "Games"]
 
-    def __init__(self, bot):
+    def __init__(self, bot, guild: discord.Guild = None):
         super().__init__(timeout=300)
         self.bot = bot
+        self.guild = guild
         self.current_view = "Overall"  # Default view
         self.current_sort = "Level"    # Default sort
         self.current_page = 1
         self.total_pages = 1
         self.per_page = 10
+
+    def get_rank_emoji(self, level: int) -> str:
+        """Get the custom rank emoji for a level (e.g., :Level15:)"""
+        if self.guild:
+            emoji = discord.utils.get(self.guild.emojis, name=f"Level{level}")
+            if emoji:
+                return str(emoji)
+        # Fallback to text if emoji not found
+        return f"**Lv {level}**"
 
     def get_position_display(self, position: int) -> str:
         """Get medal emoji or position number"""
@@ -1125,18 +1135,6 @@ class LeaderboardView(discord.ui.View):
         else:
             return f"`{position}.`"
 
-    def get_rank_icon(self, level: int) -> str:
-        """Get rank icon for level"""
-        if level >= 45:
-            return "⭐"
-        elif level >= 35:
-            return "🔷"
-        elif level >= 25:
-            return "🔶"
-        elif level >= 15:
-            return "⬜"
-        else:
-            return "⬛"
 
     async def get_players_for_view(self) -> list:
         """Get sorted players based on current view and sort"""
@@ -1232,19 +1230,19 @@ class LeaderboardView(discord.ui.View):
                     name = f"Unknown"
 
                 position = self.get_position_display(i)
-                rank_icon = self.get_rank_icon(p["level"])
+                rank_emoji = self.get_rank_emoji(p["level"])
 
-                # Format based on sort - Level sort shows just icon + name
+                # Format based on sort - show rank emoji + name, extra stat if not Level sort
                 if self.current_sort == "Level":
-                    line = f"{position} {rank_icon} **{p['level']}** {name}"
+                    line = f"{position} {rank_emoji} {name}"
                 elif self.current_sort == "Wins":
-                    line = f"{position} {rank_icon} **{p['level']}** {name} • **{p['wins']}W**"
+                    line = f"{position} {rank_emoji} {name} • **{p['wins']}W**"
                 elif self.current_sort == "W/L %":
-                    line = f"{position} {rank_icon} **{p['level']}** {name} • **{p['wl_pct']:.0f}%** ({p['wins']}W/{p['losses']}L)"
+                    line = f"{position} {rank_emoji} {name} • **{p['wl_pct']:.0f}%** ({p['wins']}W/{p['losses']}L)"
                 elif self.current_sort == "Games":
-                    line = f"{position} {rank_icon} **{p['level']}** {name} • **{p['games']}** games"
+                    line = f"{position} {rank_emoji} {name} • **{p['games']}** games"
                 else:
-                    line = f"{position} {rank_icon} **{p['level']}** {name}"
+                    line = f"{position} {rank_emoji} {name}"
 
                 leaderboard_lines.append(line)
 
