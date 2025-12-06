@@ -7,7 +7,7 @@ Import this module in bot.py with:
     await bot.load_extension('STATSRANKS')
 """
 
-MODULE_VERSION = "1.3.0"
+MODULE_VERSION = "1.3.1"
 
 import discord
 from discord import app_commands
@@ -569,64 +569,42 @@ async def record_manual_match(red_team: List[int], blue_team: List[int], games: 
     print(f"✅ Manual match {match_label} logged: {series_winner} wins ({red_game_wins}-{blue_game_wins}) - stats via populate_stats.py")
 
 async def refresh_all_ranks(guild: discord.Guild, player_ids: List[int], send_dm: bool = True):
-    """Refresh rank roles for all players in a match - always recalculates highest_rank"""
+    """Refresh rank roles for all players - reads from ranks.json (website source of truth)"""
     from searchmatchmaking import queue_state
 
-    # Load stats once
-    stats = load_json_file(RANKSTATS_FILE)
-    updated = False
+    # Load ranks.json (website source of truth)
+    ranks = load_json_file(RANKS_FILE)
 
     for user_id in player_ids:
         if user_id in queue_state.guests:
             continue  # Skip guests
 
         user_key = str(user_id)
-        player_stats = stats.get(user_key)
 
-        if not player_stats:
-            continue  # Skip if no stats
-
-        # Always recalculate highest rank to ensure accuracy
-        highest = calculate_highest_rank(player_stats)
-
-        # Update stored highest_rank
-        if stats[user_key].get("highest_rank") != highest:
-            stats[user_key]["highest_rank"] = highest
-            updated = True
+        # Get highest_rank from ranks.json, default to 1
+        if user_key in ranks:
+            highest = ranks[user_key].get("highest_rank", 1)
+        else:
+            highest = 1
 
         await update_player_rank_role(guild, user_id, highest, send_dm=send_dm)
-
-    # Save once at the end if anything changed
-    if updated:
-        save_json_file(RANKSTATS_FILE, stats, skip_github=True)
 
 
 async def refresh_playlist_ranks(guild: discord.Guild, player_ids: List[int], playlist_type: str, send_dm: bool = True):
-    """Refresh rank roles for players after a playlist match - recalculates and saves highest_rank"""
-    # Load stats once
-    stats = load_json_file(RANKSTATS_FILE)
-    updated = False
+    """Refresh rank roles for players after a playlist match - reads from ranks.json"""
+    # Load ranks.json (website source of truth)
+    ranks = load_json_file(RANKS_FILE)
 
     for user_id in player_ids:
         user_key = str(user_id)
-        player_stats = stats.get(user_key)
 
-        if not player_stats:
-            continue  # Skip if no stats
-
-        # Recalculate highest rank
-        highest = calculate_highest_rank(player_stats)
-
-        # Update stored highest_rank
-        if stats[user_key].get("highest_rank") != highest:
-            stats[user_key]["highest_rank"] = highest
-            updated = True
+        # Get highest_rank from ranks.json, default to 1
+        if user_key in ranks:
+            highest = ranks[user_key].get("highest_rank", 1)
+        else:
+            highest = 1
 
         await update_player_rank_role(guild, user_id, highest, send_dm=send_dm)
-
-    # Save once at the end if anything changed
-    if updated:
-        save_json_file(RANKSTATS_FILE, stats, skip_github=True)
 
 def get_all_players_sorted(sort_by: str = "rank") -> List[Tuple[str, dict]]:
     """Get all players sorted by specified criteria"""
@@ -668,9 +646,9 @@ class StatsCommands(commands.Cog):
         if message.content == "!refresh_ranks_trigger":
             print("Received rank refresh trigger from populate_stats.py")
             try:
-                # Get all players from rankstats
-                stats = load_json_file(RANKSTATS_FILE)
-                player_ids = [int(uid) for uid in stats.keys() if uid.isdigit()]
+                # Get all players from ranks.json (website source of truth)
+                ranks = load_json_file(RANKS_FILE)
+                player_ids = [int(uid) for uid in ranks.keys() if uid.isdigit()]
 
                 # Refresh all ranks
                 await refresh_all_ranks(message.guild, player_ids, send_dm=False)
