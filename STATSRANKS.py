@@ -65,9 +65,42 @@ XP_CONFIG_FILE = "xp_config.json"
 # Rank icon URLs (for DMs)
 RANK_ICON_BASE = "https://r2-cdn.insignia.live/h2-rank"
 
+# Emblem VPS server for rendering emblem PNGs
+EMBLEM_VPS_BASE = "http://104.207.143.249:3001"
+
 def get_rank_icon_url(level: int) -> str:
     """Get the rank icon URL for a given level"""
     return f"{RANK_ICON_BASE}/{level}.png"
+
+def get_emblem_png_url(emblem_url: str) -> str:
+    """Convert emblem HTML URL to VPS PNG URL.
+
+    Converts: https://carnagereport.com/emblem.html?P=1&S=0&EP=1&ES=0&EF=2&EB=25&ET=0
+    To: http://104.207.143.249:3001/P1-S0-EP1-ES0-EF2-EB25-ET0.png
+    """
+    if not emblem_url:
+        return None
+
+    try:
+        # Parse URL parameters
+        from urllib.parse import urlparse, parse_qs
+        parsed = urlparse(emblem_url)
+        params = parse_qs(parsed.query)
+
+        # Extract values (default to 0 if missing)
+        p = params.get('P', ['0'])[0]
+        s = params.get('S', ['0'])[0]
+        ep = params.get('EP', ['0'])[0]
+        es = params.get('ES', ['0'])[0]
+        ef = params.get('EF', ['0'])[0]
+        eb = params.get('EB', ['0'])[0]
+        et = params.get('ET', ['0'])[0]
+
+        # Build VPS URL
+        return f"{EMBLEM_VPS_BASE}/P{p}-S{s}-EP{ep}-ES{es}-EF{ef}-EB{eb}-ET{et}.png"
+    except Exception as e:
+        print(f"[EMBLEM] Failed to parse emblem URL: {e}")
+        return None
 
 def load_json_file(filepath: str) -> dict:
     """Load JSON file, create if doesn't exist"""
@@ -407,13 +440,6 @@ def get_rank_progress(xp: int) -> Tuple[int, int, int]:
     xp_for_next = next_min - xp
     
     return rank, xp_in_rank, xp_for_next
-
-# Rank icon URLs (for DMs)
-RANK_ICON_BASE = "https://r2-cdn.insignia.live/h2-rank"
-
-def get_rank_icon_url(level: int) -> str:
-    """Get the rank icon URL for a given level"""
-    return f"{RANK_ICON_BASE}/{level}.png"
 
 def get_rank_role_name(level: int) -> str:
     """Get the role name for a rank level"""
@@ -903,6 +929,13 @@ class StatsCommands(commands.Cog):
 
         # Set thumbnail to rank icon PNG
         embed.set_thumbnail(url=get_rank_icon_url(highest_rank))
+
+        # Set emblem as main image if available
+        emblem_url = player_data.get("emblem_url")
+        if emblem_url:
+            emblem_png = get_emblem_png_url(emblem_url)
+            if emblem_png:
+                embed.set_image(url=emblem_png)
 
         embed.set_footer(text=f"#{placement} of {total_players} players • {total_games} games")
 
