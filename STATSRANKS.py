@@ -7,7 +7,7 @@ Import this module in bot.py with:
     await bot.load_extension('STATSRANKS')
 """
 
-MODULE_VERSION = "1.4.0"
+MODULE_VERSION = "1.4.1"
 
 import discord
 from discord import app_commands
@@ -61,7 +61,7 @@ def get_default_playlists() -> dict:
 GAMESTATS_FILE = "gamestats.json"
 RANKS_FILE = "ranks.json"  # Website source of truth (discord_id -> rank data)
 XP_CONFIG_FILE = "xp_config.json"
-# Note: rankstats.json has been removed - all stats come from ranks.json
+MMR_FILE = "MMR.json"  # Contains MMR values for team balancing (simple format for easy editing)
 
 # Rank icon URLs (for DMs)
 RANK_ICON_BASE = "https://r2-cdn.insignia.live/h2-rank"
@@ -260,13 +260,21 @@ def get_player_stats(user_id: int, skip_github: bool = False) -> dict:
 
     Note: This now reads from ranks.json instead of rankstats.json.
     The website calculates and stores all stats in ranks.json.
+    MMR is read from rankstats.json for team balancing.
     """
     ranks = load_json_file(RANKS_FILE)
+    mmr_data = load_json_file(MMR_FILE)
     user_key = str(user_id)
 
+    # Get MMR from MMR.json (if exists)
+    mmr = None
+    if user_key in mmr_data:
+        mmr = mmr_data[user_key].get("mmr")
+
     if user_key not in ranks:
-        # Return default stats if player not found
-        return {
+        # Return default stats if player not found in ranks.json
+        # But still include MMR if they have it in rankstats.json
+        stats = {
             "xp": 0,
             "wins": 0,
             "losses": 0,
@@ -280,6 +288,9 @@ def get_player_stats(user_id: int, skip_github: bool = False) -> dict:
             "highest_rank": 1,
             "playlists": get_default_playlists()
         }
+        if mmr is not None:
+            stats["mmr"] = mmr
+        return stats
 
     # Convert ranks.json format to expected format
     player_data = ranks[user_key]
@@ -288,7 +299,7 @@ def get_player_stats(user_id: int, skip_github: bool = False) -> dict:
     series_wins = player_data.get("series_wins", 0)
     series_losses = player_data.get("series_losses", 0)
 
-    return {
+    stats = {
         "xp": 0,  # XP not tracked in ranks.json
         "wins": wins,
         "losses": losses,
@@ -302,14 +313,25 @@ def get_player_stats(user_id: int, skip_github: bool = False) -> dict:
         "highest_rank": player_data.get("highest_rank", 1),
         "playlists": player_data.get("playlists", get_default_playlists())
     }
+    if mmr is not None:
+        stats["mmr"] = mmr
+    return stats
 
 def get_existing_player_stats(user_id: int) -> dict:
     """Get player stats ONLY if they already exist (don't create new entry)
 
     Now reads from ranks.json (website source of truth).
+    MMR is read from rankstats.json for team balancing.
+    Returns stats if player exists in either ranks.json OR has MMR in rankstats.json.
     """
     ranks = load_json_file(RANKS_FILE)
+    mmr_data = load_json_file(MMR_FILE)
     user_key = str(user_id)
+
+    # Get MMR from MMR.json (if exists)
+    mmr = None
+    if user_key in mmr_data:
+        mmr = mmr_data[user_key].get("mmr")
 
     if user_key in ranks:
         player_data = ranks[user_key]
@@ -318,7 +340,7 @@ def get_existing_player_stats(user_id: int) -> dict:
         series_wins = player_data.get("series_wins", 0)
         series_losses = player_data.get("series_losses", 0)
 
-        return {
+        stats = {
             "xp": 0,
             "wins": wins,
             "losses": losses,
@@ -331,6 +353,27 @@ def get_existing_player_stats(user_id: int) -> dict:
             "rank": player_data.get("rank", 1),
             "highest_rank": player_data.get("highest_rank", 1),
             "playlists": player_data.get("playlists", {})
+        }
+        if mmr is not None:
+            stats["mmr"] = mmr
+        return stats
+
+    # If not in ranks.json but has MMR in rankstats.json, return stats with MMR
+    if mmr is not None:
+        return {
+            "xp": 0,
+            "wins": 0,
+            "losses": 0,
+            "kills": 0,
+            "deaths": 0,
+            "series_wins": 0,
+            "series_losses": 0,
+            "total_games": 0,
+            "total_series": 0,
+            "rank": 1,
+            "highest_rank": 1,
+            "playlists": {},
+            "mmr": mmr
         }
     return None
 
@@ -671,14 +714,58 @@ class StatsCommands(commands.Cog):
             try:
                 # Get all players from GitHub ranks.json (website source of truth)
                 ranks = await async_load_ranks_from_github()
-                player_ids = [int(uid) for uid in ranks.keys() if uid.isdigit()]
+                guild = message.guild
 
-                # Refresh all ranks
-                await refresh_all_ranks(message.guild, player_ids, send_dm=False)
+                updated_count = 0
+                skipped_count = 0
+                error_count = 0
+                level1_count = 0
+
+                # Process ALL guild members (like /silentverify does)
+                for member in guild.members:
+                    if member.bot:
+                        continue
+
+                    try:
+                        user_id_str = str(member.id)
+
+                        # Get current Discord rank
+                        current_rank = None
+                        for role in member.roles:
+                            if role.name.startswith("Level "):
+                                try:
+                                    current_rank = int(role.name.replace("Level ", ""))
+                                    break
+                                except:
+                                    pass
+
+                        # Get rank from ranks.json, default to 1 if not found
+                        if user_id_str in ranks:
+                            highest = ranks[user_id_str].get("highest_rank", 1)
+                        else:
+                            highest = 1  # Default: give Level 1 to all members
+
+                        # Skip if already correct
+                        if current_rank == highest:
+                            skipped_count += 1
+                            continue
+
+                        if highest == 1 and current_rank is None:
+                            level1_count += 1
+
+                        await update_player_rank_role(guild, member.id, highest, send_dm=False)
+                        updated_count += 1
+
+                        # Small delay to avoid rate limits
+                        await asyncio.sleep(0.2)
+
+                    except Exception as e:
+                        print(f"❌ Error updating {member.display_name}: {e}")
+                        error_count += 1
 
                 # Delete the trigger message
                 await message.delete()
-                print("Rank refresh completed successfully")
+                print(f"Rank refresh completed: {updated_count} updated (new L1: {level1_count}), {skipped_count} skipped, {error_count} errors")
             except Exception as e:
                 print(f"Error during rank refresh: {e}")
 
@@ -1123,20 +1210,48 @@ class StatsCommands(commands.Cog):
         )
         print(f"[SILENT VERIFY] Synced {updated_count} ranks (new L1: {level1_count}), skipped {skipped_count}, {error_count} errors")
 
-    @app_commands.command(name="mmr", description="[DEPRECATED] MMR is no longer tracked")
+    @app_commands.command(name="setmmr", description="[ADMIN] Set a player's MMR for team balancing")
     @has_admin_role()
     @app_commands.describe(
         player="Player to set MMR for",
         value="MMR value (e.g., 1500)"
     )
     async def set_mmr(self, interaction: discord.Interaction, player: discord.User, value: int):
-        """DEPRECATED - MMR is no longer tracked separately"""
+        """Set a player's MMR value for team balancing (Admin only)"""
+        # Validate MMR range
+        if value < 0 or value > 3000:
+            await interaction.response.send_message(
+                "MMR value must be between 0 and 3000.",
+                ephemeral=True
+            )
+            return
+
+        # Load MMR.json
+        mmr_data = load_json_file(MMR_FILE)
+        user_key = str(player.id)
+
+        # Create or update player entry (simple format: mmr + discord_name)
+        mmr_data[user_key] = {
+            "mmr": value,
+            "discord_name": player.display_name
+        }
+
+        # Save to file
+        with open(MMR_FILE, 'w') as f:
+            json.dump(mmr_data, f, indent=2)
+
+        # Push to GitHub
+        try:
+            import github_webhook
+            github_webhook.push_file_to_github(MMR_FILE, MMR_FILE)
+        except Exception as e:
+            print(f"Failed to push MMR.json to GitHub: {e}")
+
         await interaction.response.send_message(
-            "MMR is no longer tracked separately.\n"
-            "Player rankings are now based on Level from ranks.json (managed by the website).\n"
-            "Use `/playerstats` to view a player's current stats.",
+            f"✅ Set **{player.display_name}**'s MMR to **{value}**",
             ephemeral=True
         )
+        print(f"[MMR] {interaction.user.display_name} set {player.display_name}'s MMR to {value}")
     
     @app_commands.command(name="leaderboard", description="View the matchmaking leaderboard")
     async def leaderboard(self, interaction: discord.Interaction):
