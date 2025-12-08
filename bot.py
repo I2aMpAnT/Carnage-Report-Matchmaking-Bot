@@ -15,7 +15,15 @@ DATA_FILES = [
     "queue_config.json",
     "xp_config.json",
     "matchmakingstate.json",
-    "players.json"
+    "players.json",
+    "MMR.json",
+    "head_to_head_matches.json",
+    "head_to_head_stats.json",
+    "double_team_matches.json",
+    "double_team_stats.json",
+    "team_hardcore_matches.json",
+    "team_hardcore_stats.json",
+    "MLG4v4.json"
 ]
 
 def pull_from_github():

@@ -752,11 +752,16 @@ class StatsCommands(commands.Cog):
                                 except:
                                     pass
 
-                        # Get rank from ranks.json, default to 1 if not found
+                        # Get rank from ranks.json
                         if user_id_str in ranks:
                             highest = ranks[user_id_str].get("highest_rank", 1)
                         else:
-                            highest = 1  # Default: give Level 1 to all members
+                            # Not in ranks.json - only assign Level 1 if they have NO Level role
+                            # Don't downgrade players who already have a Level role
+                            if current_rank is not None:
+                                skipped_count += 1
+                                continue
+                            highest = 1  # New player, give Level 1
 
                         # Skip if already correct
                         if current_rank == highest:
@@ -1117,11 +1122,16 @@ class StatsCommands(commands.Cog):
                         except:
                             pass
 
-                # Get rank from ranks.json, default to 1 if not found
+                # Get rank from ranks.json
                 if user_id_str in ranks:
                     highest = ranks[user_id_str].get("highest_rank", 1)
                 else:
-                    highest = 1  # Default: give Level 1 to all members
+                    # Not in ranks.json - only assign Level 1 if they have NO Level role
+                    # Don't downgrade players who already have a Level role
+                    if current_rank is not None:
+                        skipped_count += 1
+                        continue
+                    highest = 1  # New player, give Level 1
 
                 # Skip if already correct
                 if current_rank == highest:
@@ -1192,11 +1202,16 @@ class StatsCommands(commands.Cog):
                         except:
                             pass
 
-                # Get rank from ranks.json, default to 1 if not found
+                # Get rank from ranks.json
                 if user_id_str in ranks:
                     highest = ranks[user_id_str].get("highest_rank", 1)
                 else:
-                    highest = 1  # Default: give Level 1 to all members
+                    # Not in ranks.json - only assign Level 1 if they have NO Level role
+                    # Don't downgrade players who already have a Level role
+                    if current_rank is not None:
+                        skipped_count += 1
+                        continue
+                    highest = 1  # New player, give Level 1
 
                 # Skip if already correct
                 if current_rank == highest:
