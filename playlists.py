@@ -371,7 +371,10 @@ def save_match_to_history(match: PlaylistMatch, result: str, guild=None):
     Match entry structure:
     - match_number: int
     - playlist: str (e.g., "mlg_4v4")
-    - timestamp: ISO format
+    - start_time: ISO format (when series opened)
+    - start_time_display: Human readable start time
+    - end_time: ISO format (when series closed) - null for active matches
+    - end_time_display: Human readable end time - null for active matches
     - result: "TEAM1_WIN" | "TEAM2_WIN" | "TIE" | "STARTED"
     - team1/team2: {player_ids: [], player_names: [], color: "Red"/"Blue" or null for 1v1}
     - games: [{winner: "TEAM1"|"TEAM2", map: str, gametype: str (simplified)}]
@@ -422,8 +425,10 @@ def save_match_to_history(match: PlaylistMatch, result: str, guild=None):
         "match_number": match.match_number,
         "playlist": match.playlist_type,
         "playlist_name": match.playlist_state.name,
-        "timestamp": match.start_time.isoformat(),
-        "timestamp_display": match.start_time.strftime('%Y-%m-%d %H:%M:%S'),
+        "start_time": match.start_time.isoformat(),
+        "start_time_display": match.start_time.strftime('%Y-%m-%d %H:%M:%S'),
+        "end_time": match.end_time.isoformat() if match.end_time else None,
+        "end_time_display": match.end_time.strftime('%Y-%m-%d %H:%M:%S') if match.end_time else None,
         "result": result,
         "team1": {
             "player_ids": match.team1,
@@ -1120,6 +1125,9 @@ async def end_playlist_match(channel: discord.TextChannel, match: PlaylistMatch)
         result = "TIE"
 
     log_action(f"{match.get_match_label()} ended: {result} ({team1_wins}-{team2_wins})")
+
+    # Set end time for the match
+    match.end_time = datetime.now()
 
     # Save to history (with guild for player names)
     save_match_to_history(match, result, guild)
