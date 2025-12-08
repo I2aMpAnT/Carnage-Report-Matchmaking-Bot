@@ -665,7 +665,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
 
             # File paths for match history
             MLG_HISTORY_FILE = "MLG4v4.json"  # MLG 4v4 match history
-            # Other playlists use per-playlist files via playlists.get_playlist_history_file()
+            # Other playlists use per-playlist files via playlists.get_playlist_matches_file()
 
             playlist_names = {
                 "mlg_4v4": "MLG 4v4",
@@ -715,8 +715,8 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                 )
             else:
                 # Other playlists use per-playlist history files
-                from playlists import get_playlist_history_file
-                history_file = get_playlist_history_file(playlist)
+                from playlists import get_playlist_matches_file
+                history_file = get_playlist_matches_file(playlist)
 
                 if not os.path.exists(history_file):
                     await interaction.followup.send(f"❌ No {playlist_name} match history found! (file {history_file} does not exist)", ephemeral=True)
