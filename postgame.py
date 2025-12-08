@@ -23,44 +23,44 @@ def save_match_history(series, winner: str):
     import json
     import os
     from datetime import datetime
-    
-    timestamp = datetime.now().isoformat()
-    timestamp_display = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
     match_type = "TEST" if series.test_mode else "RANKED"
-    
+
     # Calculate final scores
     red_wins = series.games.count('RED')
     blue_wins = series.games.count('BLUE')
-    
+
     # Build game-by-game breakdown with map/gametype data if available
     game_breakdown = []
     gamestats = load_gamestats()
     match_key = f"match_{series.match_number}"
-    
+
     for i, game_winner in enumerate(series.games, 1):
         game_data = {
             "game_number": i,
             "winner": game_winner,
             "loser": "BLUE" if game_winner == "RED" else "RED"
         }
-        
+
         # Add map/gametype if available from gamestats
         if match_key in gamestats:
             game_key = f"game_{i}"
             if game_key in gamestats[match_key]:
                 game_data["map"] = gamestats[match_key][game_key].get("map")
                 game_data["gametype"] = gamestats[match_key][game_key].get("gametype")
-        
+
         game_breakdown.append(game_data)
-    
-    # Create match entry
+
+    # Create match entry with start_time and end_time
     match_entry = {
         "type": "SERIES",
         "match_type": match_type,
         "series_label": series.series_number,
         "match_id": series.match_number,
-        "timestamp": timestamp,
-        "timestamp_display": timestamp_display,
+        "start_time": series.start_time.isoformat(),
+        "start_time_display": series.start_time.strftime('%Y-%m-%d %H:%M:%S'),
+        "end_time": series.end_time.isoformat() if series.end_time else None,
+        "end_time_display": series.end_time.strftime('%Y-%m-%d %H:%M:%S') if series.end_time else None,
         "winner": winner,
         "final_score": {
             "red": red_wins,
@@ -87,7 +87,7 @@ def save_match_history(series, winner: str):
         history_file = 'MLG4v4.json'
     else:
         history_file = 'testMLG4v4.json'
-    
+
     # Load existing history or create new
     if os.path.exists(history_file):
         try:
@@ -95,29 +95,106 @@ def save_match_history(series, winner: str):
                 history = json.load(f)
         except:
             if match_type == "RANKED":
-                history = {"total_ranked_matches": 0, "matches": []}
+                history = {"total_ranked_matches": 0, "matches": [], "active_matches": []}
             else:
-                history = {"total_test_matches": 0, "matches": []}
+                history = {"total_test_matches": 0, "matches": [], "active_matches": []}
     else:
         if match_type == "RANKED":
-            history = {"total_ranked_matches": 0, "matches": []}
+            history = {"total_ranked_matches": 0, "matches": [], "active_matches": []}
         else:
-            history = {"total_test_matches": 0, "matches": []}
-    
+            history = {"total_test_matches": 0, "matches": [], "active_matches": []}
+
+    # Ensure active_matches exists
+    if "active_matches" not in history:
+        history["active_matches"] = []
+
+    # Remove from active_matches if present
+    history["active_matches"] = [
+        m for m in history["active_matches"]
+        if m.get("match_id") != series.match_number
+    ]
+
     # Update counters
     if match_type == "RANKED":
         history["total_ranked_matches"] = history.get("total_ranked_matches", 0) + 1
     else:
         history["total_test_matches"] = history.get("total_test_matches", 0) + 1
-    
-    # Add new match
+
+    # Add new match to completed matches
     history["matches"].append(match_entry)
-    
+
     # Save back to file
     with open(history_file, 'w') as f:
         json.dump(history, f, indent=2)
-    
+
     log_action(f"Saved {match_type} match {series.series_number} to {history_file}")
+
+
+def save_active_match(series):
+    """Save match to active_matches when series starts"""
+    import json
+    import os
+
+    match_type = "TEST" if series.test_mode else "RANKED"
+
+    # Create active match entry
+    active_entry = {
+        "type": "SERIES",
+        "match_type": match_type,
+        "series_label": series.series_number,
+        "match_id": series.match_number,
+        "start_time": series.start_time.isoformat(),
+        "start_time_display": series.start_time.strftime('%Y-%m-%d %H:%M:%S'),
+        "end_time": None,
+        "end_time_display": None,
+        "result": "STARTED",
+        "teams": {
+            "red": {
+                "players": series.red_team[:],
+                "voice_channel_id": getattr(series, 'red_vc_id', None)
+            },
+            "blue": {
+                "players": series.blue_team[:],
+                "voice_channel_id": getattr(series, 'blue_vc_id', None)
+            }
+        }
+    }
+
+    # Save to appropriate file
+    if match_type == "RANKED":
+        history_file = 'MLG4v4.json'
+    else:
+        history_file = 'testMLG4v4.json'
+
+    # Load existing history or create new
+    if os.path.exists(history_file):
+        try:
+            with open(history_file, 'r') as f:
+                history = json.load(f)
+        except:
+            if match_type == "RANKED":
+                history = {"total_ranked_matches": 0, "matches": [], "active_matches": []}
+            else:
+                history = {"total_test_matches": 0, "matches": [], "active_matches": []}
+    else:
+        if match_type == "RANKED":
+            history = {"total_ranked_matches": 0, "matches": [], "active_matches": []}
+        else:
+            history = {"total_test_matches": 0, "matches": [], "active_matches": []}
+
+    # Ensure active_matches exists
+    if "active_matches" not in history:
+        history["active_matches"] = []
+
+    # Add to active_matches
+    history["active_matches"].append(active_entry)
+
+    # Save back to file
+    with open(history_file, 'w') as f:
+        json.dump(history, f, indent=2)
+
+    log_action(f"Added {match_type} match {series.series_number} to active_matches in {history_file}")
+
 
 def load_gamestats():
     """Load gamestats.json if available"""
