@@ -996,7 +996,14 @@ async def finalize_teams(channel: discord.TextChannel, red_team: List[int], blue
         queue_state.queue_join_times.clear()
     
     await show_series_embed(channel)
-    
+
+    # Save to active_matches
+    try:
+        from postgame import save_active_match
+        save_active_match(queue_state.current_series)
+    except Exception as e:
+        log_action(f"Failed to save active match: {e}")
+
     # Save state
     try:
         import state_manager
