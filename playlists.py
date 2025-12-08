@@ -1422,6 +1422,278 @@ async def initialize_all_playlists(bot):
             log_action(f"Could not find channel {config['channel_id']} for {config['name']}")
 
 
+async def sync_game_results_from_files(bot) -> dict:
+    """
+    Sync game results from playlist JSON files (updated by populate_stats.py).
+    Updates in-memory match objects and refreshes embeds.
+
+    Returns dict with counts of updates made.
+    """
+    results = {
+        "games_added": 0,
+        "matches_completed": 0,
+        "embeds_updated": 0,
+        "errors": []
+    }
+
+    for ptype in PLAYLIST_CONFIG.keys():
+        try:
+            matches_file = get_playlist_matches_file(ptype)
+            if not os.path.exists(matches_file):
+                continue
+
+            with open(matches_file, 'r') as f:
+                file_data = json.load(f)
+
+            ps = get_playlist_state(ptype)
+
+            # Check if there's an active match in memory
+            if not ps.current_match:
+                continue
+
+            match = ps.current_match
+
+            # Find this match in the file's active_matches
+            active_matches = file_data.get("active_matches", [])
+            file_match = None
+            for am in active_matches:
+                if am.get("match_number") == match.match_number:
+                    file_match = am
+                    break
+
+            if not file_match:
+                # Match might have been moved to completed - check matches array
+                completed_matches = file_data.get("matches", [])
+                for cm in completed_matches:
+                    if cm.get("match_number") == match.match_number:
+                        # Match was completed by populate_stats.py
+                        # Update in-memory match with final results
+                        games = cm.get("games", [])
+                        for game in games:
+                            game_num = game.get("game_number", len(match.games) + 1)
+                            winner = game.get("winner", "TEAM1")
+                            if len(match.games) < game_num:
+                                match.games.append(winner)
+                                match.game_stats[game_num] = {
+                                    "map": game.get("map", ""),
+                                    "gametype": game.get("gametype", "")
+                                }
+                                results["games_added"] += 1
+
+                        # End the match
+                        channel = bot.get_channel(PLAYLIST_CONFIG[ptype]["channel_id"])
+                        if channel:
+                            await complete_match_from_stats(channel, match, cm)
+                            results["matches_completed"] += 1
+                        break
+                continue
+
+            # Sync games from file to in-memory match
+            file_games = file_match.get("games", [])
+            games_before = len(match.games)
+
+            for game in file_games:
+                game_num = game.get("game_number", len(match.games) + 1)
+                winner = game.get("winner")
+
+                # Only add if we don't have this game yet
+                if game_num > len(match.games) and winner:
+                    match.games.append(winner)
+                    match.game_stats[game_num] = {
+                        "map": game.get("map", ""),
+                        "gametype": game.get("gametype", ""),
+                        "score": game.get("score", "")
+                    }
+                    results["games_added"] += 1
+
+            # Update embed if games were added
+            if len(match.games) > games_before:
+                channel = bot.get_channel(PLAYLIST_CONFIG[ptype]["channel_id"])
+                if channel:
+                    await show_playlist_match_embed(channel, match)
+                    results["embeds_updated"] += 1
+                    log_action(f"Updated {ps.name} match embed with {len(match.games) - games_before} new game(s)")
+
+                # Also update the active match in file with new data
+                update_active_match_in_history(match)
+
+        except Exception as e:
+            results["errors"].append(f"{ptype}: {str(e)}")
+            log_action(f"Error syncing {ptype} game results: {e}")
+
+    return results
+
+
+async def complete_match_from_stats(channel: discord.TextChannel, match: PlaylistMatch, completed_data: dict):
+    """
+    Complete a match that was finished by populate_stats.py.
+    Posts final results to channel and cleans up.
+    """
+    ps = match.playlist_state
+    guild = channel.guild
+
+    # Set end time from file data
+    end_time_str = completed_data.get("end_time")
+    if end_time_str:
+        match.end_time = datetime.fromisoformat(end_time_str)
+    else:
+        match.end_time = datetime.now()
+
+    # Determine winner
+    team1_wins = match.games.count('TEAM1')
+    team2_wins = match.games.count('TEAM2')
+
+    result = completed_data.get("result", "TIE")
+
+    log_action(f"{match.get_match_label()} completed from stats: {result} ({team1_wins}-{team2_wins})")
+
+    # Post final results embed
+    await post_match_results(channel, match, result)
+
+    # Move players to postgame if they're still in match VCs
+    POSTGAME_VC_ID = 1424845826362048643
+    postgame_vc = guild.get_channel(POSTGAME_VC_ID)
+    if postgame_vc:
+        all_players = match.team1 + match.team2
+        for uid in all_players:
+            member = guild.get_member(uid)
+            if member and member.voice:
+                # Check if they're in one of the match VCs
+                if member.voice.channel and member.voice.channel.id in [match.team1_vc_id, match.team2_vc_id, match.shared_vc_id]:
+                    try:
+                        await member.move_to(postgame_vc)
+                    except:
+                        pass
+
+    # Delete match VCs
+    for vc_id in [match.shared_vc_id, match.team1_vc_id, match.team2_vc_id]:
+        if vc_id:
+            vc = guild.get_channel(vc_id)
+            if vc:
+                try:
+                    await vc.delete()
+                except:
+                    pass
+
+    # Delete match embed
+    if match.match_message:
+        try:
+            await match.match_message.delete()
+        except:
+            pass
+
+    # Clear current match
+    ps.current_match = None
+
+    # Update queue embed
+    await update_playlist_embed(channel, ps)
+
+    # Refresh ranks for all players (with DMs)
+    import STATSRANKS
+    all_players = match.team1 + match.team2
+    await STATSRANKS.refresh_playlist_ranks(guild, all_players, ps.playlist_type, send_dm=True)
+
+    log_action(f"Completed {match.get_match_label()} from populate_stats.py")
+
+
+async def post_match_results(channel: discord.TextChannel, match: PlaylistMatch, result: str):
+    """
+    Post final match results to the playlist channel.
+    Format: {winning team logo} {color} Team won {gametype} on {map} - {score}
+    """
+    ps = match.playlist_state
+    guild = channel.guild
+
+    team1_wins = match.games.count('TEAM1')
+    team2_wins = match.games.count('TEAM2')
+
+    # Determine embed color based on winner
+    if result == "TEAM1_WIN":
+        color = discord.Color.red()
+    elif result == "TEAM2_WIN":
+        color = discord.Color.blue()
+    else:
+        color = discord.Color.gold()
+
+    embed = discord.Embed(
+        title=f"{match.get_match_label()} - Complete",
+        color=color
+    )
+
+    # Winner announcement
+    if ps.playlist_type == PlaylistType.HEAD_TO_HEAD:
+        player1 = guild.get_member(match.team1[0])
+        player2 = guild.get_member(match.team2[0])
+        p1_name = player1.display_name if player1 else "Player 1"
+        p2_name = player2.display_name if player2 else "Player 2"
+
+        if result == "TEAM1_WIN":
+            embed.description = f"**{p1_name}** defeats **{p2_name}** ({team1_wins}-{team2_wins})"
+        elif result == "TEAM2_WIN":
+            embed.description = f"**{p2_name}** defeats **{p1_name}** ({team2_wins}-{team1_wins})"
+        else:
+            embed.description = f"**{p1_name}** ties **{p2_name}** ({team1_wins}-{team2_wins})"
+    else:
+        if result == "TEAM1_WIN":
+            embed.description = f"🔴 **Red Team** wins! ({team1_wins}-{team2_wins})"
+        elif result == "TEAM2_WIN":
+            embed.description = f"🔵 **Blue Team** wins! ({team1_wins}-{team2_wins})"
+        else:
+            embed.description = f"Match tied ({team1_wins}-{team2_wins})"
+
+    # Game-by-game results with format: {logo} {Color} Team won {gametype} on {map} - {score}
+    if match.games:
+        games_text = ""
+        for i, winner in enumerate(match.games, 1):
+            stats = match.game_stats.get(i, {})
+            map_name = stats.get("map", "Unknown")
+            gametype = stats.get("gametype", "")
+            score = stats.get("score", "")
+
+            if ps.playlist_type == PlaylistType.HEAD_TO_HEAD:
+                player1 = guild.get_member(match.team1[0])
+                player2 = guild.get_member(match.team2[0])
+                p1_name = player1.display_name if player1 else "Player 1"
+                p2_name = player2.display_name if player2 else "Player 2"
+
+                winner_name = p1_name if winner == "TEAM1" else p2_name
+                if gametype and score:
+                    games_text += f"**Game {i}:** {winner_name} won {gametype} on {map_name} - {score}\n"
+                elif gametype:
+                    games_text += f"**Game {i}:** {winner_name} won {gametype} on {map_name}\n"
+                else:
+                    games_text += f"**Game {i}:** {winner_name} won on {map_name}\n"
+            else:
+                if winner == "TEAM1":
+                    logo = "🔴"
+                    team_color = "Red"
+                else:
+                    logo = "🔵"
+                    team_color = "Blue"
+
+                if gametype and score:
+                    games_text += f"{logo} **{team_color} Team** won {gametype} on {map_name} - {score}\n"
+                elif gametype:
+                    games_text += f"{logo} **{team_color} Team** won {gametype} on {map_name}\n"
+                else:
+                    games_text += f"{logo} **{team_color} Team** won on {map_name}\n"
+
+        embed.add_field(
+            name="Game Results",
+            value=games_text.strip(),
+            inline=False
+        )
+
+    # Add timestamps
+    if match.start_time and match.end_time:
+        duration = match.end_time - match.start_time
+        minutes = int(duration.total_seconds() / 60)
+        embed.set_footer(text=f"Duration: {minutes} minutes | Started: {match.start_time.strftime('%H:%M')} | Ended: {match.end_time.strftime('%H:%M')}")
+
+    await channel.send(embed=embed)
+    log_action(f"Posted final results for {match.get_match_label()}")
+
+
 # Export
 __all__ = [
     'PlaylistType',
@@ -1450,4 +1722,7 @@ __all__ = [
     'clear_playlist_queue',
     'set_playlist_hidden',
     'initialize_all_playlists',
+    'sync_game_results_from_files',
+    'complete_match_from_stats',
+    'post_match_results',
 ]

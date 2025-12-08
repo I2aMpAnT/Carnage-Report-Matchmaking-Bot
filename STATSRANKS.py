@@ -712,14 +712,27 @@ class StatsCommands(commands.Cog):
         if message.content == "!refresh_ranks_trigger":
             print("Received rank refresh trigger from populate_stats.py")
             try:
+                guild = message.guild
+
+                # STEP 1: Sync game results from JSON files and update active match embeds
+                try:
+                    import playlists
+                    sync_results = await playlists.sync_game_results_from_files(self.bot)
+                    print(f"Game sync: {sync_results['games_added']} games added, {sync_results['matches_completed']} matches completed, {sync_results['embeds_updated']} embeds updated")
+                    if sync_results['errors']:
+                        print(f"  Sync errors: {sync_results['errors']}")
+                except Exception as e:
+                    print(f"Error syncing game results: {e}")
+
+                # STEP 2: Refresh Discord ranks for all players
                 # Get all players from GitHub ranks.json (website source of truth)
                 ranks = await async_load_ranks_from_github()
-                guild = message.guild
 
                 updated_count = 0
                 skipped_count = 0
                 error_count = 0
                 level1_count = 0
+                dm_count = 0
 
                 # Process ALL guild members (like /silentverify does)
                 for member in guild.members:
@@ -753,8 +766,12 @@ class StatsCommands(commands.Cog):
                         if highest == 1 and current_rank is None:
                             level1_count += 1
 
-                        await update_player_rank_role(guild, member.id, highest, send_dm=False)
+                        # Send DMs for rank changes (except new Level 1s)
+                        should_dm = current_rank is not None and current_rank != highest
+                        await update_player_rank_role(guild, member.id, highest, send_dm=should_dm)
                         updated_count += 1
+                        if should_dm:
+                            dm_count += 1
 
                         # Small delay to avoid rate limits
                         await asyncio.sleep(0.2)
@@ -765,7 +782,7 @@ class StatsCommands(commands.Cog):
 
                 # Delete the trigger message
                 await message.delete()
-                print(f"Rank refresh completed: {updated_count} updated (new L1: {level1_count}), {skipped_count} skipped, {error_count} errors")
+                print(f"Rank refresh completed: {updated_count} updated (new L1: {level1_count}, DMs sent: {dm_count}), {skipped_count} skipped, {error_count} errors")
             except Exception as e:
                 print(f"Error during rank refresh: {e}")
 
