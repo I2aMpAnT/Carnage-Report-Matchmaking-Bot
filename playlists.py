@@ -223,6 +223,46 @@ class PlaylistMatch:
         """Get display label for this match"""
         return f"{self.playlist_state.name} #{self.match_number}"
 
+    @classmethod
+    def restore_from_json(cls, playlist_state: 'PlaylistQueueState', match_data: dict) -> 'PlaylistMatch':
+        """Restore a match from JSON data (used on bot restart)"""
+        team1 = match_data.get("team1", {}).get("player_ids", [])
+        team2 = match_data.get("team2", {}).get("player_ids", [])
+        players = team1 + team2
+
+        # Create match but don't increment counter (we'll set it manually)
+        playlist_state.match_counter -= 1  # Will be incremented back in __init__
+        match = cls(playlist_state, players, team1, team2)
+
+        # Override the match number from JSON
+        match.match_number = match_data.get("match_number", match.match_number)
+
+        # Ensure match_counter is at least as high as this match
+        if playlist_state.match_counter < match.match_number:
+            playlist_state.match_counter = match.match_number
+
+        # Restore timestamps
+        start_time_str = match_data.get("start_time")
+        if start_time_str:
+            try:
+                match.start_time = datetime.fromisoformat(start_time_str)
+            except:
+                pass
+
+        # Restore games
+        for game in match_data.get("games", []):
+            winner = game.get("winner")
+            if winner:
+                match.games.append(winner)
+                game_num = game.get("game_number", len(match.games))
+                match.game_stats[game_num] = {
+                    "map": game.get("map", ""),
+                    "gametype": game.get("gametype", ""),
+                    "score": game.get("score", "")
+                }
+
+        return match
+
 
 # Global playlist states
 playlist_states: Dict[str, PlaylistQueueState] = {}
@@ -1411,13 +1451,37 @@ def set_playlist_hidden(playlist_type: str, hidden: bool) -> bool:
 
 
 async def initialize_all_playlists(bot):
-    """Initialize all playlist embeds"""
+    """Initialize all playlist embeds, restoring active matches from JSON if any"""
     for ptype, config in PLAYLIST_CONFIG.items():
         channel = bot.get_channel(config["channel_id"])
         if channel:
             ps = get_playlist_state(ptype)
-            await create_playlist_embed(channel, ps)
-            log_action(f"Initialized {ps.name} in #{channel.name}")
+
+            # Check for active matches in JSON file to restore after restart
+            matches_file = get_playlist_matches_file(ptype)
+            restored_match = None
+            if os.path.exists(matches_file):
+                try:
+                    with open(matches_file, 'r') as f:
+                        file_data = json.load(f)
+                    active_matches = file_data.get("active_matches", [])
+                    if active_matches:
+                        # Restore the most recent active match
+                        match_data = active_matches[-1]
+                        restored_match = PlaylistMatch.restore_from_json(ps, match_data)
+                        ps.current_match = restored_match
+                        log_action(f"Restored {restored_match.get_match_label()} from JSON after restart")
+                except Exception as e:
+                    log_action(f"Failed to restore active match for {ps.name}: {e}")
+
+            if ps.current_match:
+                # Show match embed for restored active match
+                await show_playlist_match_embed(channel, ps.current_match)
+                log_action(f"Initialized {ps.name} with active match #{ps.current_match.match_number} in #{channel.name}")
+            else:
+                # Normal queue embed
+                await create_playlist_embed(channel, ps)
+                log_action(f"Initialized {ps.name} in #{channel.name}")
         else:
             log_action(f"Could not find channel {config['channel_id']} for {config['name']}")
 
