@@ -1710,12 +1710,6 @@ async def post_match_results(channel: discord.TextChannel, match: PlaylistMatch,
             inline=False
         )
 
-    # Add timestamps
-    if match.start_time and match.end_time:
-        duration = match.end_time - match.start_time
-        minutes = int(duration.total_seconds() / 60)
-        embed.set_footer(text=f"Duration: {minutes} minutes | Started: {match.start_time.strftime('%H:%M')} | Ended: {match.end_time.strftime('%H:%M')}")
-
     await channel.send(embed=embed)
     log_action(f"Posted final results for {match.get_match_label()}")
 
