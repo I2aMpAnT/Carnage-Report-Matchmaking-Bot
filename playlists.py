@@ -1599,7 +1599,8 @@ async def complete_match_from_stats(channel: discord.TextChannel, match: Playlis
 async def post_match_results(channel: discord.TextChannel, match: PlaylistMatch, result: str):
     """
     Post final match results to the playlist channel.
-    Format: {winning team logo} {color} Team won {gametype} on {map} - {score}
+    Format for teams: {winning team logo} {color} Team won {gametype} on {map} - {score}
+    Format for 1v1: {winner_name} won {gametype} on {map}! (with winner's emblem as thumbnail)
     """
     ps = match.playlist_state
     guild = channel.guild
@@ -1635,10 +1636,29 @@ async def post_match_results(channel: discord.TextChannel, match: PlaylistMatch,
 
         if result == "TEAM1_WIN":
             embed.description = f"**{p1_name}** defeats **{p2_name}** ({team1_wins}-{team2_wins})"
+            winner_id = match.team1[0]
         elif result == "TEAM2_WIN":
             embed.description = f"**{p2_name}** defeats **{p1_name}** ({team2_wins}-{team1_wins})"
+            winner_id = match.team2[0]
         else:
             embed.description = f"**{p1_name}** ties **{p2_name}** ({team1_wins}-{team2_wins})"
+            winner_id = None
+
+        # Set winner's emblem as thumbnail for Head to Head
+        if winner_id:
+            try:
+                import STATSRANKS
+                from github_webhook import async_pull_emblems_from_github
+                emblems = await async_pull_emblems_from_github() or {}
+                user_key = str(winner_id)
+                if user_key in emblems:
+                    emblem_url = emblems[user_key].get("emblem_url") if isinstance(emblems[user_key], dict) else emblems[user_key]
+                    if emblem_url:
+                        emblem_png = STATSRANKS.get_emblem_png_url(emblem_url)
+                        if emblem_png:
+                            embed.set_thumbnail(url=emblem_png)
+            except Exception as e:
+                log_action(f"Failed to load winner emblem: {e}")
     else:
         if result == "TEAM1_WIN":
             embed.description = f"{red_logo} **Red Team** wins! ({team1_wins}-{team2_wins})"
@@ -1647,7 +1667,7 @@ async def post_match_results(channel: discord.TextChannel, match: PlaylistMatch,
         else:
             embed.description = f"Match tied ({team1_wins}-{team2_wins})"
 
-    # Game-by-game results with format: {logo} {Color} Team won {gametype} on {map} - {score}
+    # Game-by-game results
     if match.games:
         games_text = ""
         for i, winner in enumerate(match.games, 1):
@@ -1657,19 +1677,19 @@ async def post_match_results(channel: discord.TextChannel, match: PlaylistMatch,
             score = stats.get("score", "")
 
             if ps.playlist_type == PlaylistType.HEAD_TO_HEAD:
+                # Format: {winner_name} won {gametype} on {map}!
                 player1 = guild.get_member(match.team1[0])
                 player2 = guild.get_member(match.team2[0])
                 p1_name = player1.display_name if player1 else "Player 1"
                 p2_name = player2.display_name if player2 else "Player 2"
 
                 winner_name = p1_name if winner == "TEAM1" else p2_name
-                if gametype and score:
-                    games_text += f"**Game {i}:** {winner_name} won {gametype} on {map_name} - {score}\n"
-                elif gametype:
-                    games_text += f"**Game {i}:** {winner_name} won {gametype} on {map_name}\n"
+                if gametype:
+                    games_text += f"**{winner_name}** won {gametype} on {map_name}!\n"
                 else:
-                    games_text += f"**Game {i}:** {winner_name} won on {map_name}\n"
+                    games_text += f"**{winner_name}** won on {map_name}!\n"
             else:
+                # Format: {logo} {Color} Team won {gametype} on {map} - {score}
                 if winner == "TEAM1":
                     logo = red_logo
                     team_color = "Red"
