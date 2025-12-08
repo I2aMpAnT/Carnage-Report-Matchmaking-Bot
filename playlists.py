@@ -1604,6 +1604,12 @@ async def post_match_results(channel: discord.TextChannel, match: PlaylistMatch,
     ps = match.playlist_state
     guild = channel.guild
 
+    # Team emoji IDs
+    RED_TEAM_EMOJI_ID = 1442675426886418522
+    BLUE_TEAM_EMOJI_ID = 1442675472428433438
+    red_logo = f"<:redteam:{RED_TEAM_EMOJI_ID}>"
+    blue_logo = f"<:blueteam:{BLUE_TEAM_EMOJI_ID}>"
+
     team1_wins = match.games.count('TEAM1')
     team2_wins = match.games.count('TEAM2')
 
@@ -1635,9 +1641,9 @@ async def post_match_results(channel: discord.TextChannel, match: PlaylistMatch,
             embed.description = f"**{p1_name}** ties **{p2_name}** ({team1_wins}-{team2_wins})"
     else:
         if result == "TEAM1_WIN":
-            embed.description = f"🔴 **Red Team** wins! ({team1_wins}-{team2_wins})"
+            embed.description = f"{red_logo} **Red Team** wins! ({team1_wins}-{team2_wins})"
         elif result == "TEAM2_WIN":
-            embed.description = f"🔵 **Blue Team** wins! ({team1_wins}-{team2_wins})"
+            embed.description = f"{blue_logo} **Blue Team** wins! ({team1_wins}-{team2_wins})"
         else:
             embed.description = f"Match tied ({team1_wins}-{team2_wins})"
 
@@ -1665,10 +1671,10 @@ async def post_match_results(channel: discord.TextChannel, match: PlaylistMatch,
                     games_text += f"**Game {i}:** {winner_name} won on {map_name}\n"
             else:
                 if winner == "TEAM1":
-                    logo = "🔴"
+                    logo = red_logo
                     team_color = "Red"
                 else:
-                    logo = "🔵"
+                    logo = blue_logo
                     team_color = "Blue"
 
                 if gametype and score:
