@@ -793,7 +793,17 @@ class StatsCommands(commands.Cog):
 
                         # Send DMs for rank changes (except new Level 1s)
                         should_dm = current_rank is not None and current_rank != highest
-                        await update_player_rank_role(guild, member.id, highest, send_dm=should_dm)
+
+                        # Find which playlist matches the highest rank (for DM)
+                        playlist_name = None
+                        if should_dm and user_id_str in ranks:
+                            playlists = ranks[user_id_str].get("playlists", {})
+                            for ptype, pdata in playlists.items():
+                                if pdata.get("rank", 1) == highest:
+                                    playlist_name = ptype
+                                    break
+
+                        await update_player_rank_role(guild, member.id, highest, send_dm=should_dm, playlist_name=playlist_name)
                         updated_count += 1
                         if should_dm:
                             dm_count += 1
