@@ -917,7 +917,7 @@ async def start_playlist_match(channel: discord.TextChannel, playlist_state: Pla
 
     # Create pregame lobby VC
     pregame_vc = await guild.create_voice_channel(
-        name=f"🎮 {ps.name} Pregame Lobby",
+        name=f"{ps.name} Pregame Lobby",
         category=category,
         user_limit=ps.max_players + 2
     )
