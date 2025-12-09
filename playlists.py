@@ -1709,7 +1709,17 @@ async def sync_game_results_from_files(bot) -> dict:
                         games = cm.get("games", [])
                         for game in games:
                             game_num = game.get("game_number", len(match.games) + 1)
-                            winner = game.get("winner", "TEAM1")
+                            winner = game.get("winner")
+
+                            # Skip ties - game will be replayed
+                            if winner == "TIE" or winner == "TIED" or not winner:
+                                continue
+
+                            # Skip resets (games under 2 minutes) - game will be replayed
+                            duration_seconds = game.get("duration_seconds", 9999)
+                            if duration_seconds < 120:
+                                continue
+
                             if len(match.games) < game_num:
                                 match.games.append(winner)
                                 match.game_stats[game_num] = {
@@ -1733,6 +1743,17 @@ async def sync_game_results_from_files(bot) -> dict:
             for game in file_games:
                 game_num = game.get("game_number", len(match.games) + 1)
                 winner = game.get("winner")
+
+                # Skip ties - game will be replayed
+                if winner == "TIE" or winner == "TIED" or not winner:
+                    log_action(f"Skipping tied game {game_num} in {ps.name} - will be replayed")
+                    continue
+
+                # Skip resets (games under 2 minutes) - game will be replayed
+                duration_seconds = game.get("duration_seconds", 9999)
+                if duration_seconds < 120:  # 2 minutes
+                    log_action(f"Skipping reset game {game_num} in {ps.name} ({duration_seconds}s) - will be replayed")
+                    continue
 
                 # Only add if we don't have this game yet
                 if game_num > len(match.games) and winner:
