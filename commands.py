@@ -3051,23 +3051,43 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
     @bot.tree.command(name='restart', description='[ADMIN] Restart the bot')
     @has_admin_role()
     async def restart_bot(interaction: discord.Interaction):
-        """Restart the bot"""
+        """Restart the bot - pulls latest code from GitHub first"""
         import sys
-        import urllib.request
+        import subprocess
+        import shutil
+        import glob
 
         log_action(f"Bot restart initiated by {interaction.user.display_name}")
-        await interaction.response.send_message("🔄 Restarting bot...", ephemeral=True)
+        await interaction.response.send_message("🔄 Pulling latest code and restarting...", ephemeral=True)
 
-        # Update bot.py BEFORE restarting to ensure latest backup logic is used
+        # Backup all JSON files before git pull
+        backups = {}
+        json_files = [f for f in glob.glob("*.json") if f not in ["package.json", "package-lock.json"]]
+        for filename in json_files:
+            if os.path.exists(filename):
+                backup_name = f"{filename}.backup"
+                shutil.copy2(filename, backup_name)
+                backups[filename] = backup_name
+
+        if backups:
+            log_action(f"Backed up {len(backups)} JSON files before restart")
+
+        # Pull latest code from GitHub
         try:
-            github_url = "https://raw.githubusercontent.com/I2aMpAnT/Carnage-Report-Matchmaking-Bot/main/bot.py"
-            with urllib.request.urlopen(github_url, timeout=10) as response:
-                latest_code = response.read().decode('utf-8')
-            with open("bot.py", 'w') as f:
-                f.write(latest_code)
-            log_action("Updated bot.py from GitHub before restart")
+            subprocess.run(["git", "fetch", "origin", "main"], capture_output=True, timeout=30)
+            subprocess.run(["git", "reset", "--hard", "origin/main"], capture_output=True, timeout=30)
+            log_action("Pulled latest code from GitHub before restart")
         except Exception as e:
-            log_action(f"Failed to update bot.py before restart: {e}")
+            log_action(f"Failed to pull from GitHub before restart: {e}")
+
+        # Restore JSON files from backup
+        for filename, backup_name in backups.items():
+            if os.path.exists(backup_name):
+                shutil.copy2(backup_name, filename)
+                os.remove(backup_name)
+
+        if backups:
+            log_action(f"Restored {len(backups)} JSON files after git pull")
 
         # Give time for the message to send
         await asyncio.sleep(1)
