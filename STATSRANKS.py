@@ -531,9 +531,8 @@ async def update_player_rank_role(guild: discord.Guild, user_id: int, new_level:
                 # Send banner image first (appears at top)
                 await member.send("https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/MessagefromCarnageReportHEADER.png")
 
-                # Then send the rank change embed (rank icon as thumbnail, no level text)
-                embed = discord.Embed(color=discord.Color.blue())
-                embed.set_thumbnail(url=get_rank_icon_url(new_level))
+                # Then send the rank change embed with rank icon as main image
+                embed = discord.Embed(color=discord.Color.from_rgb(255, 255, 255))  # White border
 
                 # Build message with optional playlist name
                 playlist_suffix = f" in **{playlist_name}**" if playlist_name else ""
@@ -541,11 +540,12 @@ async def update_player_rank_role(guild: discord.Guild, user_id: int, new_level:
                 if new_level > old_level:
                     # Level up
                     embed.description = f"Congratulations, you have ranked up{playlist_suffix}!"
-                    embed.color = discord.Color.green()
                 elif new_level < old_level:
                     # Derank
                     embed.description = f"Sorry, you have been deranked{playlist_suffix}."
-                    embed.color = discord.Color.red()
+
+                # Rank icon as main image (bottom)
+                embed.set_image(url=get_rank_icon_url(new_level))
 
                 await member.send(embed=embed)
                 print(f"Sent rank change DM to {member.name}: {old_level} -> {new_level}")
