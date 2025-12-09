@@ -866,17 +866,12 @@ async def show_balanced_teams_confirmation(
 
     guild = channel.guild
 
-    # Calculate team MMRs
-    red_avg = int(sum(player_mmrs.get(uid, 1500) for uid in red_team) / len(red_team))
-    blue_avg = int(sum(player_mmrs.get(uid, 1500) for uid in blue_team) / len(blue_team))
-    mmr_diff = abs(sum(player_mmrs.get(uid, 1500) for uid in red_team) - sum(player_mmrs.get(uid, 1500) for uid in blue_team))
-
     # Create confirmation view
     view = BalancedTeamsRejectView(all_players, test_mode, testers)
 
-    # Build team display
-    red_mentions = "\n".join([f"<@{uid}> ({player_mmrs.get(uid, 1500)})" for uid in red_team])
-    blue_mentions = "\n".join([f"<@{uid}> ({player_mmrs.get(uid, 1500)})" for uid in blue_team])
+    # Build team display (just player names, no MMR)
+    red_mentions = "\n".join([f"<@{uid}>" for uid in red_team])
+    blue_mentions = "\n".join([f"<@{uid}>" for uid in blue_team])
 
     # 10-second countdown
     for seconds_left in range(10, -1, -1):
@@ -887,20 +882,14 @@ async def show_balanced_teams_confirmation(
         )
 
         embed.add_field(
-            name=f"<:redteam:{RED_TEAM_EMOJI_ID}> Red Team ({red_avg} avg MMR)",
+            name=f"<:redteam:{RED_TEAM_EMOJI_ID}> Red Team Voice",
             value=red_mentions,
             inline=True
         )
         embed.add_field(
-            name=f"<:blueteam:{BLUE_TEAM_EMOJI_ID}> Blue Team ({blue_avg} avg MMR)",
+            name=f"<:blueteam:{BLUE_TEAM_EMOJI_ID}> Blue Team Voice",
             value=blue_mentions,
             inline=True
-        )
-
-        embed.add_field(
-            name="MMR Difference",
-            value=f"{mmr_diff} total MMR difference",
-            inline=False
         )
 
         # Show reject votes
