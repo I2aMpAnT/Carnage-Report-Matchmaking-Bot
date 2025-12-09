@@ -528,10 +528,11 @@ async def update_player_rank_role(guild: discord.Guild, user_id: int, new_level:
         # Send DM notification if rank changed and send_dm is enabled
         if send_dm and old_level is not None and old_level != new_level:
             try:
-                embed = discord.Embed(color=discord.Color.blue())
+                # Send banner image first (appears at top)
+                await member.send("https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/MessagefromCarnageReportHEADER.png")
 
-                # Add header image
-                embed.set_image(url="https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/MessagefromCarnageReportHEADER.png")
+                # Then send the rank change embed
+                embed = discord.Embed(color=discord.Color.blue())
 
                 if new_level > old_level:
                     # Level up
