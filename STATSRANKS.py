@@ -489,8 +489,47 @@ def get_rank_role_name(level: int) -> str:
     """Get the role name for a rank level"""
     return f"Level {level}"
 
+async def send_playlist_rank_dm(guild: discord.Guild, member: discord.Member, old_level: int, new_level: int, playlist_name: str):
+    """Send a DM notification for a playlist rank change"""
+    try:
+        # Get rank emoji from guild
+        rank_emoji = None
+        emoji_name = str(new_level)
+        emoji = discord.utils.get(guild.emojis, name=emoji_name)
+        if emoji:
+            rank_emoji = str(emoji)
+        elif new_level <= 9:
+            # Single-digit levels use underscore suffix (e.g., "6_")
+            emoji = discord.utils.get(guild.emojis, name=f"{new_level}_")
+            if emoji:
+                rank_emoji = str(emoji)
+        if not rank_emoji:
+            rank_emoji = f"**Level {new_level}**"  # Fallback
+
+        # Single embed with smaller banner as thumbnail
+        embed = discord.Embed(color=discord.Color.from_rgb(255, 255, 255))
+
+        # Banner as thumbnail (smaller, on right side)
+        embed.set_thumbnail(url="https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/MessagefromCarnageReportHEADERSMALL.png")
+
+        if new_level > old_level:
+            embed.description = f"Congratulations, you have ranked up to {rank_emoji} in **{playlist_name}**!"
+        elif new_level < old_level:
+            embed.description = f"Sorry, you have been deranked to {rank_emoji} in **{playlist_name}**."
+
+        await member.send(embed=embed)
+        print(f"Sent {playlist_name} rank DM to {member.name}: {old_level} -> {new_level}")
+        return True
+    except discord.Forbidden:
+        print(f"Could not DM {member.name} - DMs disabled")
+        return False
+    except Exception as e:
+        print(f"Error sending DM to {member.name}: {e}")
+        return False
+
+
 async def update_player_rank_role(guild: discord.Guild, user_id: int, new_level: int, send_dm: bool = True, playlist_name: str = None):
-    """Update player's rank role with DM notification on rank change"""
+    """Update player's rank role (Discord role only, DMs handled separately)"""
     member = guild.get_member(user_id)
     if not member:
         return
@@ -524,45 +563,9 @@ async def update_player_rank_role(guild: discord.Guild, user_id: int, new_level:
 
     if new_role:
         await member.add_roles(new_role, reason=f"Reached {new_role_name}")
-
-        # Send DM notification if rank changed and send_dm is enabled
-        if send_dm and old_level is not None and old_level != new_level:
-            try:
-                # Get rank emoji from guild
-                rank_emoji = None
-                emoji_name = str(new_level)
-                emoji = discord.utils.get(guild.emojis, name=emoji_name)
-                if emoji:
-                    rank_emoji = str(emoji)
-                elif new_level <= 9:
-                    # Single-digit levels use underscore suffix (e.g., "6_")
-                    emoji = discord.utils.get(guild.emojis, name=f"{new_level}_")
-                    if emoji:
-                        rank_emoji = str(emoji)
-                if not rank_emoji:
-                    rank_emoji = f"**Level {new_level}**"  # Fallback
-
-                # Single embed with smaller banner as thumbnail
-                embed = discord.Embed(color=discord.Color.from_rgb(255, 255, 255))
-
-                # Banner as thumbnail (smaller, on right side)
-                embed.set_thumbnail(url="https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/MessagefromCarnageReportHEADERSMALL.png")
-
-                playlist_suffix = f" in **{playlist_name}**" if playlist_name else ""
-
-                if new_level > old_level:
-                    embed.description = f"Congratulations, you have ranked up to {rank_emoji}{playlist_suffix}!"
-                elif new_level < old_level:
-                    embed.description = f"Sorry, you have been deranked to {rank_emoji}{playlist_suffix}."
-
-                await member.send(embed=embed)
-                print(f"Sent rank change DM to {member.name}: {old_level} -> {new_level}")
-            except discord.Forbidden:
-                print(f"Could not DM {member.name} - DMs disabled")
-            except Exception as e:
-                print(f"Error sending DM to {member.name}: {e}")
+        print(f"Updated {member.name}'s Discord role to {new_role_name}")
     else:
-        print(f"⚠️ Role '{new_role_name}' not found in guild")
+        print(f"Role '{new_role_name}' not found in guild")
 
 def add_game_stats(match_number: int, game_number: int, map_name: str, gametype: str) -> bool:
     """Add game stats to gamestats.json with timestamp"""
@@ -744,9 +747,9 @@ class StatsCommands(commands.Cog):
                 except Exception as e:
                     print(f"Error syncing game results: {e}")
 
-                # STEP 2: Refresh Discord ranks for all players
-                # Get all players from GitHub ranks.json (website source of truth)
-                ranks = await async_load_ranks_from_github()
+                # STEP 2: Load OLD ranks first (local file), then pull NEW from GitHub
+                old_ranks = load_json_file(RANKS_FILE)
+                new_ranks = await async_load_ranks_from_github()
 
                 updated_count = 0
                 skipped_count = 0
@@ -754,7 +757,7 @@ class StatsCommands(commands.Cog):
                 level1_count = 0
                 dm_count = 0
 
-                # Process ALL guild members (like /silentverify does)
+                # Process ALL guild members
                 for member in guild.members:
                     if member.bot:
                         continue
@@ -762,52 +765,58 @@ class StatsCommands(commands.Cog):
                     try:
                         user_id_str = str(member.id)
 
-                        # Get current Discord rank
-                        current_rank = None
+                        # Get current Discord rank (for role updates)
+                        current_discord_rank = None
                         for role in member.roles:
                             if role.name.startswith("Level "):
                                 try:
-                                    current_rank = int(role.name.replace("Level ", ""))
+                                    current_discord_rank = int(role.name.replace("Level ", ""))
                                     break
                                 except:
                                     pass
 
-                        # Get rank from ranks.json
-                        if user_id_str in ranks:
-                            highest = ranks[user_id_str].get("highest_rank", 1)
+                        # Get new highest rank from GitHub
+                        if user_id_str in new_ranks:
+                            new_highest = new_ranks[user_id_str].get("highest_rank", 1)
                         else:
-                            # Not in ranks.json - only assign Level 1 if they have NO Level role
-                            # Don't downgrade players who already have a Level role
-                            if current_rank is not None:
+                            # Not in ranks.json - only assign Level 1 if no role
+                            if current_discord_rank is not None:
                                 skipped_count += 1
                                 continue
-                            highest = 1  # New player, give Level 1
+                            new_highest = 1
 
-                        # Skip if already correct
-                        if current_rank == highest:
+                        # Compare each playlist and send DMs for changes
+                        old_playlists = old_ranks.get(user_id_str, {}).get("playlists", {})
+                        new_playlists = new_ranks.get(user_id_str, {}).get("playlists", {})
+
+                        for playlist_type in PLAYLIST_TYPES:
+                            old_rank = old_playlists.get(playlist_type, {}).get("rank", 0)
+                            new_rank = new_playlists.get(playlist_type, {}).get("rank", 0)
+
+                            # Only DM if rank changed and player has played this playlist
+                            if new_rank > 0 and old_rank != new_rank:
+                                if await send_playlist_rank_dm(guild, member, old_rank, new_rank, playlist_type):
+                                    dm_count += 1
+                                await asyncio.sleep(0.1)  # Small delay between DMs
+
+                        # Update Discord role silently (no DM - DMs sent per playlist above)
+                        if current_discord_rank != new_highest:
+                            if new_highest == 1 and current_discord_rank is None:
+                                level1_count += 1
+                            await update_player_rank_role(guild, member.id, new_highest, send_dm=False)
+                            updated_count += 1
+                        else:
                             skipped_count += 1
-                            continue
 
-                        if highest == 1 and current_rank is None:
-                            level1_count += 1
-
-                        # Send DMs for rank changes (except new Level 1s)
-                        should_dm = current_rank is not None and current_rank != highest
-                        await update_player_rank_role(guild, member.id, highest, send_dm=should_dm)
-                        updated_count += 1
-                        if should_dm:
-                            dm_count += 1
-
-                        # Small delay to avoid rate limits
-                        await asyncio.sleep(0.2)
+                        await asyncio.sleep(0.1)
 
                     except Exception as e:
-                        print(f"❌ Error updating {member.display_name}: {e}")
+                        print(f"Error updating {member.display_name}: {e}")
                         error_count += 1
 
                 # Delete the trigger message
                 await message.delete()
-                print(f"Rank refresh completed: {updated_count} updated (new L1: {level1_count}, DMs sent: {dm_count}), {skipped_count} skipped, {error_count} errors")
+                print(f"Rank refresh completed: {updated_count} roles updated (new L1: {level1_count}), {dm_count} DMs sent, {skipped_count} skipped, {error_count} errors")
             except Exception as e:
                 print(f"Error during rank refresh: {e}")
 
