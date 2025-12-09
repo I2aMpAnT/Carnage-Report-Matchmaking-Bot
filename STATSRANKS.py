@@ -528,24 +528,32 @@ async def update_player_rank_role(guild: discord.Guild, user_id: int, new_level:
         # Send DM notification if rank changed and send_dm is enabled
         if send_dm and old_level is not None and old_level != new_level:
             try:
-                # Send banner image first (appears at top)
+                # Get rank emoji from guild
+                rank_emoji = None
+                emoji_name = str(new_level)
+                emoji = discord.utils.get(guild.emojis, name=emoji_name)
+                if emoji:
+                    rank_emoji = str(emoji)
+                elif new_level <= 9:
+                    # Single-digit levels use underscore suffix (e.g., "6_")
+                    emoji = discord.utils.get(guild.emojis, name=f"{new_level}_")
+                    if emoji:
+                        rank_emoji = str(emoji)
+                if not rank_emoji:
+                    rank_emoji = f"**Level {new_level}**"  # Fallback
+
+                # 1. Banner at top
                 await member.send("https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/MessagefromCarnageReportHEADER.png")
 
-                # Then send the rank change embed with rank icon as main image
-                embed = discord.Embed(color=discord.Color.from_rgb(255, 255, 255))  # White border
+                # 2. Text embed with rank emoji inline and white border
+                embed = discord.Embed(color=discord.Color.from_rgb(255, 255, 255))
 
-                # Build message with optional playlist name
                 playlist_suffix = f" in **{playlist_name}**" if playlist_name else ""
 
                 if new_level > old_level:
-                    # Level up
-                    embed.description = f"Congratulations, you have ranked up{playlist_suffix}!"
+                    embed.description = f"Congratulations, you have ranked up to {rank_emoji}{playlist_suffix}!"
                 elif new_level < old_level:
-                    # Derank
-                    embed.description = f"Sorry, you have been deranked{playlist_suffix}."
-
-                # Rank icon as main image (bottom)
-                embed.set_image(url=get_rank_icon_url(new_level))
+                    embed.description = f"Sorry, you have been deranked to {rank_emoji}{playlist_suffix}."
 
                 await member.send(embed=embed)
                 print(f"Sent rank change DM to {member.name}: {old_level} -> {new_level}")
