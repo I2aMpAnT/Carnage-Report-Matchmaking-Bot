@@ -2,7 +2,7 @@
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 # Supports ALL playlists: MLG 4v4 (voting), Team Hardcore/Double Team (auto-balance), Head to Head (1v1)
 
-MODULE_VERSION = "1.4.0"
+MODULE_VERSION = "1.5.0"
 
 import discord
 from discord.ui import View, Button, Select
@@ -810,26 +810,32 @@ class TeamSelectionView(View):
                 best_red, best_blue = best_blue, best_red
 
         log_action(f"Balanced teams created - MMR diff: {best_diff} (checked {combinations_checked} valid combinations)")
-        await finalize_teams(interaction.channel, best_red, best_blue, test_mode=self.test_mode)
-    
+
+        # Show balanced teams for 10-second confirmation
+        # If majority doesn't vote NO, teams proceed automatically
+        await show_balanced_teams_confirmation(
+            interaction.channel, best_red, best_blue, player_mmrs,
+            self.players, self.test_mode, self.testers, self.pregame_vc_id, self.match_label
+        )
+
     async def start_captains_draft(self, interaction: discord.Interaction):
         """Start captain draft"""
         # Pick 2 random captains
         captains = random.sample(self.players, 2)
         remaining = [p for p in self.players if p not in captains]
-        
+
         embed = discord.Embed(
             title="Captains Draft",
             description="Captains will pick their teams!",
             color=discord.Color.purple()
         )
-        
+
         embed.add_field(name=f"<:redteam:{RED_TEAM_EMOJI_ID}> Captain 1 (Red)", value=f"<@{captains[0]}>", inline=True)
         embed.add_field(name=f"<:blueteam:{BLUE_TEAM_EMOJI_ID}> Captain 2 (Blue)", value=f"<@{captains[1]}>", inline=True)
-        
+
         view = CaptainDraftView(captains, remaining, test_mode=self.test_mode)
         await interaction.followup.send(embed=embed, view=view)
-    
+
     async def start_players_pick(self, interaction: discord.Interaction):
         """Start players pick teams"""
         embed = discord.Embed(
@@ -837,9 +843,186 @@ class TeamSelectionView(View):
             description="Click a button to join a team!",
             color=discord.Color.green()
         )
-        
+
         view = PlayersPickView(self.players, test_mode=self.test_mode)
         await interaction.followup.send(embed=embed, view=view)
+
+
+async def show_balanced_teams_confirmation(
+    channel: discord.TextChannel,
+    red_team: List[int],
+    blue_team: List[int],
+    player_mmrs: dict,
+    all_players: List[int],
+    test_mode: bool,
+    testers: List[int],
+    pregame_vc_id: int,
+    match_label: str
+):
+    """Show balanced teams with 10-second confirmation timer.
+    If majority doesn't reject, teams proceed automatically."""
+    import asyncio
+    from searchmatchmaking import get_queue_progress_image
+
+    guild = channel.guild
+
+    # Calculate team MMRs
+    red_avg = int(sum(player_mmrs.get(uid, 1500) for uid in red_team) / len(red_team))
+    blue_avg = int(sum(player_mmrs.get(uid, 1500) for uid in blue_team) / len(blue_team))
+    mmr_diff = abs(sum(player_mmrs.get(uid, 1500) for uid in red_team) - sum(player_mmrs.get(uid, 1500) for uid in blue_team))
+
+    # Create confirmation view
+    view = BalancedTeamsRejectView(all_players, test_mode, testers)
+
+    # Build team display
+    red_mentions = "\n".join([f"<@{uid}> ({player_mmrs.get(uid, 1500)})" for uid in red_team])
+    blue_mentions = "\n".join([f"<@{uid}> ({player_mmrs.get(uid, 1500)})" for uid in blue_team])
+
+    # 10-second countdown
+    for seconds_left in range(10, -1, -1):
+        embed = discord.Embed(
+            title=f"Balanced Teams - {match_label}",
+            description=f"Teams will be locked in **{seconds_left}** seconds...\n\nVote **Reject** if you want to re-pick teams.",
+            color=discord.Color.gold()
+        )
+
+        embed.add_field(
+            name=f"<:redteam:{RED_TEAM_EMOJI_ID}> Red Team ({red_avg} avg MMR)",
+            value=red_mentions,
+            inline=True
+        )
+        embed.add_field(
+            name=f"<:blueteam:{BLUE_TEAM_EMOJI_ID}> Blue Team ({blue_avg} avg MMR)",
+            value=blue_mentions,
+            inline=True
+        )
+
+        embed.add_field(
+            name="MMR Difference",
+            value=f"{mmr_diff} total MMR difference",
+            inline=False
+        )
+
+        # Show reject votes
+        reject_count = len(view.reject_votes)
+        majority_needed = (len(all_players) // 2) + 1  # 5 for 8 players
+        embed.add_field(
+            name=f"Reject Votes ({reject_count}/{majority_needed} needed)",
+            value=", ".join([f"<@{uid}>" for uid in view.reject_votes]) if view.reject_votes else "None",
+            inline=False
+        )
+
+        embed.set_image(url=get_queue_progress_image(8))
+
+        if seconds_left == 10:
+            # First message
+            view.confirmation_message = await channel.send(embed=embed, view=view)
+        else:
+            try:
+                await view.confirmation_message.edit(embed=embed, view=view)
+            except:
+                pass
+
+        # Check if majority rejected
+        if view.rejected:
+            log_action(f"Balanced teams rejected by majority - returning to team selection")
+            try:
+                await view.confirmation_message.delete()
+            except:
+                pass
+            # Go back to team selection
+            await show_team_selection_after_reject(channel, all_players, test_mode, testers, pregame_vc_id, match_label)
+            return
+
+        if seconds_left > 0:
+            await asyncio.sleep(1)
+
+    # Timer expired - proceed with teams
+    log_action(f"Balanced teams confirmed (no majority reject)")
+    try:
+        await view.confirmation_message.delete()
+    except:
+        pass
+
+    await finalize_teams(channel, red_team, blue_team, test_mode=test_mode, testers=testers)
+
+
+async def show_team_selection_after_reject(
+    channel: discord.TextChannel,
+    players: List[int],
+    test_mode: bool,
+    testers: List[int],
+    pregame_vc_id: int,
+    match_label: str
+):
+    """Show team selection again after balanced teams were rejected"""
+    from searchmatchmaking import queue_state, get_queue_progress_image
+
+    embed = discord.Embed(
+        title=f"Pregame Lobby - {match_label}",
+        description="Balanced teams were rejected!\n\nSelect your preferred team selection method:",
+        color=discord.Color.gold()
+    )
+    embed.set_image(url=get_queue_progress_image(8))
+
+    player_count = f"{len(players)}/8 players"
+    if test_mode:
+        player_count += " (TEST MODE)"
+    player_list = "\n".join([f"<@{uid}>" for uid in players])
+    embed.add_field(name=f"Players ({player_count})", value=player_list, inline=False)
+
+    view = TeamSelectionView(players, test_mode=test_mode, testers=testers, pregame_vc_id=pregame_vc_id, match_label=match_label)
+    pregame_message = await channel.send(embed=embed, view=view)
+    view.pregame_message = pregame_message
+    queue_state.pregame_message = pregame_message
+
+
+class BalancedTeamsRejectView(View):
+    """View for rejecting balanced teams within 10 seconds"""
+    def __init__(self, players: List[int], test_mode: bool = False, testers: List[int] = None):
+        super().__init__(timeout=None)
+        self.players = players
+        self.test_mode = test_mode
+        self.testers = testers or []
+        self.reject_votes = set()
+        self.rejected = False
+        self.confirmation_message = None
+
+    @discord.ui.button(label="Reject Teams", style=discord.ButtonStyle.danger, custom_id="reject_balanced")
+    async def reject_btn(self, interaction: discord.Interaction, button: Button):
+        await self.handle_reject(interaction)
+
+    async def handle_reject(self, interaction: discord.Interaction):
+        """Handle reject vote"""
+        # Check if player is in match
+        if self.test_mode:
+            if interaction.user.id not in self.testers:
+                await interaction.response.send_message("Only testers can vote!", ephemeral=True)
+                return
+        else:
+            if interaction.user.id not in self.players:
+                await interaction.response.send_message("Only players in this match can vote!", ephemeral=True)
+                return
+
+        # Toggle vote
+        if interaction.user.id in self.reject_votes:
+            self.reject_votes.remove(interaction.user.id)
+        else:
+            self.reject_votes.add(interaction.user.id)
+
+        await interaction.response.defer()
+
+        # Check if majority rejected
+        if self.test_mode:
+            # Test mode: need 2 tester votes to reject
+            tester_rejects = sum(1 for uid in self.reject_votes if uid in self.testers)
+            if tester_rejects >= 2:
+                self.rejected = True
+        else:
+            # Normal mode: need majority (5 of 8) to reject
+            majority_needed = (len(self.players) // 2) + 1
+            if len(self.reject_votes) >= majority_needed:
+                self.rejected = True
 
 
 class CaptainDraftView(View):
