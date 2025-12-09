@@ -542,11 +542,11 @@ async def update_player_rank_role(guild: discord.Guild, user_id: int, new_level:
                 if not rank_emoji:
                     rank_emoji = f"**Level {new_level}**"  # Fallback
 
-                # 1. Banner at top
-                await member.send("https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/MessagefromCarnageReportHEADER.png")
-
-                # 2. Text embed with rank emoji inline and white border
+                # Single embed with smaller banner as thumbnail
                 embed = discord.Embed(color=discord.Color.from_rgb(255, 255, 255))
+
+                # Banner as thumbnail (smaller, on right side)
+                embed.set_thumbnail(url="https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/MessagefromCarnageReportHEADERSMALL.png")
 
                 playlist_suffix = f" in **{playlist_name}**" if playlist_name else ""
 
