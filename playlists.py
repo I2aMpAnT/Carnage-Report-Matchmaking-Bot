@@ -1255,11 +1255,10 @@ async def show_playlist_match_embed(channel: discord.TextChannel, match: Playlis
 
     view = PlaylistMatchView(match)
 
-    # Find and update existing match message
+    # Delete old message and repost (keeps it at bottom of channel)
     if match.match_message:
         try:
-            await match.match_message.edit(embed=embed, view=view)
-            return
+            await match.match_message.delete()
         except:
             pass
 
