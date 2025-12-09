@@ -3053,9 +3053,21 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
     async def restart_bot(interaction: discord.Interaction):
         """Restart the bot"""
         import sys
+        import urllib.request
 
         log_action(f"Bot restart initiated by {interaction.user.display_name}")
         await interaction.response.send_message("🔄 Restarting bot...", ephemeral=True)
+
+        # Update bot.py BEFORE restarting to ensure latest backup logic is used
+        try:
+            github_url = "https://raw.githubusercontent.com/I2aMpAnT/Carnage-Report-Matchmaking-Bot/main/bot.py"
+            with urllib.request.urlopen(github_url, timeout=10) as response:
+                latest_code = response.read().decode('utf-8')
+            with open("bot.py", 'w') as f:
+                f.write(latest_code)
+            log_action("Updated bot.py from GitHub before restart")
+        except Exception as e:
+            log_action(f"Failed to update bot.py before restart: {e}")
 
         # Give time for the message to send
         await asyncio.sleep(1)
