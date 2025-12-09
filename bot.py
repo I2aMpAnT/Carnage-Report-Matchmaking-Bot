@@ -5,41 +5,33 @@ import os
 import sys
 import subprocess
 import shutil
+import glob
 
-# JSON data files to preserve (not overwritten by git)
-DATA_FILES = [
-    "rankstats.json",
-    "matchhistory.json",
-    "testmatchhistory.json",
-    "gamestats.json",
-    "queue_config.json",
-    "xp_config.json",
-    "matchmakingstate.json",
-    "players.json",
-    "MMR.json",
-    "head_to_head_matches.json",
-    "head_to_head_stats.json",
-    "double_team_matches.json",
-    "double_team_stats.json",
-    "team_hardcore_matches.json",
-    "team_hardcore_stats.json",
-    "MLG4v4.json"
-]
+def get_json_files_to_backup():
+    """Get all JSON files that should be preserved across git pulls"""
+    # Backup ALL .json files to ensure no data is lost
+    # This avoids issues where new json files are added to the repo
+    # but the local bot.py doesn't know about them yet
+    json_files = glob.glob("*.json")
+    # Exclude any config files that should come from git
+    exclude = ["package.json", "package-lock.json"]
+    return [f for f in json_files if f not in exclude]
 
 def pull_from_github():
     """Pull latest code from GitHub before starting - ALWAYS uses latest code"""
     print("📥 Pulling latest code from GitHub...")
     try:
-        # Backup JSON data files first
+        # Backup ALL JSON data files first (dynamically discovered)
+        # This ensures new json files are backed up even if bot.py is old
         backups = {}
-        for filename in DATA_FILES:
+        for filename in get_json_files_to_backup():
             if os.path.exists(filename):
                 backup_name = f"{filename}.backup"
                 shutil.copy2(filename, backup_name)
                 backups[filename] = backup_name
 
         if backups:
-            print(f"📦 Backed up {len(backups)} data files")
+            print(f"📦 Backed up {len(backups)} JSON files: {', '.join(backups.keys())}")
 
         # Fetch latest from origin
         fetch_result = subprocess.run(
