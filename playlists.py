@@ -204,10 +204,12 @@ class PlaylistMatch:
         self.team1_vc_id: Optional[int] = None
         self.team2_vc_id: Optional[int] = None
         self.shared_vc_id: Optional[int] = None  # For Head to Head
+        self.pregame_vc_id: Optional[int] = None  # Pregame lobby
 
         # Message references
         self.match_message: Optional[discord.Message] = None
         self.general_message: Optional[discord.Message] = None
+        self.pregame_message: Optional[discord.Message] = None
 
         # Time window for stats matching
         self.start_time = datetime.now()
@@ -876,7 +878,7 @@ async def update_playlist_embed(channel: discord.TextChannel, playlist_state: Pl
 
 
 async def start_playlist_match(channel: discord.TextChannel, playlist_state: PlaylistQueueState):
-    """Start a match when queue is full"""
+    """Start a match when queue is full - creates pregame lobby first"""
     ps = playlist_state
     players = ps.queue[:]
 
@@ -890,71 +892,146 @@ async def start_playlist_match(channel: discord.TextChannel, playlist_state: Pla
     ps.queue.clear()
     ps.queue_join_times.clear()
 
-    # Select map/gametype for auto-queue playlists
-    map_name, gametype = ("", "")
-    if ps.config["show_map_gametype"]:
-        map_name, gametype = select_random_map_gametype(ps.playlist_type)
-
-    # Balance teams or assign players
-    if ps.playlist_type == PlaylistType.HEAD_TO_HEAD:
-        # 1v1 - no teams, just two players
-        team1 = [players[0]]
-        team2 = [players[1]]
-    elif ps.auto_balance:
-        # Auto-balance by MMR
-        team1, team2 = await balance_teams_by_mmr(players, ps.team_size)
-    else:
-        # MLG 4v4 - will use team selection (handled separately in pregame)
-        # For now, just create the match and proceed to pregame
-        team1 = []
-        team2 = []
-
-    # Create match object
-    match = PlaylistMatch(ps, players, team1, team2)
-    match.map_name = map_name
-    match.gametype = gametype
-    ps.current_match = match
-
-    # For MLG 4v4, go to team selection (use existing pregame system)
+    # For MLG 4v4, use existing pregame system (already has lobby + team selection)
     if ps.playlist_type == PlaylistType.MLG_4V4:
-        # Use existing pregame system
         from pregame import start_pregame
         from searchmatchmaking import queue_state
         queue_state.queue = players
         await start_pregame(channel)
         return
 
-    # For other playlists, create voice channels and show match embed
+    # Select map/gametype for auto-queue playlists
+    map_name, gametype = ("", "")
+    if ps.config["show_map_gametype"]:
+        map_name, gametype = select_random_map_gametype(ps.playlist_type)
+
+    # Create match object (teams assigned later after pregame)
+    match = PlaylistMatch(ps, players, [], [])
+    match.map_name = map_name
+    match.gametype = gametype
+    ps.current_match = match
+
     guild = channel.guild
     voice_category_id = 1403916181554860112
     category = guild.get_channel(voice_category_id)
 
+    # Create pregame lobby VC
+    pregame_vc = await guild.create_voice_channel(
+        name=f"🎮 {ps.name} Pregame Lobby",
+        category=category,
+        user_limit=ps.max_players + 2
+    )
+    match.pregame_vc_id = pregame_vc.id
+
+    # Show pregame embed telling players to join
+    embed = discord.Embed(
+        title=f"{match.get_match_label()} - Waiting for Players",
+        description=f"**{ps.name}**\n\n⏳ All players must join the pregame voice channel within **5 minutes**.",
+        color=discord.Color.orange()
+    )
+
+    # List players
+    player_names = []
+    for uid in players:
+        member = guild.get_member(uid)
+        name = member.display_name if member else f"<@{uid}>"
+        player_names.append(f"• {name}")
+
+    embed.add_field(
+        name="Players",
+        value="\n".join(player_names),
+        inline=False
+    )
+
+    embed.add_field(
+        name="🔊 Join Voice Channel",
+        value=f"<#{pregame_vc.id}>",
+        inline=False
+    )
+
+    if map_name and gametype:
+        embed.add_field(
+            name="Map & Gametype",
+            value=f"{map_name} - {gametype}",
+            inline=False
+        )
+
+    # Ping all players
+    pings = " ".join([f"<@{uid}>" for uid in players])
+    pregame_msg = await channel.send(content=pings, embed=embed)
+    match.pregame_message = pregame_msg
+
+    # Wait for all players to join pregame VC (5 minutes)
+    all_joined = await wait_for_pregame_join(guild, pregame_vc, players, pregame_msg, match, channel)
+
+    if not all_joined:
+        # Cancel match - not all players joined in time
+        log_action(f"{match.get_match_label()} cancelled - not all players joined pregame")
+
+        # Delete pregame VC
+        try:
+            await pregame_vc.delete()
+        except:
+            pass
+
+        # Delete pregame message
+        try:
+            await pregame_msg.delete()
+        except:
+            pass
+
+        # Send cancellation message
+        await channel.send(
+            embed=discord.Embed(
+                title=f"{match.get_match_label()} - Cancelled",
+                description="❌ Match cancelled - not all players joined the pregame lobby in time.",
+                color=discord.Color.red()
+            )
+        )
+
+        # Clear current match
+        ps.current_match = None
+
+        # Update queue embed
+        await update_playlist_embed(channel, ps)
+        return
+
+    # All players joined - proceed with team assignment
+    log_action(f"All players joined pregame for {match.get_match_label()}")
+
+    # Balance teams or assign players
     if ps.playlist_type == PlaylistType.HEAD_TO_HEAD:
-        # Create shared voice channel for 1v1
-        player1 = guild.get_member(team1[0])
-        player2 = guild.get_member(team2[0])
+        # 1v1 - no teams, just two players
+        match.team1 = [players[0]]
+        match.team2 = [players[1]]
+    elif ps.auto_balance:
+        # Auto-balance by MMR
+        match.team1, match.team2 = await balance_teams_by_mmr(players, ps.team_size)
+
+    # Delete pregame message
+    try:
+        await pregame_msg.delete()
+    except:
+        pass
+
+    # Create final voice channels and move players
+    if ps.playlist_type == PlaylistType.HEAD_TO_HEAD:
+        # Rename pregame VC to vs format
+        player1 = guild.get_member(match.team1[0])
+        player2 = guild.get_member(match.team2[0])
         p1_name = player1.display_name if player1 else "Player 1"
         p2_name = player2.display_name if player2 else "Player 2"
 
-        vc = await guild.create_voice_channel(
-            name=f"{p1_name} vs {p2_name}",
-            category=category,
-            user_limit=4
-        )
-        match.shared_vc_id = vc.id
-
-        # Move players
-        for uid in players:
-            member = guild.get_member(uid)
-            if member and member.voice:
-                try:
-                    await member.move_to(vc)
-                except:
-                    pass
+        try:
+            await pregame_vc.edit(name=f"{p1_name} vs {p2_name}")
+        except:
+            pass
+        match.shared_vc_id = pregame_vc.id
+        match.pregame_vc_id = None  # No longer pregame
     else:
-        # Create team voice channels for 2v2 or 4v4 with red/blue emojis
-        team1_mmrs = [await get_player_mmr(uid) for uid in team1]
-        team2_mmrs = [await get_player_mmr(uid) for uid in team2]
+        # Create team voice channels for 2v2 or 4v4
+        team1_mmrs = [await get_player_mmr(uid) for uid in match.team1]
+        team2_mmrs = [await get_player_mmr(uid) for uid in match.team2]
         team1_avg = int(sum(team1_mmrs) / len(team1_mmrs)) if team1_mmrs else 1500
         team2_avg = int(sum(team2_mmrs) / len(team2_mmrs)) if team2_mmrs else 1500
 
@@ -974,8 +1051,8 @@ async def start_playlist_match(channel: discord.TextChannel, playlist_state: Pla
         match.team1_vc_id = team1_vc.id
         match.team2_vc_id = team2_vc.id
 
-        # Move players
-        for uid in team1:
+        # Move players to team VCs
+        for uid in match.team1:
             member = guild.get_member(uid)
             if member and member.voice:
                 try:
@@ -983,13 +1060,20 @@ async def start_playlist_match(channel: discord.TextChannel, playlist_state: Pla
                 except:
                     pass
 
-        for uid in team2:
+        for uid in match.team2:
             member = guild.get_member(uid)
             if member and member.voice:
                 try:
                     await member.move_to(team2_vc)
                 except:
                     pass
+
+        # Delete pregame VC
+        try:
+            await pregame_vc.delete()
+        except:
+            pass
+        match.pregame_vc_id = None
 
     # Show match embed
     await show_playlist_match_embed(channel, match)
@@ -999,6 +1083,87 @@ async def start_playlist_match(channel: discord.TextChannel, playlist_state: Pla
 
     # Save to history (with guild for player names)
     save_match_to_history(match, "STARTED", guild)
+
+
+async def wait_for_pregame_join(guild: discord.Guild, pregame_vc: discord.VoiceChannel,
+                                 players: List[int], pregame_msg: discord.Message,
+                                 match, channel: discord.TextChannel) -> bool:
+    """Wait for all players to join pregame VC. Returns True if all joined, False if timeout."""
+    import asyncio
+
+    timeout_seconds = 300  # 5 minutes
+    check_interval = 5  # Check every 5 seconds
+    elapsed = 0
+
+    while elapsed < timeout_seconds:
+        # Check who's in the pregame VC
+        try:
+            vc = guild.get_channel(pregame_vc.id)
+            if not vc:
+                return False  # VC was deleted
+
+            members_in_vc = [m.id for m in vc.members]
+            players_in_vc = [uid for uid in players if uid in members_in_vc]
+            players_not_in_vc = [uid for uid in players if uid not in members_in_vc]
+
+            # All players joined!
+            if len(players_in_vc) == len(players):
+                return True
+
+            # Update embed with status
+            time_remaining = timeout_seconds - elapsed
+            minutes = time_remaining // 60
+            seconds = time_remaining % 60
+
+            embed = discord.Embed(
+                title=f"{match.get_match_label()} - Waiting for Players",
+                description=f"**{match.playlist_state.name}**\n\n⏳ Time remaining: **{minutes}:{seconds:02d}**",
+                color=discord.Color.orange()
+            )
+
+            # Show who's in and who's not
+            in_vc_names = []
+            not_in_vc_names = []
+            for uid in players:
+                member = guild.get_member(uid)
+                name = member.display_name if member else f"<@{uid}>"
+                if uid in players_in_vc:
+                    in_vc_names.append(f"✅ {name}")
+                else:
+                    not_in_vc_names.append(f"❌ {name}")
+
+            all_names = in_vc_names + not_in_vc_names
+            embed.add_field(
+                name=f"Players ({len(players_in_vc)}/{len(players)})",
+                value="\n".join(all_names),
+                inline=False
+            )
+
+            embed.add_field(
+                name="🔊 Join Voice Channel",
+                value=f"<#{pregame_vc.id}>",
+                inline=False
+            )
+
+            if match.map_name and match.gametype:
+                embed.add_field(
+                    name="Map & Gametype",
+                    value=f"{match.map_name} - {match.gametype}",
+                    inline=False
+                )
+
+            try:
+                await pregame_msg.edit(embed=embed)
+            except:
+                pass
+
+        except Exception as e:
+            log_action(f"Error checking pregame VC: {e}")
+
+        await asyncio.sleep(check_interval)
+        elapsed += check_interval
+
+    return False  # Timeout
 
 
 async def show_playlist_match_embed(channel: discord.TextChannel, match: PlaylistMatch):
