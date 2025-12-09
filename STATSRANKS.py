@@ -489,7 +489,7 @@ def get_rank_role_name(level: int) -> str:
     """Get the role name for a rank level"""
     return f"Level {level}"
 
-async def update_player_rank_role(guild: discord.Guild, user_id: int, new_level: int, send_dm: bool = True):
+async def update_player_rank_role(guild: discord.Guild, user_id: int, new_level: int, send_dm: bool = True, playlist_name: str = None):
     """Update player's rank role with DM notification on rank change"""
     member = guild.get_member(user_id)
     if not member:
@@ -521,7 +521,7 @@ async def update_player_rank_role(guild: discord.Guild, user_id: int, new_level:
     # Add new level role
     new_role_name = get_rank_role_name(new_level)
     new_role = discord.utils.get(guild.roles, name=new_role_name)
-    
+
     if new_role:
         await member.add_roles(new_role, reason=f"Reached {new_role_name}")
 
@@ -531,18 +531,20 @@ async def update_player_rank_role(guild: discord.Guild, user_id: int, new_level:
                 # Send banner image first (appears at top)
                 await member.send("https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/MessagefromCarnageReportHEADER.png")
 
-                # Then send the rank change embed
+                # Then send the rank change embed (rank icon as thumbnail, no level text)
                 embed = discord.Embed(color=discord.Color.blue())
+                embed.set_thumbnail(url=get_rank_icon_url(new_level))
+
+                # Build message with optional playlist name
+                playlist_suffix = f" in **{playlist_name}**" if playlist_name else ""
 
                 if new_level > old_level:
                     # Level up
-                    embed.set_thumbnail(url=get_rank_icon_url(new_level))
-                    embed.description = f"Congratulations, you have ranked up to **Level {new_level}**!"
+                    embed.description = f"Congratulations, you have ranked up{playlist_suffix}!"
                     embed.color = discord.Color.green()
                 elif new_level < old_level:
                     # Derank
-                    embed.set_thumbnail(url=get_rank_icon_url(new_level))
-                    embed.description = f"Sorry, you have deranked to **Level {new_level}**."
+                    embed.description = f"Sorry, you have been deranked{playlist_suffix}."
                     embed.color = discord.Color.red()
 
                 await member.send(embed=embed)
@@ -653,6 +655,15 @@ async def refresh_playlist_ranks(guild: discord.Guild, player_ids: List[int], pl
     # Load ranks.json from GitHub (website source of truth)
     ranks = await async_load_ranks_from_github()
 
+    # Get playlist name for DM
+    playlist_name = None
+    try:
+        from playlists import PLAYLIST_CONFIG
+        if playlist_type in PLAYLIST_CONFIG:
+            playlist_name = PLAYLIST_CONFIG[playlist_type]["name"]
+    except:
+        pass
+
     for user_id in player_ids:
         user_key = str(user_id)
 
@@ -662,7 +673,7 @@ async def refresh_playlist_ranks(guild: discord.Guild, player_ids: List[int], pl
         else:
             highest = 1
 
-        await update_player_rank_role(guild, user_id, highest, send_dm=send_dm)
+        await update_player_rank_role(guild, user_id, highest, send_dm=send_dm, playlist_name=playlist_name)
 
 def get_all_players_sorted(sort_by: str = "rank") -> List[Tuple[str, dict]]:
     """Get all players sorted by specified criteria - reads from local ranks.json"""
