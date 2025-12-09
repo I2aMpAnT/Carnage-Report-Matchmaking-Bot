@@ -923,6 +923,15 @@ async def start_playlist_match(channel: discord.TextChannel, playlist_state: Pla
     )
     match.pregame_vc_id = pregame_vc.id
 
+    # Move players already in voice to pregame lobby
+    for uid in players:
+        member = guild.get_member(uid)
+        if member and member.voice:
+            try:
+                await member.move_to(pregame_vc)
+            except:
+                pass
+
     # Show pregame embed telling players to join
     embed = discord.Embed(
         title=f"{match.get_match_label()} - Waiting for Players",
