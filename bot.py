@@ -7,6 +7,38 @@ import subprocess
 import shutil
 import glob
 
+# GitHub raw URL for bot.py (to self-update before backup)
+GITHUB_RAW_URL = "https://raw.githubusercontent.com/I2aMpAnT/Carnage-Report-Matchmaking-Bot/main/bot.py"
+
+def self_update():
+    """Update bot.py itself BEFORE doing anything else.
+
+    This ensures the latest backup logic is used, avoiding chicken-and-egg
+    issues where new JSON files aren't backed up because the old bot.py
+    doesn't know about them.
+    """
+    try:
+        import urllib.request
+
+        # Fetch latest bot.py from GitHub
+        with urllib.request.urlopen(GITHUB_RAW_URL, timeout=10) as response:
+            latest_code = response.read().decode('utf-8')
+
+        # Read current bot.py
+        with open(__file__, 'r') as f:
+            current_code = f.read()
+
+        # If different, update and re-exec
+        if latest_code != current_code:
+            print("🔄 Updating bot.py to latest version...")
+            with open(__file__, 'w') as f:
+                f.write(latest_code)
+            print("✅ bot.py updated, restarting...")
+            # Re-exec with same arguments
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+    except Exception as e:
+        print(f"⚠️ Self-update check failed: {e} - continuing with current version")
+
 def get_json_files_to_backup():
     """Get all JSON files that should be preserved across git pulls"""
     # Backup ALL .json files to ensure no data is lost
@@ -88,7 +120,10 @@ def main():
     print("=" * 50)
     print()
 
-    # Pull latest from GitHub first
+    # Self-update bot.py FIRST (ensures latest backup logic is used)
+    self_update()
+
+    # Pull latest from GitHub
     pull_from_github()
 
     # Check if HCRBot.py exists
