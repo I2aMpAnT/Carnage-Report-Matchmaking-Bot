@@ -1,7 +1,7 @@
 # statsdedi.py - Vultr VPS Management for Stats Dedi
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.0.1"
+MODULE_VERSION = "1.0.2"
 
 import discord
 from discord import app_commands
@@ -11,6 +11,7 @@ import aiohttp
 import asyncio
 import os
 import re
+import time
 from datetime import datetime
 from typing import Optional, Dict, List
 
@@ -34,6 +35,22 @@ ALLOWED_ROLES = ["Dedi", "Staff", "Overlord"]
 
 # Track active dedis (instance_id -> user_id)
 active_dedis: Dict[str, int] = {}
+
+# Track spin-up times for averaging
+spinup_times: List[float] = []  # List of spin-up times in seconds
+pending_creates: Dict[str, float] = {}  # instance_id -> start_time
+
+
+def get_average_spinup_time() -> Optional[str]:
+    """Get average spin-up time as formatted string"""
+    if not spinup_times:
+        return None
+    avg_seconds = sum(spinup_times) / len(spinup_times)
+    minutes = int(avg_seconds // 60)
+    seconds = int(avg_seconds % 60)
+    if minutes > 0:
+        return f"{minutes}m {seconds}s"
+    return f"{seconds}s"
 
 
 async def test_vultr_connection() -> tuple[bool, str]:
@@ -161,7 +178,7 @@ async def get_instance_bandwidth(instance_id: str) -> dict:
         return {}
 
 
-async def wait_for_instance_ready(instance_id: str, user: discord.User, initial_ip: str):
+async def wait_for_instance_ready(instance_id: str, user: discord.User, initial_ip: str, start_time: float):
     """Background task to wait for instance to be ready and DM user"""
     max_attempts = 60  # 5 minutes max (5 second intervals)
 
@@ -177,6 +194,19 @@ async def wait_for_instance_ready(instance_id: str, user: discord.User, initial_
 
             # Check if ready
             if status == "active" and power_status == "running" and server_status == "ok":
+                # Calculate spin-up time
+                elapsed = time.time() - start_time
+                spinup_times.append(elapsed)
+
+                # Remove from pending
+                if instance_id in pending_creates:
+                    del pending_creates[instance_id]
+
+                # Format elapsed time
+                elapsed_min = int(elapsed // 60)
+                elapsed_sec = int(elapsed % 60)
+                elapsed_str = f"{elapsed_min}m {elapsed_sec}s" if elapsed_min > 0 else f"{elapsed_sec}s"
+
                 try:
                     embed = discord.Embed(
                         title="Stats Dedi Ready!",
@@ -185,11 +215,11 @@ async def wait_for_instance_ready(instance_id: str, user: discord.User, initial_
                     )
                     embed.add_field(name="IP Address", value=f"`{main_ip}`", inline=True)
                     embed.add_field(name="Password", value=f"`{DEDI_PASSWORD}`", inline=True)
-                    embed.add_field(name="Status", value="Running", inline=False)
+                    embed.add_field(name="Spin-up Time", value=elapsed_str, inline=True)
                     embed.set_footer(text="Connect via Remote Desktop (RDP)")
 
                     await user.send(embed=embed)
-                    print(f"[DEDI] {user.name}'s StatsDedi is ready at {main_ip}")
+                    print(f"[DEDI] {user.name}'s StatsDedi is ready at {main_ip} (took {elapsed_str})")
                 except discord.Forbidden:
                     print(f"[DEDI] Could not DM {user.name} - DMs disabled")
                 return
@@ -198,6 +228,10 @@ async def wait_for_instance_ready(instance_id: str, user: discord.User, initial_
             print(f"[DEDI] Error checking instance status: {e}")
 
     # Timeout - still not ready after 5 minutes
+    # Remove from pending
+    if instance_id in pending_creates:
+        del pending_creates[instance_id]
+
     try:
         await user.send(
             embed=discord.Embed(
@@ -294,13 +328,21 @@ class StatsDediView(View):
                 )
                 return
 
+            # Record start time for spin-up tracking
+            start_time = time.time()
+
             # Create the instance
             instance = await create_instance(user_label)
             instance_id = instance.get("id")
             main_ip = instance.get("main_ip", "Assigning...")
 
-            # Track this dedi
+            # Track this dedi and start time
             active_dedis[instance_id] = interaction.user.id
+            pending_creates[instance_id] = start_time
+
+            # Get average spin-up time for estimate
+            avg_time = get_average_spinup_time()
+            estimate_text = f"Average spin-up time: {avg_time}" if avg_time else "This usually takes 1-3 minutes."
 
             # Send confirmation in channel
             await interaction.followup.send(
@@ -316,7 +358,7 @@ class StatsDediView(View):
             try:
                 dm_embed = discord.Embed(
                     title="Stats Dedi Creating",
-                    description="Your Stats Dedi is being set up. This usually takes 1-3 minutes.",
+                    description=f"Your Stats Dedi is being set up. {estimate_text}",
                     color=discord.Color.gold()
                 )
                 dm_embed.add_field(name="IP Address", value=f"`{main_ip}`" if main_ip != "0.0.0.0" else "Assigning...", inline=True)
@@ -330,7 +372,7 @@ class StatsDediView(View):
                 print(f"[DEDI] Could not DM {interaction.user.name} - DMs disabled")
 
             # Start background task to wait for ready
-            asyncio.create_task(wait_for_instance_ready(instance_id, interaction.user, main_ip))
+            asyncio.create_task(wait_for_instance_ready(instance_id, interaction.user, main_ip, start_time))
 
         except Exception as e:
             await interaction.followup.send(f"Error creating dedi: {e}", ephemeral=True)
@@ -517,12 +559,16 @@ class StatsDediCog(commands.Cog):
             )
             return
 
+        # Get average spin-up time
+        avg_time = get_average_spinup_time()
+        avg_text = f"\n\n**Avg Spin-up Time:** {avg_time}" if avg_time else ""
+
         embed = discord.Embed(
             title="Stats Dedi Control Panel",
-            description="Manage Vultr VPS instances for stats processing.\n\n"
-                        "**List** - View all running Stats Dedis\n"
-                        "**Create** - Spin up a new Stats Dedi\n"
-                        "**Destroy** - Shut down your Stats Dedi",
+            description=f"Manage Vultr VPS instances for stats processing.\n\n"
+                        f"**List** - View all running Stats Dedis\n"
+                        f"**Create** - Spin up a new Stats Dedi\n"
+                        f"**Destroy** - Shut down your Stats Dedi{avg_text}",
             color=discord.Color.blue()
         )
         embed.set_footer(text="Stats Dedis are billed hourly. Remember to destroy when done!")
