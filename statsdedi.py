@@ -1,7 +1,7 @@
 # statsdedi.py - Vultr VPS Management for Stats Dedi
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.0.2"
+MODULE_VERSION = "1.0.3"
 
 import discord
 from discord import app_commands
@@ -180,7 +180,7 @@ async def get_instance_bandwidth(instance_id: str) -> dict:
 
 async def wait_for_instance_ready(instance_id: str, user: discord.User, initial_ip: str, start_time: float):
     """Background task to wait for instance to be ready and DM user"""
-    max_attempts = 60  # 5 minutes max (5 second intervals)
+    max_attempts = 120  # 10 minutes max (5 second intervals)
 
     for attempt in range(max_attempts):
         await asyncio.sleep(5)
@@ -192,8 +192,12 @@ async def wait_for_instance_ready(instance_id: str, user: discord.User, initial_
             server_status = instance.get("server_status", "")
             main_ip = instance.get("main_ip", initial_ip)
 
-            # Check if ready
-            if status == "active" and power_status == "running" and server_status == "ok":
+            # Log status for debugging
+            if attempt % 6 == 0:  # Log every 30 seconds
+                print(f"[DEDI] {instance_id[:8]}... status={status}, power={power_status}, server={server_status}, ip={main_ip}")
+
+            # Check if ready - just need active and running
+            if status == "active" and power_status == "running":
                 # Calculate spin-up time
                 elapsed = time.time() - start_time
                 spinup_times.append(elapsed)
@@ -227,21 +231,10 @@ async def wait_for_instance_ready(instance_id: str, user: discord.User, initial_
         except Exception as e:
             print(f"[DEDI] Error checking instance status: {e}")
 
-    # Timeout - still not ready after 5 minutes
-    # Remove from pending
+    # Timeout - remove from pending but don't DM
     if instance_id in pending_creates:
         del pending_creates[instance_id]
-
-    try:
-        await user.send(
-            embed=discord.Embed(
-                title="Stats Dedi Status",
-                description="Your Stats Dedi is taking longer than expected to start. It may still be setting up. Check back in a few minutes.",
-                color=discord.Color.orange()
-            )
-        )
-    except:
-        pass
+    print(f"[DEDI] Timeout waiting for {instance_id[:8]}... to become ready")
 
 
 class StatsDediView(View):
