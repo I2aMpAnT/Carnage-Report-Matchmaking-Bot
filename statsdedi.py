@@ -19,11 +19,11 @@ VULTR_API_BASE = "https://api.vultr.com/v2"
 
 # Vultr Settings
 VULTR_REGION = "ewr"  # NYC/New Jersey region
-VULTR_PLAN = "vcg-a40-1c-5g-2vram"  # Cloud GPU: 1 vCPU, 5GB RAM, 90GB NVMe, 2GB VRAM - $0.075/hr
+VULTR_PLAN = "vcg-a16-3c-32g-8vram"  # Cloud GPU: 3 vCPUs, 32GB RAM, 170GB NVMe, 8GB VRAM - $0.236/hr
 VULTR_SNAPSHOT_ID = os.getenv('VULTR_SNAPSHOT_ID')  # Set in .env
 
 # Hourly rate for cost calculation
-HOURLY_RATE = 0.075  # $0.075/hr for vcg-a40-1c-5g-2vram
+HOURLY_RATE = 0.236  # $0.236/hr for vcg-a16-3c-32g-8vram
 
 # Default password for the dedi
 DEDI_PASSWORD = "2s-V-A#Ywo(]PJmN"
