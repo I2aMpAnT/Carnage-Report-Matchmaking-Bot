@@ -197,7 +197,14 @@ async def on_ready():
         print('✅ Stats parser module loaded!')
     except Exception as e:
         print(f'⚠️ Stats parser module not loaded: {e}')
-    
+
+    # Setup Stats Dedi module (Vultr VPS management)
+    try:
+        await bot.load_extension('statsdedi')
+        print('✅ Stats Dedi module loaded!')
+    except Exception as e:
+        print(f'⚠️ Stats Dedi module not loaded: {e}')
+
     # Sync slash commands
     try:
         synced = await bot.tree.sync()
