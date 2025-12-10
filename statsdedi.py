@@ -1,7 +1,7 @@
 # statsdedi.py - Vultr VPS Management for Stats Dedi
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.0.4"
+MODULE_VERSION = "1.0.5"
 
 import discord
 from discord import app_commands
@@ -327,15 +327,10 @@ class StatsDediView(View):
             # Create the instance
             instance = await create_instance(user_label)
             instance_id = instance.get("id")
-            main_ip = instance.get("main_ip", "Assigning...")
 
             # Track this dedi and start time
             active_dedis[instance_id] = interaction.user.id
             pending_creates[instance_id] = start_time
-
-            # Get average spin-up time for estimate
-            avg_time = get_average_spinup_time()
-            estimate_text = f"Average spin-up time: {avg_time}" if avg_time else "This usually takes 1-3 minutes."
 
             # Send confirmation in channel
             await interaction.followup.send(
@@ -347,22 +342,42 @@ class StatsDediView(View):
                 ephemeral=True
             )
 
-            # DM user with initial info
-            try:
-                dm_embed = discord.Embed(
-                    title="Stats Dedi Creating",
-                    description=f"Your Stats Dedi is being set up. {estimate_text}",
-                    color=discord.Color.gold()
-                )
-                dm_embed.add_field(name="IP Address", value=f"`{main_ip}`" if main_ip != "0.0.0.0" else "Assigning...", inline=True)
-                dm_embed.add_field(name="Password", value=f"`{DEDI_PASSWORD}`", inline=True)
-                dm_embed.add_field(name="Status", value="Setting up...", inline=False)
-                dm_embed.set_footer(text="You'll receive another message when it's ready!")
+            # Wait for IP to be assigned (poll a few times)
+            main_ip = None
+            for _ in range(12):  # Try for up to 60 seconds
+                await asyncio.sleep(5)
+                try:
+                    inst = await get_instance(instance_id)
+                    ip = inst.get("main_ip", "")
+                    if ip and ip != "0.0.0.0":
+                        main_ip = ip
+                        break
+                except:
+                    pass
 
-                await interaction.user.send(embed=dm_embed)
-                print(f"[DEDI] Creating {user_label} (ID: {instance_id})")
-            except discord.Forbidden:
-                print(f"[DEDI] Could not DM {interaction.user.name} - DMs disabled")
+            # DM user with IP once we have it
+            if main_ip:
+                try:
+                    avg_time = get_average_spinup_time()
+                    estimate_text = f"Average spin-up time: {avg_time}" if avg_time else "This usually takes 1-3 minutes."
+
+                    dm_embed = discord.Embed(
+                        title="Stats Dedi Creating",
+                        description=f"Your Stats Dedi is being set up. {estimate_text}",
+                        color=discord.Color.gold()
+                    )
+                    dm_embed.add_field(name="IP Address", value=f"`{main_ip}`", inline=True)
+                    dm_embed.add_field(name="Password", value=f"`{DEDI_PASSWORD}`", inline=True)
+                    dm_embed.add_field(name="Status", value="Setting up...", inline=False)
+                    dm_embed.set_footer(text="You'll receive another message when it's ready!")
+
+                    await interaction.user.send(embed=dm_embed)
+                    print(f"[DEDI] Creating {user_label} (ID: {instance_id}) - IP: {main_ip}")
+                except discord.Forbidden:
+                    print(f"[DEDI] Could not DM {interaction.user.name} - DMs disabled")
+            else:
+                main_ip = "Unknown"
+                print(f"[DEDI] Creating {user_label} (ID: {instance_id}) - IP not yet assigned")
 
             # Start background task to wait for ready
             asyncio.create_task(wait_for_instance_ready(instance_id, interaction.user, main_ip, start_time))
@@ -371,7 +386,7 @@ class StatsDediView(View):
             await interaction.followup.send(f"Error creating dedi: {e}", ephemeral=True)
 
     async def handle_destroy(self, interaction: discord.Interaction):
-        """Destroy user's StatsDedi - always shows selection"""
+        """Destroy StatsDedi - shows all dedis for selection"""
         await interaction.response.defer(ephemeral=True)
 
         try:
@@ -389,27 +404,7 @@ class StatsDediView(View):
                 )
                 return
 
-            # Check if user is admin (can destroy any) or regular user (only their own)
-            user_roles = [role.name for role in interaction.user.roles]
-            is_admin = any(role in ["Staff", "Overlord"] for role in user_roles)
-
-            # Filter to only user's dedis if not admin
-            if not is_admin:
-                user_label = f"{interaction.user.display_name}'s StatsDedi"
-                stats_dedis = [i for i in stats_dedis if i.get("label") == user_label]
-
-                if not stats_dedis:
-                    await interaction.followup.send(
-                        embed=discord.Embed(
-                            title="No Dedi Found",
-                            description="You don't have a Stats Dedi running.",
-                            color=discord.Color.red()
-                        ),
-                        ephemeral=True
-                    )
-                    return
-
-            # Always show selection view for confirmation
+            # Show all dedis to all users
             view = DediDestroySelectView(stats_dedis)
             await interaction.followup.send(
                 embed=discord.Embed(
