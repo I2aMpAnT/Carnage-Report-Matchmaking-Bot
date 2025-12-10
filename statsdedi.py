@@ -1,7 +1,7 @@
 # statsdedi.py - Vultr VPS Management for Stats Dedi
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.0.0"
+MODULE_VERSION = "1.0.1"
 
 import discord
 from discord import app_commands
@@ -10,6 +10,7 @@ from discord.ui import View, Button
 import aiohttp
 import asyncio
 import os
+import re
 from datetime import datetime
 from typing import Optional, Dict, List
 
@@ -33,6 +34,32 @@ ALLOWED_ROLES = ["Dedi", "Staff", "Overlord"]
 
 # Track active dedis (instance_id -> user_id)
 active_dedis: Dict[str, int] = {}
+
+
+async def test_vultr_connection() -> tuple[bool, str]:
+    """Test Vultr API connection and return (success, message)"""
+    if not VULTR_API_KEY:
+        return False, "VULTR_API_KEY not set in environment"
+
+    headers = {
+        "Authorization": f"Bearer {VULTR_API_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{VULTR_API_BASE}/account", headers=headers) as resp:
+                if resp.status == 200:
+                    return True, "Connected"
+                else:
+                    text = await resp.text()
+                    # Extract IP from error message if present
+                    ip_match = re.search(r'(\d+\.\d+\.\d+\.\d+)', text)
+                    if ip_match:
+                        return False, f"IP not authorized: `{ip_match.group(1)}`\n\nAdd this IP to Vultr API Access Control."
+                    return False, f"API error {resp.status}: {text}"
+    except Exception as e:
+        return False, f"Connection error: {e}"
 
 
 def has_allowed_role():
@@ -460,16 +487,32 @@ class StatsDediCog(commands.Cog):
     @has_allowed_role()
     async def statsdedi(self, interaction: discord.Interaction):
         """Main command - shows control panel"""
+        # Defer first so we can test the API
+        await interaction.response.defer(ephemeral=True)
+
         if not VULTR_API_KEY:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "Vultr API key not configured. Please set VULTR_API_KEY in .env",
                 ephemeral=True
             )
             return
 
         if not VULTR_SNAPSHOT_ID:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "Vultr snapshot ID not configured. Please set VULTR_SNAPSHOT_ID in .env",
+                ephemeral=True
+            )
+            return
+
+        # Test API connection first
+        success, message = await test_vultr_connection()
+        if not success:
+            await interaction.followup.send(
+                embed=discord.Embed(
+                    title="Vultr API Error",
+                    description=message,
+                    color=discord.Color.red()
+                ),
                 ephemeral=True
             )
             return
@@ -485,7 +528,7 @@ class StatsDediCog(commands.Cog):
         embed.set_footer(text="Stats Dedis are billed hourly. Remember to destroy when done!")
 
         view = StatsDediView()
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
 
 async def setup(bot):
