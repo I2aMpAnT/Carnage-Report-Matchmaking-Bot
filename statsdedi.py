@@ -19,8 +19,11 @@ VULTR_API_BASE = "https://api.vultr.com/v2"
 
 # Vultr Settings
 VULTR_REGION = "ewr"  # NYC/New Jersey region
-VULTR_PLAN = "vc2-1c-1gb"  # Basic plan - adjust as needed
+VULTR_PLAN = "vcg-a40-1c-5g-2vram"  # Cloud GPU: 1 vCPU, 5GB RAM, 90GB NVMe, 2GB VRAM - $0.075/hr
 VULTR_SNAPSHOT_ID = os.getenv('VULTR_SNAPSHOT_ID')  # Set in .env
+
+# Hourly rate for cost calculation
+HOURLY_RATE = 0.075  # $0.075/hr for vcg-a40-1c-5g-2vram
 
 # Default password for the dedi
 DEDI_PASSWORD = "2s-V-A#Ywo(]PJmN"
@@ -363,15 +366,14 @@ class StatsDediView(View):
             # We'll estimate based on the instance age
             date_created = user_dedi.get("date_created", "")
 
-            # Calculate approximate cost (vc2-1c-1gb is ~$5/month = ~$0.007/hour)
-            hourly_rate = 0.007
+            # Calculate approximate cost
             try:
                 created_time = datetime.fromisoformat(date_created.replace("Z", "+00:00"))
                 hours_running = (datetime.now(created_time.tzinfo) - created_time).total_seconds() / 3600
                 hours_running = max(1, hours_running)  # Minimum 1 hour
-                estimated_cost = hours_running * hourly_rate
+                estimated_cost = hours_running * HOURLY_RATE
             except:
-                estimated_cost = hourly_rate  # Default to 1 hour if can't parse
+                estimated_cost = HOURLY_RATE  # Default to 1 hour if can't parse
 
             # Destroy it
             await destroy_instance(instance_id)
@@ -423,14 +425,13 @@ class DediDestroySelectView(View):
 
             # Calculate cost
             date_created = dedi.get("date_created", "")
-            hourly_rate = 0.007
             try:
                 created_time = datetime.fromisoformat(date_created.replace("Z", "+00:00"))
                 hours_running = (datetime.now(created_time.tzinfo) - created_time).total_seconds() / 3600
                 hours_running = max(1, hours_running)
-                estimated_cost = hours_running * hourly_rate
+                estimated_cost = hours_running * HOURLY_RATE
             except:
-                estimated_cost = hourly_rate
+                estimated_cost = HOURLY_RATE
 
             try:
                 await destroy_instance(instance_id)
