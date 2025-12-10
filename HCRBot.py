@@ -457,36 +457,10 @@ async def repost_queue_embed_if_needed(message: discord.Message):
 
 
 async def repost_match_embed_if_needed(message: discord.Message):
-    """Repost match embed to keep it at the bottom of general chat during active series"""
-    from searchmatchmaking import queue_state, log_action
-
-    if not queue_state.current_series:
-        return
-
-    series = queue_state.current_series
-    if not hasattr(series, 'general_message') or not series.general_message:
-        return
-
-    # Repost the match embed to keep it at the bottom
-    try:
-        from ingame import update_general_chat_embed
-
-        # Delete the old message
-        old_message = series.general_message
-        try:
-            await old_message.delete()
-        except:
-            pass
-
-        # Clear the reference so update_general_chat_embed creates a new one
-        series.general_message = None
-
-        # Repost the embed
-        await update_general_chat_embed(message.guild, series)
-        log_action(f"Reposted match embed to bottom (triggered by {message.author.display_name})")
-
-    except Exception as e:
-        print(f"Error reposting match embed: {e}")
+    """Match embed should NOT be reposted on every message.
+    It only gets updated when game data changes (handled in ingame.py)."""
+    # Disabled - embed only updates when game results are added
+    pass
 
 # Run bot - works both when imported and when run directly
 if not TOKEN:

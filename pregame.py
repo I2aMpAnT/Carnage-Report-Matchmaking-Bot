@@ -135,6 +135,23 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
         pings = " ".join([f"<@{uid}>" for uid in players])
         pregame_message = await channel.send(content=pings, embed=embed)
 
+        # DM players not in voice to let them know to join
+        for uid in players_not_in_voice:
+            member = guild.get_member(uid)
+            if member:
+                try:
+                    dm_embed = discord.Embed(
+                        title=f"{match_label} - Join Pregame Lobby!",
+                        description=f"Your **{playlist_name}** match is starting! Please join the **Pregame Lobby** voice channel within 5 minutes or the match may be cancelled.",
+                        color=discord.Color.gold()
+                    )
+                    await member.send(embed=dm_embed)
+                    log_action(f"Sent pregame DM to {member.name}")
+                except discord.Forbidden:
+                    log_action(f"Could not DM {member.name} - DMs disabled")
+                except Exception as e:
+                    log_action(f"Error sending pregame DM to {member.name}: {e}")
+
         # Start task to wait for all players
         asyncio.create_task(wait_for_playlist_players(
             channel, pregame_message, players, pregame_vc.id,
@@ -251,9 +268,27 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
                 inline=False
             )
 
-    # Send waiting embed (no buttons yet)
-    pregame_message = await target_channel.send(embed=embed)
+    # Ping players in channel
+    pings = " ".join([f"<@{uid}>" for uid in players])
+    pregame_message = await target_channel.send(content=pings, embed=embed)
     queue_state.pregame_message = pregame_message
+
+    # DM players not in voice to let them know to join
+    for uid in players_not_in_voice:
+        member = guild.get_member(uid)
+        if member:
+            try:
+                dm_embed = discord.Embed(
+                    title=f"{match_label} - Join Pregame Lobby!",
+                    description=f"Your match is starting! Please join the **Pregame Lobby** voice channel within 5 minutes or you may be replaced.",
+                    color=discord.Color.gold()
+                )
+                await member.send(embed=dm_embed)
+                log_action(f"Sent pregame DM to {member.name}")
+            except discord.Forbidden:
+                log_action(f"Could not DM {member.name} - DMs disabled")
+            except Exception as e:
+                log_action(f"Error sending pregame DM to {member.name}: {e}")
 
     # Start task to wait for all players and then show team selection
     asyncio.create_task(wait_for_players_and_show_selection(
@@ -859,7 +894,7 @@ async def show_balanced_teams_confirmation(
     pregame_vc_id: int,
     match_label: str
 ):
-    """Show balanced teams with 10-second confirmation timer.
+    """Show balanced teams with 30-second confirmation timer.
     If majority doesn't reject, teams proceed automatically."""
     import asyncio
     from searchmatchmaking import get_queue_progress_image
@@ -873,8 +908,8 @@ async def show_balanced_teams_confirmation(
     red_mentions = "\n".join([f"<@{uid}>" for uid in red_team])
     blue_mentions = "\n".join([f"<@{uid}>" for uid in blue_team])
 
-    # 10-second countdown
-    for seconds_left in range(10, -1, -1):
+    # 30-second countdown
+    for seconds_left in range(30, -1, -1):
         embed = discord.Embed(
             title=f"Balanced Teams - {match_label}",
             description=f"Teams will be locked in **{seconds_left}** seconds...\n\nVote **Reject** if you want to re-pick teams.",
@@ -1264,7 +1299,14 @@ async def finalize_teams(channel: discord.TextChannel, red_team: List[int], blue
         # Clear queue since match is starting (only for real matches)
         queue_state.queue.clear()
         queue_state.queue_join_times.clear()
-    
+
+        # Update queue embed to show it's empty and ready for new players
+        from searchmatchmaking import update_queue_embed, QUEUE_CHANNEL_ID
+        queue_channel = guild.get_channel(QUEUE_CHANNEL_ID)
+        if queue_channel:
+            await update_queue_embed(queue_channel)
+            log_action("Updated queue embed after match started")
+
     await show_series_embed(channel)
 
     # Save to active_matches

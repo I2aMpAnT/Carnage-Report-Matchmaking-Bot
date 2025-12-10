@@ -793,8 +793,9 @@ class StatsCommands(commands.Cog):
                             old_rank = old_playlists.get(playlist_type, {}).get("rank", 0)
                             new_rank = new_playlists.get(playlist_type, {}).get("rank", 0)
 
-                            # Only DM if rank changed and player has played this playlist
-                            if new_rank > 0 and old_rank != new_rank:
+                            # Only DM if rank ACTUALLY changed (both old and new must be > 0)
+                            # Don't DM for first-time placements (old_rank = 0)
+                            if old_rank > 0 and new_rank > 0 and old_rank != new_rank:
                                 if await send_playlist_rank_dm(guild, member, old_rank, new_rank, playlist_type):
                                     dm_count += 1
                                 await asyncio.sleep(0.1)  # Small delay between DMs
