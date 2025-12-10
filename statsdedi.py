@@ -1,7 +1,7 @@
 # statsdedi.py - Vultr VPS Management for Stats Dedi
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.0.3"
+MODULE_VERSION = "1.0.4"
 
 import discord
 from discord import app_commands
@@ -371,91 +371,55 @@ class StatsDediView(View):
             await interaction.followup.send(f"Error creating dedi: {e}", ephemeral=True)
 
     async def handle_destroy(self, interaction: discord.Interaction):
-        """Destroy user's StatsDedi"""
+        """Destroy user's StatsDedi - always shows selection"""
         await interaction.response.defer(ephemeral=True)
 
         try:
-            # Find user's dedi
             instances = await list_instances()
-            user_label = f"{interaction.user.display_name}'s StatsDedi"
+            stats_dedis = [i for i in instances if "StatsDedi" in i.get("label", "")]
 
-            user_dedi = None
-            for i in instances:
-                if i.get("label") == user_label:
-                    user_dedi = i
-                    break
-
-            # Staff/Overlord can destroy any dedi - show selection
-            user_roles = [role.name for role in interaction.user.roles]
-            is_admin = any(role in ["Staff", "Overlord"] for role in user_roles)
-
-            if not user_dedi and not is_admin:
+            if not stats_dedis:
                 await interaction.followup.send(
                     embed=discord.Embed(
-                        title="No Dedi Found",
-                        description="You don't have a Stats Dedi running.",
+                        title="No Dedis Found",
+                        description="No Stats Dedis are currently running.",
                         color=discord.Color.red()
                     ),
                     ephemeral=True
                 )
                 return
 
-            # If admin and no personal dedi, show all dedis to choose from
-            if not user_dedi and is_admin:
-                stats_dedis = [i for i in instances if "StatsDedi" in i.get("label", "")]
+            # Check if user is admin (can destroy any) or regular user (only their own)
+            user_roles = [role.name for role in interaction.user.roles]
+            is_admin = any(role in ["Staff", "Overlord"] for role in user_roles)
+
+            # Filter to only user's dedis if not admin
+            if not is_admin:
+                user_label = f"{interaction.user.display_name}'s StatsDedi"
+                stats_dedis = [i for i in stats_dedis if i.get("label") == user_label]
+
                 if not stats_dedis:
-                    await interaction.followup.send("No Stats Dedis to destroy.", ephemeral=True)
+                    await interaction.followup.send(
+                        embed=discord.Embed(
+                            title="No Dedi Found",
+                            description="You don't have a Stats Dedi running.",
+                            color=discord.Color.red()
+                        ),
+                        ephemeral=True
+                    )
                     return
 
-                # Show selection view
-                view = DediDestroySelectView(stats_dedis)
-                await interaction.followup.send(
-                    embed=discord.Embed(
-                        title="Select Dedi to Destroy",
-                        description="Choose which Stats Dedi to destroy:",
-                        color=discord.Color.orange()
-                    ),
-                    view=view,
-                    ephemeral=True
-                )
-                return
-
-            # Destroy the user's dedi
-            instance_id = user_dedi.get("id")
-
-            # Get billing info before destroying
-            # Note: Vultr charges by the hour, minimum 1 hour
-            # We'll estimate based on the instance age
-            date_created = user_dedi.get("date_created", "")
-
-            # Calculate approximate cost
-            try:
-                created_time = datetime.fromisoformat(date_created.replace("Z", "+00:00"))
-                hours_running = (datetime.now(created_time.tzinfo) - created_time).total_seconds() / 3600
-                hours_running = max(1, hours_running)  # Minimum 1 hour
-                estimated_cost = hours_running * HOURLY_RATE
-            except:
-                estimated_cost = HOURLY_RATE  # Default to 1 hour if can't parse
-
-            # Destroy it
-            await destroy_instance(instance_id)
-
-            # Remove from tracking
-            if instance_id in active_dedis:
-                del active_dedis[instance_id]
-
-            # Send confirmation
+            # Always show selection view for confirmation
+            view = DediDestroySelectView(stats_dedis)
             await interaction.followup.send(
                 embed=discord.Embed(
-                    title="Stats Dedi Destroyed",
-                    description=f"Thank you for using the Carnage Report Stats Dedi!\n\n"
-                                f"**Estimated Cost:** ${estimated_cost:.2f}",
-                    color=discord.Color.green()
+                    title="Select Dedi to Destroy",
+                    description="Choose which Stats Dedi to destroy:",
+                    color=discord.Color.orange()
                 ),
+                view=view,
                 ephemeral=True
             )
-
-            print(f"[DEDI] Destroyed {user_label} (ID: {instance_id}) - Est. cost: ${estimated_cost:.2f}")
 
         except Exception as e:
             await interaction.followup.send(f"Error destroying dedi: {e}", ephemeral=True)
