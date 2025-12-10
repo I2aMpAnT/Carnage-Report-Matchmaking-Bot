@@ -506,11 +506,11 @@ async def send_playlist_rank_dm(guild: discord.Guild, member: discord.Member, ol
         if not rank_emoji:
             rank_emoji = f"**Level {new_level}**"  # Fallback
 
-        # Single embed with smaller banner as thumbnail
-        embed = discord.Embed(color=discord.Color.from_rgb(255, 255, 255))
+        # Send banner at top as header
+        await member.send("https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/MessagefromCarnageReportHEADERSMALL.png")
 
-        # Banner as thumbnail (smaller, on right side)
-        embed.set_thumbnail(url="https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/MessagefromCarnageReportHEADERSMALL.png")
+        # Then send the rank message embed
+        embed = discord.Embed(color=discord.Color.from_rgb(255, 255, 255))
 
         if new_level > old_level:
             embed.description = f"Congratulations, you have ranked up to {rank_emoji} in **{playlist_name}**!"
@@ -793,8 +793,9 @@ class StatsCommands(commands.Cog):
                             old_rank = old_playlists.get(playlist_type, {}).get("rank", 0)
                             new_rank = new_playlists.get(playlist_type, {}).get("rank", 0)
 
-                            # Only DM if rank changed and player has played this playlist
-                            if new_rank > 0 and old_rank != new_rank:
+                            # Only DM if rank ACTUALLY changed (both old and new must be > 0)
+                            # Don't DM for first-time placements (old_rank = 0)
+                            if old_rank > 0 and new_rank > 0 and old_rank != new_rank:
                                 if await send_playlist_rank_dm(guild, member, old_rank, new_rank, playlist_type):
                                     dm_count += 1
                                 await asyncio.sleep(0.1)  # Small delay between DMs
