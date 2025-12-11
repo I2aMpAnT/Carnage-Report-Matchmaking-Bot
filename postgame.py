@@ -1,17 +1,134 @@
 # postgame.py - Postgame Processing, Stats Recording, and Cleanup
 
-MODULE_VERSION = "1.2.0"
+MODULE_VERSION = "1.3.0"
 
 import discord
 from discord.ui import View, Button
 from typing import List
-from datetime import datetime
+from datetime import datetime, timezone
+import json
+import os
 
 # Will be imported from bot.py
 POSTGAME_LOBBY_ID = None
 QUEUE_CHANNEL_ID = None
 RED_TEAM_EMOJI_ID = None
 BLUE_TEAM_EMOJI_ID = None
+
+# Active match file
+ACTIVE_MATCH_FILE = 'activematch.json'
+
+# Timezone for consistent logging (UTC)
+TIMEZONE = timezone.utc
+TIMEZONE_NAME = "UTC"
+
+
+def get_utc_now():
+    """Get current time in UTC"""
+    return datetime.now(TIMEZONE)
+
+
+def format_timestamp(dt: datetime) -> dict:
+    """Format a datetime with timezone info for JSON storage"""
+    if dt is None:
+        return {"iso": None, "display": None, "timezone": TIMEZONE_NAME}
+
+    # Ensure timezone aware
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=TIMEZONE)
+
+    return {
+        "iso": dt.isoformat(),
+        "display": dt.strftime('%Y-%m-%d %H:%M:%S'),
+        "timezone": TIMEZONE_NAME
+    }
+
+
+def load_active_matches() -> dict:
+    """Load active matches from activematch.json"""
+    if os.path.exists(ACTIVE_MATCH_FILE):
+        try:
+            with open(ACTIVE_MATCH_FILE, 'r') as f:
+                return json.load(f)
+        except:
+            pass
+    return {"timezone": TIMEZONE_NAME, "active_matches": []}
+
+
+def save_active_matches(data: dict):
+    """Save active matches to activematch.json"""
+    with open(ACTIVE_MATCH_FILE, 'w') as f:
+        json.dump(data, f, indent=2)
+
+
+def add_to_active_matches(series):
+    """Add a series to activematch.json when it starts"""
+    match_type = "TEST" if series.test_mode else "RANKED"
+    start_time = get_utc_now()
+
+    # Update series start_time to use UTC
+    series.start_time = start_time
+
+    active_entry = {
+        "type": "SERIES",
+        "match_type": match_type,
+        "series_label": series.series_number,
+        "match_id": series.match_number,
+        "start_time": format_timestamp(start_time),
+        "end_time": format_timestamp(None),
+        "result": "IN_PROGRESS",
+        "teams": {
+            "red": {
+                "players": series.red_team[:],
+                "voice_channel_id": getattr(series, 'red_vc_id', None)
+            },
+            "blue": {
+                "players": series.blue_team[:],
+                "voice_channel_id": getattr(series, 'blue_vc_id', None)
+            }
+        },
+        "games": []
+    }
+
+    data = load_active_matches()
+    data["active_matches"].append(active_entry)
+    save_active_matches(data)
+
+    log_action(f"Added {match_type} match {series.series_number} to {ACTIVE_MATCH_FILE}")
+
+
+def update_active_match_games(series):
+    """Update the games list for an active match"""
+    data = load_active_matches()
+
+    for match in data["active_matches"]:
+        if match.get("match_id") == series.match_number:
+            match["games"] = series.games[:]
+            break
+
+    save_active_matches(data)
+
+
+def remove_from_active_matches(series) -> dict:
+    """Remove a series from activematch.json and return its data"""
+    data = load_active_matches()
+
+    removed_match = None
+    new_active = []
+
+    for match in data["active_matches"]:
+        if match.get("match_id") == series.match_number:
+            removed_match = match
+        else:
+            new_active.append(match)
+
+    data["active_matches"] = new_active
+    save_active_matches(data)
+
+    if removed_match:
+        log_action(f"Removed match {series.series_number} from {ACTIVE_MATCH_FILE}")
+
+    return removed_match
 
 def log_action(message: str):
     """Log actions"""
@@ -20,11 +137,14 @@ def log_action(message: str):
 
 def save_match_history(series, winner: str):
     """Save match results to MLG4v4.json with comprehensive data"""
-    import json
-    import os
-    from datetime import datetime
-
     match_type = "TEST" if series.test_mode else "RANKED"
+
+    # Set end time with UTC
+    end_time = get_utc_now()
+    series.end_time = end_time
+
+    # Remove from activematch.json
+    remove_from_active_matches(series)
 
     # Calculate final scores
     red_wins = series.games.count('RED')
@@ -51,16 +171,15 @@ def save_match_history(series, winner: str):
 
         game_breakdown.append(game_data)
 
-    # Create match entry with start_time and end_time
+    # Create match entry with start_time and end_time (UTC timezone)
     match_entry = {
         "type": "SERIES",
         "match_type": match_type,
         "series_label": series.series_number,
         "match_id": series.match_number,
-        "start_time": series.start_time.isoformat(),
-        "start_time_display": series.start_time.strftime('%Y-%m-%d %H:%M:%S'),
-        "end_time": series.end_time.isoformat() if series.end_time else None,
-        "end_time_display": series.end_time.strftime('%Y-%m-%d %H:%M:%S') if series.end_time else None,
+        "start_time": format_timestamp(series.start_time),
+        "end_time": format_timestamp(end_time),
+        "timezone": TIMEZONE_NAME,
         "winner": winner,
         "final_score": {
             "red": red_wins,
@@ -81,7 +200,7 @@ def save_match_history(series, winner: str):
         "stats_recorded": not series.test_mode,
         "swap_history": getattr(series, 'swap_history', [])
     }
-    
+
     # Save to different files based on match type
     if match_type == "RANKED":
         history_file = 'MLG4v4.json'
@@ -95,24 +214,17 @@ def save_match_history(series, winner: str):
                 history = json.load(f)
         except:
             if match_type == "RANKED":
-                history = {"total_ranked_matches": 0, "matches": [], "active_matches": []}
+                history = {"total_ranked_matches": 0, "matches": [], "timezone": TIMEZONE_NAME}
             else:
-                history = {"total_test_matches": 0, "matches": [], "active_matches": []}
+                history = {"total_test_matches": 0, "matches": [], "timezone": TIMEZONE_NAME}
     else:
         if match_type == "RANKED":
-            history = {"total_ranked_matches": 0, "matches": [], "active_matches": []}
+            history = {"total_ranked_matches": 0, "matches": [], "timezone": TIMEZONE_NAME}
         else:
-            history = {"total_test_matches": 0, "matches": [], "active_matches": []}
+            history = {"total_test_matches": 0, "matches": [], "timezone": TIMEZONE_NAME}
 
-    # Ensure active_matches exists
-    if "active_matches" not in history:
-        history["active_matches"] = []
-
-    # Remove from active_matches if present
-    history["active_matches"] = [
-        m for m in history["active_matches"]
-        if m.get("match_id") != series.match_number
-    ]
+    # Ensure timezone is set
+    history["timezone"] = TIMEZONE_NAME
 
     # Update counters
     if match_type == "RANKED":
@@ -127,73 +239,12 @@ def save_match_history(series, winner: str):
     with open(history_file, 'w') as f:
         json.dump(history, f, indent=2)
 
-    log_action(f"Saved {match_type} match {series.series_number} to {history_file}")
+    log_action(f"Saved {match_type} match {series.series_number} to {history_file} (UTC)")
 
 
 def save_active_match(series):
-    """Save match to active_matches when series starts"""
-    import json
-    import os
-
-    match_type = "TEST" if series.test_mode else "RANKED"
-
-    # Create active match entry
-    active_entry = {
-        "type": "SERIES",
-        "match_type": match_type,
-        "series_label": series.series_number,
-        "match_id": series.match_number,
-        "start_time": series.start_time.isoformat(),
-        "start_time_display": series.start_time.strftime('%Y-%m-%d %H:%M:%S'),
-        "end_time": None,
-        "end_time_display": None,
-        "result": "STARTED",
-        "teams": {
-            "red": {
-                "players": series.red_team[:],
-                "voice_channel_id": getattr(series, 'red_vc_id', None)
-            },
-            "blue": {
-                "players": series.blue_team[:],
-                "voice_channel_id": getattr(series, 'blue_vc_id', None)
-            }
-        }
-    }
-
-    # Save to appropriate file
-    if match_type == "RANKED":
-        history_file = 'MLG4v4.json'
-    else:
-        history_file = 'testMLG4v4.json'
-
-    # Load existing history or create new
-    if os.path.exists(history_file):
-        try:
-            with open(history_file, 'r') as f:
-                history = json.load(f)
-        except:
-            if match_type == "RANKED":
-                history = {"total_ranked_matches": 0, "matches": [], "active_matches": []}
-            else:
-                history = {"total_test_matches": 0, "matches": [], "active_matches": []}
-    else:
-        if match_type == "RANKED":
-            history = {"total_ranked_matches": 0, "matches": [], "active_matches": []}
-        else:
-            history = {"total_test_matches": 0, "matches": [], "active_matches": []}
-
-    # Ensure active_matches exists
-    if "active_matches" not in history:
-        history["active_matches"] = []
-
-    # Add to active_matches
-    history["active_matches"].append(active_entry)
-
-    # Save back to file
-    with open(history_file, 'w') as f:
-        json.dump(history, f, indent=2)
-
-    log_action(f"Added {match_type} match {series.series_number} to active_matches in {history_file}")
+    """Save match to activematch.json when series starts"""
+    add_to_active_matches(series)
 
 
 def load_gamestats():
@@ -221,10 +272,13 @@ async def record_game_winner(series_view, winner: str, channel: discord.TextChan
     
     game_number = len(series.games)
     log_action(f"Game {game_number} won by {winner} in Match #{series.match_number}")
-    
+
     # Log individual game result immediately
     log_individual_game(series, game_number, winner)
-    
+
+    # Update activematch.json with game results
+    update_active_match_games(series)
+
     # Save state
     try:
         import state_manager
