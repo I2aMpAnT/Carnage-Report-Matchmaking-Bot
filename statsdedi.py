@@ -1,7 +1,7 @@
 # statsdedi.py - Vultr VPS Management for Stats Dedi
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.0.5"
+MODULE_VERSION = "1.0.7"
 
 import discord
 from discord import app_commands
@@ -87,6 +87,20 @@ def has_allowed_role():
             return True
         await interaction.response.send_message(
             "You need the Dedi, Staff, or Overlord role to use this command!",
+            ephemeral=True
+        )
+        return False
+    return app_commands.check(predicate)
+
+
+def is_admin():
+    """Check if user has Staff or Overlord role"""
+    async def predicate(interaction: discord.Interaction):
+        user_roles = [role.name for role in interaction.user.roles]
+        if any(role in ["Staff", "Overlord"] for role in user_roles):
+            return True
+        await interaction.response.send_message(
+            "You need the Staff or Overlord role to use this command!",
             ephemeral=True
         )
         return False
@@ -527,6 +541,63 @@ class StatsDediCog(commands.Cog):
 
         view = StatsDediView()
         await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+
+    @app_commands.command(name="snapshotupdate", description="Update the Vultr snapshot ID for Stats Dedis (Admin only)")
+    @app_commands.describe(snapshot_id="The new Vultr snapshot ID to use")
+    @is_admin()
+    async def snapshotupdate(self, interaction: discord.Interaction, snapshot_id: str):
+        """Update the snapshot ID used for creating Stats Dedis"""
+        global VULTR_SNAPSHOT_ID
+
+        old_snapshot = VULTR_SNAPSHOT_ID
+        VULTR_SNAPSHOT_ID = snapshot_id
+
+        # Update .env file
+        env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+        env_updated = False
+
+        try:
+            # Read existing .env
+            if os.path.exists(env_path):
+                with open(env_path, 'r') as f:
+                    lines = f.readlines()
+
+                # Update or add VULTR_SNAPSHOT_ID
+                found = False
+                for i, line in enumerate(lines):
+                    if line.startswith('VULTR_SNAPSHOT_ID='):
+                        lines[i] = f'VULTR_SNAPSHOT_ID={snapshot_id}\n'
+                        found = True
+                        break
+
+                if not found:
+                    lines.append(f'VULTR_SNAPSHOT_ID={snapshot_id}\n')
+
+                with open(env_path, 'w') as f:
+                    f.writelines(lines)
+                env_updated = True
+            else:
+                # Create .env with just this value
+                with open(env_path, 'w') as f:
+                    f.write(f'VULTR_SNAPSHOT_ID={snapshot_id}\n')
+                env_updated = True
+        except Exception as e:
+            print(f"[DEDI] Failed to update .env: {e}")
+
+        status_text = "Updated in .env file." if env_updated else "Failed to update .env file."
+
+        await interaction.response.send_message(
+            embed=discord.Embed(
+                title="Snapshot Updated",
+                description=f"Stats Dedi snapshot ID has been updated.\n\n"
+                            f"**Old:** `{old_snapshot or 'Not set'}`\n"
+                            f"**New:** `{snapshot_id}`\n\n"
+                            f"{status_text}",
+                color=discord.Color.green()
+            ),
+            ephemeral=True
+        )
+        print(f"[DEDI] Snapshot updated by {interaction.user.name}: {old_snapshot} -> {snapshot_id} (env_updated={env_updated})")
 
 
 async def setup(bot):
