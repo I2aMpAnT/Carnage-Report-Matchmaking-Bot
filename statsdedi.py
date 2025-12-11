@@ -1,7 +1,7 @@
 # statsdedi.py - Vultr VPS Management for Stats Dedi
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.0.5"
+MODULE_VERSION = "1.0.6"
 
 import discord
 from discord import app_commands
@@ -87,6 +87,20 @@ def has_allowed_role():
             return True
         await interaction.response.send_message(
             "You need the Dedi, Staff, or Overlord role to use this command!",
+            ephemeral=True
+        )
+        return False
+    return app_commands.check(predicate)
+
+
+def is_admin():
+    """Check if user has Staff or Overlord role"""
+    async def predicate(interaction: discord.Interaction):
+        user_roles = [role.name for role in interaction.user.roles]
+        if any(role in ["Staff", "Overlord"] for role in user_roles):
+            return True
+        await interaction.response.send_message(
+            "You need the Staff or Overlord role to use this command!",
             ephemeral=True
         )
         return False
@@ -527,6 +541,29 @@ class StatsDediCog(commands.Cog):
 
         view = StatsDediView()
         await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+
+    @app_commands.command(name="snapshotupdate", description="Update the Vultr snapshot ID for Stats Dedis (Admin only)")
+    @app_commands.describe(snapshot_id="The new Vultr snapshot ID to use")
+    @is_admin()
+    async def snapshotupdate(self, interaction: discord.Interaction, snapshot_id: str):
+        """Update the snapshot ID used for creating Stats Dedis"""
+        global VULTR_SNAPSHOT_ID
+
+        old_snapshot = VULTR_SNAPSHOT_ID
+        VULTR_SNAPSHOT_ID = snapshot_id
+
+        await interaction.response.send_message(
+            embed=discord.Embed(
+                title="Snapshot Updated",
+                description=f"Stats Dedi snapshot ID has been updated.\n\n"
+                            f"**Old:** `{old_snapshot or 'Not set'}`\n"
+                            f"**New:** `{snapshot_id}`\n\n"
+                            f"Note: This change is temporary until bot restart. Update .env to make permanent.",
+                color=discord.Color.green()
+            ),
+            ephemeral=True
+        )
+        print(f"[DEDI] Snapshot updated by {interaction.user.name}: {old_snapshot} -> {snapshot_id}")
 
 
 async def setup(bot):
