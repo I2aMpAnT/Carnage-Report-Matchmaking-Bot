@@ -921,8 +921,6 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         await interaction.response.defer()
         log_action(f"Admin {interaction.user.name} set required roles: {role_list}")
 
-    # NOTE: /silentrankrefresh removed - use /silentverify in STATSRANKS.py instead (duplicate functionality)
-
     @bot.tree.command(name='setupgameemojis', description='[ADMIN] Auto-detect game emoji IDs')
     @has_admin_role()
     async def setup_game_emojis(interaction: discord.Interaction):
