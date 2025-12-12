@@ -2889,7 +2889,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
     @bot.tree.command(name='syncnames', description='[ADMIN] Update all discord_name fields in players.json from guild')
     @has_admin_role()
     async def sync_names(interaction: discord.Interaction):
-        """Loop through all players in players.json and update their discord_name from guild member data"""
+        """Loop through all players in players.json and update their discord_name with server nickname"""
         await interaction.response.defer(ephemeral=True)
 
         players_file = "players.json"
@@ -2902,14 +2902,23 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
 
         updated = 0
         not_found = 0
+        guild = interaction.guild
 
         for user_id_str in players.keys():
             try:
                 user_id = int(user_id_str)
-                member = interaction.guild.get_member(user_id)
+                # Try to get from cache first, then fetch if not found
+                member = guild.get_member(user_id)
+                if not member:
+                    try:
+                        member = await guild.fetch_member(user_id)
+                    except:
+                        member = None
 
                 if member:
-                    players[user_id_str]["discord_name"] = member.name
+                    # Use server nickname if set, otherwise display_name
+                    nickname = member.nick if member.nick else member.display_name
+                    players[user_id_str]["discord_name"] = nickname
                     updated += 1
                 else:
                     not_found += 1
@@ -2927,12 +2936,12 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
 
         await interaction.followup.send(
             f"✅ **Sync Complete**\n"
-            f"• Updated: **{updated}** players\n"
+            f"• Updated: **{updated}** players with server nicknames\n"
             f"• Not in server: **{not_found}** players",
             ephemeral=True
         )
 
-        log_action(f"Synced discord_names by {interaction.user.display_name}: {updated} updated")
+        log_action(f"Synced discord_names (nicknames) by {interaction.user.display_name}: {updated} updated")
 
     # ========== Twitch Commands ==========
 
