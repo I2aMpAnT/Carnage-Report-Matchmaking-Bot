@@ -2676,6 +2676,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
 
         def get_page_content(self) -> str:
             """Get the log content for the current page"""
+            import re
             # Page 0 = most recent (end of file)
             # Higher pages = older logs (earlier in file)
             end_idx = self.total_lines - (self.current_page * self.lines_per_page)
@@ -2686,6 +2687,10 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
 
             page_lines = self.all_lines[start_idx:end_idx]
             content = ''.join(page_lines)
+
+            # Redact MAC addresses (formats: XX:XX:XX:XX:XX:XX or XX-XX-XX-XX-XX-XX)
+            mac_pattern = r'([0-9A-Fa-f]{2}[:\-]){5}[0-9A-Fa-f]{2}'
+            content = re.sub(mac_pattern, '-REDACTED-', content)
 
             # Truncate if needed for Discord's limit
             if len(content) > 1800:
