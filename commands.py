@@ -1,7 +1,7 @@
 # commands.py - All Bot Commands
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.4.9"
+MODULE_VERSION = "1.5.0"
 
 import discord
 from discord import app_commands
@@ -3441,5 +3441,662 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                 f"❌ {user.display_name} has no Twitch linked.",
                 ephemeral=True
             )
+
+    # ========== STATS COMMANDS (from STATSRANKS.py) ==========
+
+    @bot.tree.command(name="addgamestats", description="[ADMIN] Add game statistics")
+    @has_admin_role()
+    @app_commands.describe(
+        match_number="Match number",
+        game_number="Game number within the match",
+        map_name="Map that was played",
+        gametype="Gametype that was played"
+    )
+    @app_commands.choices(
+        map_name=[
+            app_commands.Choice(name="Midship", value="Midship"),
+            app_commands.Choice(name="Beaver Creek", value="Beaver Creek"),
+            app_commands.Choice(name="Lockout", value="Lockout"),
+            app_commands.Choice(name="Warlock", value="Warlock"),
+            app_commands.Choice(name="Sanctuary", value="Sanctuary"),
+        ],
+        gametype=[
+            app_commands.Choice(name="MLG CTF5", value="MLG CTF5"),
+            app_commands.Choice(name="MLG CTF3", value="MLG CTF3"),
+            app_commands.Choice(name="MLG Team Slayer", value="MLG Team Slayer"),
+            app_commands.Choice(name="MLG Oddball", value="MLG Oddball"),
+            app_commands.Choice(name="MLG Bomb", value="MLG Bomb"),
+        ]
+    )
+    async def addgamestats(
+        interaction: discord.Interaction,
+        match_number: int,
+        game_number: int,
+        map_name: str,
+        gametype: str
+    ):
+        """Add game statistics"""
+        import STATSRANKS
+
+        # Validate combination
+        if gametype not in STATSRANKS.MAP_GAMETYPES.get(map_name, []):
+            await interaction.response.send_message(
+                f"❌ Sorry, **{gametype}** is not played on **{map_name}**\n\n"
+                f"Valid gametypes for {map_name}: {', '.join(STATSRANKS.MAP_GAMETYPES[map_name])}",
+                ephemeral=True
+            )
+            return
+
+        # Add to stats
+        success = STATSRANKS.add_game_stats(match_number, game_number, map_name, gametype)
+
+        if success:
+            await interaction.response.send_message(
+                f"✅ Game stats added!\n"
+                f"**Match #{match_number}** - Game {game_number}\n"
+                f"**Map:** {map_name}\n"
+                f"**Gametype:** {gametype}",
+                ephemeral=True
+            )
+            log_action(f"[STATS] Game stats added: Match {match_number}, Game {game_number}, {map_name}, {gametype}")
+        else:
+            await interaction.response.send_message(
+                "❌ Failed to add game stats!",
+                ephemeral=True
+            )
+
+    @bot.tree.command(name="playerstats", description="View player matchmaking statistics")
+    @app_commands.describe(user="User to view stats for (optional)")
+    async def playerstats(interaction: discord.Interaction, user: discord.User = None):
+        """Show player stats with per-playlist ranks"""
+        import STATSRANKS
+
+        target_user = user or interaction.user
+
+        # Get stats
+        player_stats = STATSRANKS.get_player_stats(target_user.id)
+
+        # Get highest rank and per-playlist ranks
+        highest_rank = player_stats.get("highest_rank", 1)
+        playlist_ranks = STATSRANKS.get_all_playlist_ranks(target_user.id)
+
+        # Calculate win rate
+        total_games = player_stats["total_games"]
+        wins = player_stats["wins"]
+        losses = player_stats["losses"]
+        win_rate = (wins / total_games * 100) if total_games > 0 else 0
+
+        # Get MMR
+        mmr = player_stats.get("mmr", 1500)
+
+        # Create embed
+        embed = discord.Embed(
+            title=f"{target_user.name}'s Matchmaking Stats",
+            color=discord.Color.from_rgb(0, 112, 192)
+        )
+
+        # Header with player name and MMR
+        embed.add_field(
+            name="PLAYER",
+            value=f"**{target_user.name}**",
+            inline=True
+        )
+
+        embed.add_field(
+            name="MMR",
+            value=f"**{mmr:.1f}**",
+            inline=True
+        )
+
+        embed.add_field(
+            name="HIGHEST RANK",
+            value=f"**Level {highest_rank}**",
+            inline=True
+        )
+
+        embed.add_field(name="\u200b", value="\u200b", inline=False)  # Spacer
+
+        # Per-Playlist Ranks section
+        playlists = player_stats.get("playlists", {})
+
+        ranks_text = ""
+        for ptype in STATSRANKS.PLAYLIST_TYPES:
+            pdata = playlists.get(ptype, {})
+            p_highest_rank = pdata.get("highest_rank", 1)
+            pxp = pdata.get("xp", 0)
+            pwins = pdata.get("wins", 0)
+            plosses = pdata.get("losses", 0)
+            ranks_text += f"**{ptype}**: Level {p_highest_rank} ({pxp} XP) - {pwins}W/{plosses}L\n"
+
+        embed.add_field(
+            name="📊 PLAYLIST RANKS",
+            value=ranks_text.strip() if ranks_text else "No playlist data yet",
+            inline=False
+        )
+
+        embed.add_field(name="\u200b", value="\u200b", inline=False)  # Spacer
+
+        # Win Rate
+        embed.add_field(
+            name="WINRATE",
+            value=f"**{win_rate:.0f}%**",
+            inline=True
+        )
+
+        # Wins
+        embed.add_field(
+            name="WINS",
+            value=f"**{wins}**",
+            inline=True
+        )
+
+        # Losses
+        embed.add_field(
+            name="LOSSES",
+            value=f"**{losses}**",
+            inline=True
+        )
+
+        embed.set_thumbnail(url=target_user.display_avatar.url)
+        embed.set_footer(text=f"Total Games: {total_games} | Series W/L: {player_stats['series_wins']}/{player_stats['series_losses']}")
+
+        await interaction.response.send_message(embed=embed)
+
+    @bot.tree.command(name="verifystats", description="Update your rank role based on your current stats")
+    async def verifystats(interaction: discord.Interaction):
+        """Verify and update your own rank - pulls from GitHub (source of truth)"""
+        await interaction.response.defer(ephemeral=True)
+
+        import STATSRANKS
+
+        # Pull latest stats from GitHub (source of truth) - use async version
+        github_stats = await github_webhook.async_pull_rankstats_from_github()
+
+        user_id_str = str(interaction.user.id)
+
+        if not github_stats or user_id_str not in github_stats:
+            await interaction.followup.send(
+                "❌ Could not find your stats. You may not have played any ranked games yet.",
+                ephemeral=True
+            )
+            return
+
+        player_stats = github_stats[user_id_str]
+
+        # Use highest_rank from GitHub, fall back to calculating
+        highest = player_stats.get("highest_rank")
+        if highest is None or highest < 1:
+            highest = STATSRANKS.calculate_highest_rank(player_stats)
+
+        # Update role based on highest rank (with DM notification)
+        await STATSRANKS.update_player_rank_role(interaction.guild, interaction.user.id, highest, send_dm=True)
+
+        # Update local stats to match GitHub
+        local_stats = STATSRANKS.load_json_file(STATSRANKS.RANKSTATS_FILE)
+        local_stats[user_id_str] = player_stats
+        STATSRANKS.save_json_file(STATSRANKS.RANKSTATS_FILE, local_stats, skip_github=True)
+
+        # Get per-playlist ranks for display
+        playlists = player_stats.get("playlists", {})
+        ranks_display = "\n".join([
+            f"• **{ptype}**: Level {pdata.get('highest_rank', 1)}"
+            for ptype, pdata in playlists.items()
+            if pdata.get('highest_rank', 0) > 0
+        ]) or "No playlist stats yet"
+
+        await interaction.followup.send(
+            f"✅ Your rank has been verified!\n"
+            f"**Highest Rank: Level {highest}**\n\n"
+            f"Per-playlist ranks:\n{ranks_display}",
+            ephemeral=True
+        )
+        log_action(f"[VERIFY] {interaction.user.name} verified rank: Level {highest}")
+
+    @bot.tree.command(name="verifystatsall", description="[ADMIN] Refresh all players' rank roles")
+    @has_admin_role()
+    async def verifystatsall(interaction: discord.Interaction):
+        """Refresh all ranks (Admin only) - pulls from GitHub (source of truth)"""
+        await interaction.response.send_message(
+            "🔄 Pulling ranks from GitHub and syncing... This may take a while.",
+            ephemeral=True
+        )
+
+        import STATSRANKS
+
+        guild = interaction.guild
+
+        # Pull latest stats from GitHub (source of truth) - use async version
+        stats = await github_webhook.async_pull_rankstats_from_github()
+
+        if not stats:
+            await interaction.followup.send(
+                "❌ Could not pull stats from GitHub. Please try again later.",
+                ephemeral=True
+            )
+            return
+
+        updated_count = 0
+        skipped_count = 0
+        error_count = 0
+        not_found_count = 0
+
+        for user_id_str, player_stats in stats.items():
+            try:
+                user_id = int(user_id_str)
+                member = guild.get_member(user_id)
+
+                # Try to fetch if not in cache
+                if not member:
+                    try:
+                        member = await guild.fetch_member(user_id)
+                    except (discord.NotFound, discord.HTTPException):
+                        not_found_count += 1
+                        continue
+
+                if not member:
+                    not_found_count += 1
+                    continue
+
+                # Get current Discord rank
+                current_rank = None
+                for role in member.roles:
+                    if role.name.startswith("Level "):
+                        try:
+                            current_rank = int(role.name.replace("Level ", ""))
+                            break
+                        except:
+                            pass
+
+                # Use highest_rank from GitHub, fall back to calculating
+                highest = player_stats.get("highest_rank")
+                if highest is None or highest < 1:
+                    highest = STATSRANKS.calculate_highest_rank(player_stats)
+                    print(f"  [DEBUG] {member.display_name}: highest_rank missing, calculated {highest}")
+
+                # Skip if already correct
+                if current_rank == highest:
+                    skipped_count += 1
+                    continue
+
+                print(f"  [SYNC] {member.display_name}: Discord={current_rank}, GitHub highest_rank={highest}")
+                await STATSRANKS.update_player_rank_role(guild, user_id, highest, send_dm=True)
+                updated_count += 1
+                print(f"  Updated {member.display_name}: Level {current_rank} → Level {highest}")
+
+                # Small delay to avoid rate limits
+                await asyncio.sleep(0.3)
+
+            except Exception as e:
+                print(f"❌ Error updating user {user_id_str}: {e}")
+                error_count += 1
+
+        # Update local stats to match GitHub
+        STATSRANKS.save_json_file(STATSRANKS.RANKSTATS_FILE, stats, skip_github=True)
+
+        # Summary
+        await interaction.followup.send(
+            f"✅ Rank sync complete!\n"
+            f"**Updated:** {updated_count}\n"
+            f"**Already correct:** {skipped_count}\n"
+            f"**Not in server:** {not_found_count}\n"
+            f"**Errors:** {error_count}",
+            ephemeral=True
+        )
+        log_action(f"[VERIFY ALL] Synced {updated_count} ranks, skipped {skipped_count}, not found {not_found_count}, {error_count} errors")
+
+    @bot.tree.command(name="silentverify", description="[ADMIN] Sync all ranks silently (no DMs)")
+    @has_admin_role()
+    async def silentverify(interaction: discord.Interaction):
+        """Refresh all ranks silently (Admin only) - NO DMs sent"""
+        await interaction.response.send_message(
+            "🔄 Silently syncing ranks from GitHub... (no DMs will be sent)",
+            ephemeral=True
+        )
+
+        import STATSRANKS
+
+        guild = interaction.guild
+
+        # Pull latest stats from GitHub (source of truth) - use async version
+        stats = await github_webhook.async_pull_rankstats_from_github()
+
+        if not stats:
+            await interaction.followup.send(
+                "❌ Could not pull stats from GitHub. Please try again later.",
+                ephemeral=True
+            )
+            return
+
+        updated_count = 0
+        skipped_count = 0
+        error_count = 0
+        not_found_count = 0
+
+        for user_id_str, player_stats in stats.items():
+            try:
+                user_id = int(user_id_str)
+                member = guild.get_member(user_id)
+
+                # Try to fetch if not in cache
+                if not member:
+                    try:
+                        member = await guild.fetch_member(user_id)
+                    except (discord.NotFound, discord.HTTPException):
+                        not_found_count += 1
+                        continue
+
+                if not member:
+                    not_found_count += 1
+                    continue
+
+                # Get current Discord rank
+                current_rank = None
+                for role in member.roles:
+                    if role.name.startswith("Level "):
+                        try:
+                            current_rank = int(role.name.replace("Level ", ""))
+                            break
+                        except:
+                            pass
+
+                # Use highest_rank from GitHub, fall back to calculating
+                highest = player_stats.get("highest_rank")
+                if highest is None or highest < 1:
+                    highest = STATSRANKS.calculate_highest_rank(player_stats)
+
+                # Skip if already correct
+                if current_rank == highest:
+                    skipped_count += 1
+                    continue
+
+                print(f"  [SILENT SYNC] {member.display_name}: Discord={current_rank}, GitHub highest_rank={highest}")
+                await STATSRANKS.update_player_rank_role(guild, user_id, highest, send_dm=False)
+                updated_count += 1
+                print(f"  [SILENT] Updated {member.display_name}: Level {current_rank} → Level {highest}")
+
+                # Small delay to avoid rate limits
+                await asyncio.sleep(0.3)
+
+            except Exception as e:
+                print(f"❌ Error updating user {user_id_str}: {e}")
+                error_count += 1
+
+        # Update local stats to match GitHub
+        STATSRANKS.save_json_file(STATSRANKS.RANKSTATS_FILE, stats, skip_github=True)
+
+        # Summary
+        await interaction.followup.send(
+            f"✅ Silent rank sync complete!\n"
+            f"**Updated:** {updated_count}\n"
+            f"**Already correct:** {skipped_count}\n"
+            f"**Not in server:** {not_found_count}\n"
+            f"**Errors:** {error_count}",
+            ephemeral=True
+        )
+        log_action(f"[SILENT VERIFY] Synced {updated_count} ranks, skipped {skipped_count}, not found {not_found_count}, {error_count} errors")
+
+    @bot.tree.command(name="mmr", description="[ADMIN] Set a player's MMR")
+    @has_admin_role()
+    @app_commands.describe(
+        player="Player to set MMR for",
+        value="MMR value (e.g., 1500)"
+    )
+    async def set_mmr(interaction: discord.Interaction, player: discord.User, value: int):
+        """Set player MMR (Admin only)"""
+        import STATSRANKS
+
+        # Validate MMR value
+        if value < 0 or value > 10000:
+            await interaction.response.send_message(
+                "❌ MMR must be between 0 and 10000!",
+                ephemeral=True
+            )
+            return
+
+        # Get player stats
+        stats = STATSRANKS.load_json_file(STATSRANKS.RANKSTATS_FILE)
+        user_key = str(player.id)
+
+        # Initialize if doesn't exist
+        if user_key not in stats:
+            stats[user_key] = {
+                "xp": 0,
+                "wins": 0,
+                "losses": 0,
+                "series_wins": 0,
+                "series_losses": 0,
+                "total_games": 0,
+                "total_series": 0,
+                "mmr": value
+            }
+        else:
+            stats[user_key]["mmr"] = value
+
+        # Save
+        STATSRANKS.save_json_file(STATSRANKS.RANKSTATS_FILE, stats)
+
+        await interaction.response.send_message(
+            f"✅ Set {player.mention}'s MMR to **{value}**",
+            ephemeral=True
+        )
+        log_action(f"[MMR] {interaction.user.name} set {player.name}'s MMR to {value}")
+
+    @bot.tree.command(name="leaderboard", description="View the matchmaking leaderboard")
+    async def leaderboard(interaction: discord.Interaction):
+        """Show leaderboard - starts with Overall view, use buttons to switch"""
+        import STATSRANKS
+        view = STATSRANKS.LeaderboardView(bot)
+        embed = await view.build_embed()
+        await interaction.response.send_message(embed=embed, view=view)
+
+    # ========== STATS PARSER COMMANDS (from stats_parser.py) ==========
+
+    @bot.tree.command(name="parsestats", description="[ADMIN] Parse XLSX stats files from VPS")
+    @has_admin_role()
+    @app_commands.describe(
+        directory="Which directory to parse (default: all)",
+        force="Force reparse all files even if already processed"
+    )
+    @app_commands.choices(directory=[
+        app_commands.Choice(name="All directories", value="all"),
+        app_commands.Choice(name="Public only", value="public"),
+        app_commands.Choice(name="Private only", value="private"),
+    ])
+    async def parsestats(
+        interaction: discord.Interaction,
+        directory: str = "all",
+        force: bool = False
+    ):
+        """Parse XLSX stats files and update gameshistory.json"""
+        import stats_parser
+
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            # Determine directories to scan
+            if directory == "all":
+                dirs = list(stats_parser.STATS_DIRS.values())
+            else:
+                dirs = [stats_parser.STATS_DIRS.get(directory)] if directory in stats_parser.STATS_DIRS else []
+
+            if not dirs:
+                await interaction.followup.send(f"❌ Invalid directory: {directory}", ephemeral=True)
+                return
+
+            # Parse files
+            new_count, total_count = stats_parser.parse_all_stats(dirs, force_reparse=force)
+
+            # Push to GitHub
+            github_success = stats_parser.push_gameshistory_to_github()
+            github_status = "✅ Pushed to GitHub" if github_success else "⚠️ GitHub push failed"
+
+            # Auto-match games to pending series and update results
+            updated_series = []
+            if new_count > 0:
+                try:
+                    updated_series = await stats_parser.process_stats_and_update_results(bot) or []
+                except Exception as e:
+                    print(f"Error updating series results: {e}")
+
+            series_status = f"✅ Updated {len(updated_series)} series results" if updated_series else "ℹ️ No matching series found"
+
+            # Sync Discord ranks for all players after stats are parsed
+            ranks_synced = 0
+            try:
+                ranks_synced = await stats_parser.sync_discord_ranks_for_all_players(bot)
+            except Exception as e:
+                print(f"Error syncing Discord ranks: {e}")
+
+            ranks_status = f"✅ Synced ranks for {ranks_synced} players" if ranks_synced > 0 else "ℹ️ No ranks to sync"
+
+            await interaction.followup.send(
+                f"📊 **Stats Parsing Complete**\n"
+                f"• New games parsed: **{new_count}**\n"
+                f"• Total games: **{total_count}**\n"
+                f"• {github_status}\n"
+                f"• {series_status}\n"
+                f"• {ranks_status}",
+                ephemeral=True
+            )
+            log_action(f"[STATS PARSER] {interaction.user.name} parsed stats: {new_count} new, {total_count} total, {len(updated_series)} series updated, {ranks_synced} ranks synced")
+
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error parsing stats: {e}", ephemeral=True)
+            print(f"[STATS PARSER] Error: {e}")
+
+    @bot.tree.command(name="matchstats", description="[ADMIN] Match parsed stats to pending series")
+    @has_admin_role()
+    async def matchstats(interaction: discord.Interaction):
+        """Manually trigger matching of parsed stats to pending series"""
+        import stats_parser
+
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            updated_series = await stats_parser.process_stats_and_update_results(bot) or []
+
+            # Also sync Discord ranks after matching
+            ranks_synced = 0
+            try:
+                ranks_synced = await stats_parser.sync_discord_ranks_for_all_players(bot)
+            except Exception as e:
+                print(f"Error syncing Discord ranks: {e}")
+
+            if updated_series:
+                await interaction.followup.send(
+                    f"✅ **Updated {len(updated_series)} series results:**\n" +
+                    "\n".join([f"• {s}" for s in updated_series]) +
+                    f"\n\n✅ Synced ranks for {ranks_synced} players",
+                    ephemeral=True
+                )
+            else:
+                await interaction.followup.send(
+                    f"ℹ️ No pending series matched to parsed games.\n"
+                    f"Make sure games have been parsed and series are awaiting stats.\n\n"
+                    f"✅ Synced ranks for {ranks_synced} players",
+                    ephemeral=True
+                )
+
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error matching stats: {e}", ephemeral=True)
+            print(f"[STATS PARSER] Match error: {e}")
+
+    @bot.tree.command(name="liststats", description="[ADMIN] List available XLSX stats files")
+    @has_admin_role()
+    @app_commands.describe(directory="Which directory to list")
+    @app_commands.choices(directory=[
+        app_commands.Choice(name="All directories", value="all"),
+        app_commands.Choice(name="Public only", value="public"),
+        app_commands.Choice(name="Private only", value="private"),
+    ])
+    async def liststats(interaction: discord.Interaction, directory: str = "all"):
+        """List available XLSX stats files"""
+        import stats_parser
+
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            # Determine directories to scan
+            if directory == "all":
+                dirs_to_scan = stats_parser.STATS_DIRS.items()
+            else:
+                dirs_to_scan = [(directory, stats_parser.STATS_DIRS.get(directory))] if directory in stats_parser.STATS_DIRS else []
+
+            # Get existing parsed files
+            existing_games = stats_parser.load_existing_games()
+            parsed_files = stats_parser.get_parsed_files(existing_games)
+
+            output = []
+            total_files = 0
+            total_unparsed = 0
+
+            for dir_name, dir_path in dirs_to_scan:
+                if not dir_path:
+                    continue
+
+                files = stats_parser.scan_stats_directory(dir_path)
+                unparsed = [f for f in files if os.path.basename(f) not in parsed_files]
+
+                output.append(f"**{dir_name}** ({dir_path}):")
+                output.append(f"  • Total files: {len(files)}")
+                output.append(f"  • Unparsed: {len(unparsed)}")
+
+                # Show last 5 unparsed files
+                if unparsed[:5]:
+                    output.append("  • Recent unparsed:")
+                    for f in unparsed[:5]:
+                        output.append(f"    - {os.path.basename(f)}")
+
+                total_files += len(files)
+                total_unparsed += len(unparsed)
+                output.append("")
+
+            output.append(f"**Summary:** {total_files} total files, {total_unparsed} unparsed")
+
+            await interaction.followup.send("\n".join(output), ephemeral=True)
+
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error listing stats: {e}", ephemeral=True)
+
+    @bot.tree.command(name="gamehistory", description="View recent parsed games")
+    @app_commands.describe(count="Number of games to show (default: 5)")
+    async def gamehistory(interaction: discord.Interaction, count: int = 5):
+        """Show recent parsed games"""
+        import stats_parser
+
+        count = min(count, 10)  # Limit to 10
+
+        games = stats_parser.load_existing_games()
+
+        if not games:
+            await interaction.response.send_message("No games have been parsed yet!", ephemeral=True)
+            return
+
+        embed = discord.Embed(
+            title="📊 Recent Game History",
+            color=discord.Color.blue()
+        )
+
+        for i, game in enumerate(games[:count], 1):
+            details = game.get('details', {})
+            players = game.get('players', [])
+
+            map_name = details.get('Map Name', 'Unknown')
+            variant = details.get('Variant Name', 'Unknown')
+            duration = details.get('Duration', '?:??')
+            start_time = details.get('Start Time', '')
+
+            # Get top player
+            top_player = players[0] if players else None
+            top_info = f"{top_player['name']} ({top_player['kills']}K/{top_player['deaths']}D)" if top_player else "N/A"
+
+            embed.add_field(
+                name=f"{i}. {map_name} - {variant}",
+                value=f"⏱️ {duration} | 🏆 {top_info}\n📅 {start_time}",
+                inline=False
+            )
+
+        embed.set_footer(text=f"Total games: {len(games)}")
+        await interaction.response.send_message(embed=embed)
 
     return bot

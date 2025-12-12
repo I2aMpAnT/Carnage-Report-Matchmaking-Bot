@@ -5,8 +5,8 @@
 # ============================================
 # VERSION INFO
 # ============================================
-BOT_VERSION = "1.6.3"
-BOT_BUILD_DATE = "2025-12-05"
+BOT_VERSION = "1.6.4"
+BOT_BUILD_DATE = "2025-12-12"
 # ============================================
 
 import discord
@@ -180,20 +180,6 @@ async def on_ready():
         import traceback
         traceback.print_exc()
     
-    # Setup stats module
-    try:
-        await bot.load_extension('STATSRANKS')
-        print('✅ Stats module loaded!')
-    except Exception as e:
-        print(f'⚠️ Stats module not loaded: {e}')
-
-    # Setup stats parser module (XLSX file parsing)
-    try:
-        await bot.load_extension('stats_parser')
-        print('✅ Stats parser module loaded!')
-    except Exception as e:
-        print(f'⚠️ Stats parser module not loaded: {e}')
-    
     # Sync slash commands
     try:
         synced = await bot.tree.sync()
@@ -350,10 +336,36 @@ async def on_interaction(interaction: discord.Interaction):
             else:
                 await interaction.response.send_message("You're no longer in the queue.", ephemeral=True)
 
+# Channel ID for populate_stats.py refresh trigger
+REFRESH_TRIGGER_CHANNEL_ID = 1427929973125156924
+
 @bot.event
 async def on_message(message: discord.Message):
     """Handle messages - keep queue embeds and match embeds at bottom of their channels"""
-    # Ignore bot messages
+    # Handle rank refresh trigger from populate_stats.py (allows webhooks)
+    if message.channel.id == REFRESH_TRIGGER_CHANNEL_ID:
+        # Allow webhooks but not regular bots
+        if message.author.bot and not message.webhook_id:
+            return
+        if message.content == "!refresh_ranks_trigger":
+            print("Received rank refresh trigger from populate_stats.py")
+            try:
+                import STATSRANKS
+                # Get all players from rankstats
+                stats = STATSRANKS.load_json_file(STATSRANKS.RANKSTATS_FILE)
+                player_ids = [int(uid) for uid in stats.keys() if uid.isdigit()]
+
+                # Refresh all ranks
+                await STATSRANKS.refresh_all_ranks(message.guild, player_ids, send_dm=False)
+
+                # Delete the trigger message
+                await message.delete()
+                print("Rank refresh completed successfully")
+            except Exception as e:
+                print(f"Error during rank refresh: {e}")
+            return
+
+    # Ignore bot messages for other handlers
     if message.author.bot:
         return
 
