@@ -2872,7 +2872,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             )
             return
 
-        twitch_module.set_player_twitch(interaction.user.id, name, discord_name=interaction.user.name)
+        twitch_module.set_player_twitch(interaction.user.id, name)
         await interaction.response.send_message(
             f"✅ Linked your Twitch to **{name}**",
             ephemeral=True
@@ -2943,11 +2943,32 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             return
 
         series = queue_state.current_series
+        guild = interaction.guild
+        players_data = twitch_module.load_players()
 
-        red_twitch = twitch_module.get_team_twitch_names(series.red_team)
-        blue_twitch = twitch_module.get_team_twitch_names(series.blue_team)
+        # Build lists of (discord_name, twitch_name) for each team
+        red_streams = []
+        blue_streams = []
 
-        if not red_twitch and not blue_twitch:
+        for user_id in series.red_team:
+            player_data = players_data.get(str(user_id))
+            if player_data and 'twitch_name' in player_data:
+                twitch_name = player_data['twitch_name']
+                # Get discord display name from guild member
+                member = guild.get_member(user_id)
+                discord_name = member.display_name if member else player_data.get('discord_name', twitch_name)
+                red_streams.append((discord_name, twitch_name))
+
+        for user_id in series.blue_team:
+            player_data = players_data.get(str(user_id))
+            if player_data and 'twitch_name' in player_data:
+                twitch_name = player_data['twitch_name']
+                # Get discord display name from guild member
+                member = guild.get_member(user_id)
+                discord_name = member.display_name if member else player_data.get('discord_name', twitch_name)
+                blue_streams.append((discord_name, twitch_name))
+
+        if not red_streams and not blue_streams:
             await interaction.response.send_message(
                 "❌ No players have Twitch linked.",
                 ephemeral=True
@@ -2959,19 +2980,23 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             color=discord.Color.purple()
         )
 
-        if red_twitch:
+        if red_streams:
             embed.add_field(
                 name="🔴 Red Team Streams",
-                value="\n".join([f"[{n}](https://twitch.tv/{n})" for n in red_twitch]),
+                value="\n".join([f"[{discord_name}](https://twitch.tv/{twitch_name})" for discord_name, twitch_name in red_streams]),
                 inline=True
             )
 
-        if blue_twitch:
+        if blue_streams:
             embed.add_field(
                 name="🔵 Blue Team Streams",
-                value="\n".join([f"[{n}](https://twitch.tv/{n})" for n in blue_twitch]),
+                value="\n".join([f"[{discord_name}](https://twitch.tv/{twitch_name})" for discord_name, twitch_name in blue_streams]),
                 inline=True
             )
+
+        # Get just twitch names for the MultiStreamView buttons
+        red_twitch = [t for _, t in red_streams]
+        blue_twitch = [t for _, t in blue_streams]
 
         view = twitch_module.MultiStreamView(red_twitch, blue_twitch)
         await interaction.response.send_message(embed=embed, view=view)
@@ -3002,7 +3027,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             await interaction.response.send_message("❌ Invalid Twitch username.", ephemeral=True)
             return
 
-        twitch_module.set_player_twitch(user.id, name, discord_name=user.name)
+        twitch_module.set_player_twitch(user.id, name)
         await interaction.response.send_message(
             f"✅ Set {user.display_name}'s Twitch to **{name}**",
             ephemeral=True
