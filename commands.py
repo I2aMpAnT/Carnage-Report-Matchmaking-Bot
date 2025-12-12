@@ -1,7 +1,7 @@
 # commands.py - All Bot Commands
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.4.9"
+MODULE_VERSION = "1.5.0"
 
 import discord
 from discord import app_commands
@@ -3343,5 +3343,82 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         results.append(f"\n**📂 Working Directory:**\n`{os.getcwd()}`")
 
         await interaction.followup.send("\n".join(results), ephemeral=True)
+
+    @bot.tree.command(name="populatestatsrefresh", description="[ADMIN] Clear all stats files and repopulate from scratch")
+    @has_admin_role()
+    async def populatestatsrefresh(interaction: discord.Interaction):
+        """Clear stats JSON files and run populate_stats.py"""
+        await interaction.response.defer(ephemeral=True)
+
+        import subprocess
+
+        stats_dir = "/home/carnagereport/CarnageReport.com"
+        files_to_delete = [
+            "processed_state.json",
+            "gamestats.json",
+            "gameshistory.json",
+            "rankstats.json",
+            "ranks.json",
+            "customgames.json",
+            "MLG 4v4_matches.json",
+            "MLG 4v4_stats.json",
+            "rankhistory.json",
+            "series.json",
+            "head_to_head_matches.json",
+            "head_to_head_stats.json",
+            "matchhistory.json",
+        ]
+
+        deleted = []
+        errors = []
+
+        # Delete each file
+        for filename in files_to_delete:
+            filepath = os.path.join(stats_dir, filename)
+            try:
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+                    deleted.append(filename)
+            except Exception as e:
+                errors.append(f"{filename}: {e}")
+
+        # Run populate_stats.py
+        try:
+            result = subprocess.run(
+                ["python3", "populate_stats.py"],
+                cwd=stats_dir,
+                capture_output=True,
+                text=True,
+                timeout=300  # 5 minute timeout
+            )
+            populate_success = result.returncode == 0
+            populate_output = result.stdout[-500:] if result.stdout else ""
+            populate_error = result.stderr[-500:] if result.stderr else ""
+        except subprocess.TimeoutExpired:
+            populate_success = False
+            populate_output = ""
+            populate_error = "Timeout after 5 minutes"
+        except Exception as e:
+            populate_success = False
+            populate_output = ""
+            populate_error = str(e)
+
+        # Build response
+        response = f"**Stats Refresh Results**\n\n"
+        response += f"**Deleted {len(deleted)} files:**\n"
+        if deleted:
+            response += "```\n" + "\n".join(deleted) + "\n```\n"
+        else:
+            response += "No files found to delete.\n"
+
+        if errors:
+            response += f"\n**Errors:**\n```\n" + "\n".join(errors) + "\n```\n"
+
+        response += f"\n**populate_stats.py:** {'✅ Success' if populate_success else '❌ Failed'}\n"
+        if populate_error:
+            response += f"```\n{populate_error}\n```"
+
+        log_action(f"Admin {interaction.user.name} ran /populatestatsrefresh - deleted {len(deleted)} files, populate={'success' if populate_success else 'failed'}")
+        await interaction.followup.send(response, ephemeral=True)
 
     return bot
