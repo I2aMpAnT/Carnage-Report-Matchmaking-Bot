@@ -175,6 +175,13 @@ async def on_ready():
         import traceback
         traceback.print_exc()
     
+    # Setup Stats Dedi module (Vultr VPS management)
+    try:
+        await bot.load_extension('statsdedi')
+        print('✅ Stats Dedi module loaded!')
+    except Exception as e:
+        print(f'⚠️ Stats Dedi module not loaded: {e}')
+
     # Sync slash commands
     try:
         synced = await bot.tree.sync()

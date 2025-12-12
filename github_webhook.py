@@ -3,7 +3,7 @@ github_webhook.py - Automatic GitHub Updates
 Pushes all JSON data files to GitHub whenever they're updated
 """
 
-MODULE_VERSION = "1.2.1"
+MODULE_VERSION = "1.2.2"
 
 import json
 import base64
@@ -37,7 +37,7 @@ JSON_FILES = {
     "head_to_head.json": "head_to_head.json",
     "testmatchhistory.json": "testmatchhistory.json",
     # Stats and config
-    "rankstats.json": "rankstats.json",
+    "MMR.json": "MMR.json",
     "gamestats.json": "gamestats.json",
     "queue_config.json": "queue_config.json",
     "xp_config.json": "xp_config.json",
@@ -134,6 +134,17 @@ async def async_pull_rankstats_from_github() -> dict:
     """Async version: Pull rankstats.json from GitHub"""
     return await async_pull_file_from_github("rankstats.json")
 
+
+async def async_pull_ranks_from_github() -> dict:
+    """Async version: Pull ranks.json from GitHub (website source of truth)"""
+    return await async_pull_file_from_github("ranks.json")
+
+
+async def async_pull_emblems_from_github() -> dict:
+    """Async version: Pull emblems.json from GitHub (player emblem data)"""
+    return await async_pull_file_from_github("emblems.json")
+
+
 def push_file_to_github(local_file: str, github_path: str, commit_message: str = None) -> bool:
     """
     Push a local file to GitHub repo
@@ -225,9 +236,13 @@ def update_testmatchhistory_on_github():
     """Push testmatchhistory.json to GitHub"""
     return push_file_to_github("testmatchhistory.json", "testmatchhistory.json")
 
+def update_mmr_on_github():
+    """Push MMR.json to GitHub"""
+    return push_file_to_github("MMR.json", "MMR.json")
+
 def update_rankstats_on_github():
-    """Push rankstats.json to GitHub"""
-    return push_file_to_github("rankstats.json", "rankstats.json")
+    """DEPRECATED: Use update_mmr_on_github instead. Kept for backwards compatibility."""
+    return update_mmr_on_github()
 
 def update_gamestats_on_github():
     """Push gamestats.json to GitHub"""

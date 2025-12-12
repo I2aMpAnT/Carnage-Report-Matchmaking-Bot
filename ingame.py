@@ -254,13 +254,18 @@ class SeriesView(View):
         await interaction.response.defer()
         await self.update_series_embed(interaction.channel)
         
-        # Count staff votes
-        staff_votes = sum(1 for uid in self.end_voters 
-                         if any(role in ADMIN_ROLES 
-                               for role in interaction.guild.get_member(uid).roles))
-        
-        # End conditions: 5 total votes OR 2 staff votes
-        if len(self.end_voters) >= 5 or staff_votes >= 2:
+        # Count staff votes (handle case where member might not be cached)
+        staff_votes = 0
+        for uid in self.end_voters:
+            member = interaction.guild.get_member(uid)
+            if member:
+                member_roles = [role.name for role in member.roles]
+                if any(role in ADMIN_ROLES for role in member_roles):
+                    staff_votes += 1
+
+        # End conditions: majority (5 of 8) total votes OR 2 staff votes
+        majority_needed = (len(all_players) // 2) + 1
+        if len(self.end_voters) >= majority_needed or staff_votes >= 2:
             from postgame import end_series
             await end_series(self, interaction.channel)
     
