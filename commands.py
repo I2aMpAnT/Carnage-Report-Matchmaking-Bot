@@ -210,7 +210,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         valid_commands = [
             "addplayer", "removeplayer", "resetqueue", "cancelmatch", "cancelcurrent",
             "correctcurrent", "testmatchmaking", "swap", "ping", "silentping",
-            "bannedroles", "requiredroles", "setupgameemojis",
+            "bannedroles", "requiredroles",
             "adminunlinkalias", "linkalias", "unlinkalias", "myalias",
             "linktwitch", "unlinktwitch", "mytwitch", "stats", "leaderboard", "rank",
             "help", "addstaffrole", "removestaffrole", "liststaffroles", "rolerulechange",
@@ -925,63 +925,6 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         await interaction.response.defer()
         log_action(f"Admin {interaction.user.name} set required roles: {role_list}")
 
-    @bot.tree.command(name='setupgameemojis', description='[ADMIN] Auto-detect game emoji IDs')
-    @has_admin_role()
-    async def setup_game_emojis(interaction: discord.Interaction):
-        """Find all Game#RED and Game#BLUE emojis and save their IDs"""
-        await interaction.response.defer(ephemeral=True)
-        
-        import json
-        guild = interaction.guild
-        
-        # Find all game emojis
-        game_emojis = {}
-        found_count = 0
-        missing = []
-        
-        for i in range(1, 21):
-            red_name = f"Game{i}RED"
-            blue_name = f"Game{i}BLUE"
-            
-            red_emoji = discord.utils.get(guild.emojis, name=red_name)
-            blue_emoji = discord.utils.get(guild.emojis, name=blue_name)
-            
-            if red_emoji:
-                if i not in game_emojis:
-                    game_emojis[i] = {}
-                game_emojis[i]["RED"] = str(red_emoji.id)
-                found_count += 1
-            else:
-                missing.append(red_name)
-            
-            if blue_emoji:
-                if i not in game_emojis:
-                    game_emojis[i] = {}
-                game_emojis[i]["BLUE"] = str(blue_emoji.id)
-                found_count += 1
-            else:
-                missing.append(blue_name)
-        
-        # Save to file
-        with open('game_emojis.json', 'w') as f:
-            json.dump(game_emojis, f, indent=2)
-        
-        # Build response
-        response = f"✅ **Game Emojis Setup Complete!**\n\n"
-        response += f"**Found:** {found_count}/40 emojis\n"
-        response += f"**Saved to:** game_emojis.json\n\n"
-        
-        if missing:
-            response += f"**Missing ({len(missing)}):**\n"
-            response += ", ".join(missing[:10])
-            if len(missing) > 10:
-                response += f"... and {len(missing) - 10} more"
-        else:
-            response += "🎉 All 40 game emojis found!"
-        
-        await interaction.followup.send(response, ephemeral=True)
-        log_action(f"{interaction.user.display_name} ran game emoji setup - found {found_count}/40")
-    
     # ==== TEST COMMANDS ====
     
     @bot.tree.command(name='testmatchmaking', description='[STAFF] Start a 4v4 test match with 2 testers + 6 random players with MMR')
