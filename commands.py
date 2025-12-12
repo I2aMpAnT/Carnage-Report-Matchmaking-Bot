@@ -3019,9 +3019,22 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             )
             return
 
+        await interaction.response.defer()
+
         series = queue_state.current_series
         guild = interaction.guild
         players_data = twitch_module.load_players()
+
+        # Helper to get member's server nickname
+        async def get_nickname(user_id):
+            member = guild.get_member(user_id)
+            if not member:
+                try:
+                    member = await guild.fetch_member(user_id)
+                except:
+                    return None
+            # Use nick (server nickname) if set, otherwise display_name
+            return member.nick if member.nick else member.display_name
 
         # Build lists of (discord_name, twitch_name) for each team
         red_streams = []
@@ -3031,22 +3044,24 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             player_data = players_data.get(str(user_id))
             if player_data and 'twitch_name' in player_data:
                 twitch_name = player_data['twitch_name']
-                # Get discord display name from guild member
-                member = guild.get_member(user_id)
-                discord_name = member.display_name if member else player_data.get('discord_name', twitch_name)
+                # Get server nickname from guild member
+                discord_name = await get_nickname(user_id)
+                if not discord_name:
+                    discord_name = player_data.get('discord_name', twitch_name)
                 red_streams.append((discord_name, twitch_name))
 
         for user_id in series.blue_team:
             player_data = players_data.get(str(user_id))
             if player_data and 'twitch_name' in player_data:
                 twitch_name = player_data['twitch_name']
-                # Get discord display name from guild member
-                member = guild.get_member(user_id)
-                discord_name = member.display_name if member else player_data.get('discord_name', twitch_name)
+                # Get server nickname from guild member
+                discord_name = await get_nickname(user_id)
+                if not discord_name:
+                    discord_name = player_data.get('discord_name', twitch_name)
                 blue_streams.append((discord_name, twitch_name))
 
         if not red_streams and not blue_streams:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ No players have Twitch linked.",
                 ephemeral=True
             )
@@ -3076,7 +3091,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         blue_twitch = [t for _, t in blue_streams]
 
         view = twitch_module.MultiStreamView(red_twitch, blue_twitch)
-        await interaction.response.send_message(embed=embed, view=view)
+        await interaction.followup.send(embed=embed, view=view)
 
     @bot.tree.command(name='stream', description='Get MultiTwitch links for current match')
     async def stream_command(interaction: discord.Interaction):
