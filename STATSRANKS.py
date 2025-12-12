@@ -60,7 +60,7 @@ def get_default_playlists() -> dict:
 
 # File paths
 GAMESTATS_FILE = "gamestats.json"
-RANKS_FILE = "ranks.json"  # Website source of truth (discord_id -> rank data)
+RANKS_FILE = "/home/carnagereport/CarnageReport.com/ranks.json"  # Website source of truth (discord_id -> rank data)
 XP_CONFIG_FILE = "xp_config.json"
 MMR_FILE = "MMR.json"  # Contains MMR values for team balancing (simple format for easy editing)
 
