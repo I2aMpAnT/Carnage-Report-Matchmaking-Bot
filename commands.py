@@ -212,7 +212,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             "correctcurrent", "testmatchmaking", "swap", "ping", "silentping",
             "bannedroles", "requiredroles", "setupgameemojis",
             "adminunlinkalias", "linkalias", "unlinkalias", "myalias",
-            "linktwitch", "unlinktwitch", "mytwitch", "stats", "rank",
+            "linktwitch", "unlinktwitch", "mytwitch", "stats", "leaderboard", "rank",
             "help", "addstaffrole", "removestaffrole", "liststaffroles", "rolerulechange",
             "listrolerules"
         ]
@@ -921,6 +921,8 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         await interaction.response.defer()
         log_action(f"Admin {interaction.user.name} set required roles: {role_list}")
 
+    # NOTE: /silentrankrefresh removed - use /silentverify in STATSRANKS.py instead (duplicate functionality)
+
     @bot.tree.command(name='setupgameemojis', description='[ADMIN] Auto-detect game emoji IDs')
     @has_admin_role()
     async def setup_game_emojis(interaction: discord.Interaction):
@@ -1485,7 +1487,10 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         commands_list = []
 
         # Public Commands
-        commands_list.append("**📊 INFO**")
+        commands_list.append("**📊 STATS & INFO**")
+        commands_list.append("`/playerstats` - View player stats and MMR")
+        commands_list.append("`/leaderboard` - View MMR leaderboard")
+        commands_list.append("`/verifystats` - Verify your stats are correct")
         commands_list.append("`/help` - Show this help message")
         commands_list.append("")
 
@@ -1532,6 +1537,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             commands_list.append("")
 
             commands_list.append("**⚙️ STAFF - PLAYERS** `[STAFF]`")
+            commands_list.append("`/mmr` - Set/view player MMR")
             commands_list.append("`/adminsettwitch` - Set a player's Twitch")
             commands_list.append("`/removetwitch` - Remove a player's Twitch")
             commands_list.append("`/unlinkalias` - Remove a player's alias")
@@ -1545,6 +1551,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             commands_list.append("`/requiredroles` - Manage required roles")
             commands_list.append("`/hideplayernames` - Hide names in queue")
             commands_list.append("`/showplayernames` - Show names in queue")
+            commands_list.append("`/silentverify` - Refresh ranks silently")
             commands_list.append("")
 
             commands_list.append("**⚙️ STAFF - TESTING** `[STAFF]`")
@@ -3178,5 +3185,366 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                 "❌ Failed to add game stats!",
                 ephemeral=True
             )
+
+    @bot.tree.command(name="playerstats", description="View player matchmaking statistics")
+    @app_commands.describe(user="User to view stats for (optional)")
+    async def playerstats(interaction: discord.Interaction, user: discord.User = None):
+        """Show player stats with per-playlist ranks - reads from ranks.json (website source of truth)"""
+        import STATSRANKS
+
+        target_user = user or interaction.user
+
+        # Get stats from ranks.json (website source of truth)
+        player_stats = STATSRANKS.get_player_stats(target_user.id)
+
+        # Get highest rank
+        highest_rank = player_stats.get("highest_rank", 1)
+
+        # Calculate win rate
+        total_games = player_stats["total_games"]
+        wins = player_stats["wins"]
+        losses = player_stats["losses"]
+        win_rate = (wins / total_games * 100) if total_games > 0 else 0
+
+        # Get MMR (from MMR.json if available)
+        mmr = player_stats.get("mmr")
+        mmr_display = f"**{mmr:.1f}**" if mmr else "N/A"
+
+        # Create embed
+        embed = discord.Embed(
+            title=f"{target_user.name}'s Matchmaking Stats",
+            color=discord.Color.from_rgb(0, 112, 192)
+        )
+
+        # Header with player name and MMR
+        embed.add_field(
+            name="PLAYER",
+            value=f"**{target_user.name}**",
+            inline=True
+        )
+
+        embed.add_field(
+            name="MMR",
+            value=mmr_display,
+            inline=True
+        )
+
+        embed.add_field(
+            name="HIGHEST RANK",
+            value=f"**Level {highest_rank}**",
+            inline=True
+        )
+
+        embed.add_field(name="\u200b", value="\u200b", inline=False)  # Spacer
+
+        # Per-Playlist Ranks section (from ranks.json)
+        playlists = player_stats.get("playlists", {})
+
+        ranks_text = ""
+        for ptype in STATSRANKS.PLAYLIST_TYPES:
+            pdata = playlists.get(ptype, {})
+            # ranks.json uses "rank" for current rank, "highest_rank" for highest achieved
+            p_rank = pdata.get("rank", pdata.get("highest_rank", 1))
+            pwins = pdata.get("wins", 0)
+            plosses = pdata.get("losses", 0)
+            if pwins > 0 or plosses > 0:  # Only show playlists with activity
+                ranks_text += f"**{ptype}**: Level {p_rank} - {pwins}W/{plosses}L\n"
+
+        embed.add_field(
+            name="📊 PLAYLIST RANKS",
+            value=ranks_text.strip() if ranks_text else "No playlist data yet",
+            inline=False
+        )
+
+        embed.add_field(name="\u200b", value="\u200b", inline=False)  # Spacer
+
+        # Win Rate
+        embed.add_field(
+            name="WINRATE",
+            value=f"**{win_rate:.0f}%**",
+            inline=True
+        )
+
+        # Wins
+        embed.add_field(
+            name="WINS",
+            value=f"**{wins}**",
+            inline=True
+        )
+
+        # Losses
+        embed.add_field(
+            name="LOSSES",
+            value=f"**{losses}**",
+            inline=True
+        )
+
+        embed.set_thumbnail(url=target_user.display_avatar.url)
+        embed.set_footer(text=f"Total Games: {total_games} | Series W/L: {player_stats['series_wins']}/{player_stats['series_losses']}")
+
+        await interaction.response.send_message(embed=embed)
+
+    @bot.tree.command(name="verifystats", description="Update your rank role based on your current stats")
+    async def verifystats(interaction: discord.Interaction):
+        """Verify and update your own rank - pulls from ranks.json (website source of truth)"""
+        await interaction.response.defer(ephemeral=True)
+
+        import STATSRANKS
+
+        # Pull latest ranks from GitHub (website source of truth)
+        ranks = await STATSRANKS.async_load_ranks_from_github()
+
+        user_id_str = str(interaction.user.id)
+
+        if not ranks or user_id_str not in ranks:
+            await interaction.followup.send(
+                "❌ Could not find your stats. You may not have played any ranked games yet.",
+                ephemeral=True
+            )
+            return
+
+        player_data = ranks[user_id_str]
+
+        # Get highest_rank from ranks.json
+        highest = player_data.get("highest_rank", 1)
+
+        # Update Discord role based on highest rank
+        await STATSRANKS.update_player_rank_role(interaction.guild, interaction.user.id, highest, send_dm=False)
+
+        # Get per-playlist ranks for display
+        playlists = player_data.get("playlists", {})
+        ranks_display = "\n".join([
+            f"• **{ptype}**: Level {pdata.get('rank', pdata.get('highest_rank', 1))}"
+            for ptype, pdata in playlists.items()
+            if pdata.get('wins', 0) > 0 or pdata.get('losses', 0) > 0
+        ]) or "No playlist stats yet"
+
+        await interaction.followup.send(
+            f"✅ Your rank has been verified!\n"
+            f"**Highest Rank: Level {highest}**\n\n"
+            f"Per-playlist ranks:\n{ranks_display}",
+            ephemeral=True
+        )
+        log_action(f"[VERIFY] {interaction.user.name} verified rank: Level {highest}")
+
+    @bot.tree.command(name="verifystatsall", description="[ADMIN] Refresh all players' rank roles")
+    @has_admin_role()
+    async def verifystatsall(interaction: discord.Interaction):
+        """Refresh all ranks (Admin only) - pulls from ranks.json (website source of truth)"""
+        await interaction.response.send_message(
+            "🔄 Pulling ranks from GitHub and syncing... This may take a while.",
+            ephemeral=True
+        )
+
+        import STATSRANKS
+
+        guild = interaction.guild
+
+        # Pull latest ranks from GitHub (website source of truth)
+        ranks = await STATSRANKS.async_load_ranks_from_github()
+
+        if not ranks:
+            await interaction.followup.send(
+                "❌ Could not pull ranks from GitHub. Please try again later.",
+                ephemeral=True
+            )
+            return
+
+        updated_count = 0
+        skipped_count = 0
+        error_count = 0
+        not_found_count = 0
+
+        for user_id_str, player_data in ranks.items():
+            try:
+                user_id = int(user_id_str)
+                member = guild.get_member(user_id)
+
+                # Try to fetch if not in cache
+                if not member:
+                    try:
+                        member = await guild.fetch_member(user_id)
+                    except (discord.NotFound, discord.HTTPException):
+                        not_found_count += 1
+                        continue
+
+                if not member:
+                    not_found_count += 1
+                    continue
+
+                # Get current Discord rank
+                current_rank = None
+                for role in member.roles:
+                    if role.name.startswith("Level "):
+                        try:
+                            current_rank = int(role.name.replace("Level ", ""))
+                            break
+                        except:
+                            pass
+
+                # Get highest_rank from ranks.json
+                highest = player_data.get("highest_rank", 1)
+
+                # Skip if already correct
+                if current_rank == highest:
+                    skipped_count += 1
+                    continue
+
+                print(f"  [SYNC] {member.display_name}: Discord={current_rank}, ranks.json highest_rank={highest}")
+                await STATSRANKS.update_player_rank_role(guild, user_id, highest, send_dm=True)
+                updated_count += 1
+                print(f"  Updated {member.display_name}: Level {current_rank} → Level {highest}")
+
+                # Small delay to avoid rate limits
+                await asyncio.sleep(0.3)
+
+            except Exception as e:
+                print(f"❌ Error updating user {user_id_str}: {e}")
+                error_count += 1
+
+        # Summary
+        await interaction.followup.send(
+            f"✅ Rank sync complete!\n"
+            f"**Updated:** {updated_count}\n"
+            f"**Already correct:** {skipped_count}\n"
+            f"**Not in server:** {not_found_count}\n"
+            f"**Errors:** {error_count}",
+            ephemeral=True
+        )
+        log_action(f"[VERIFY ALL] Synced {updated_count} ranks, skipped {skipped_count}, not found {not_found_count}, {error_count} errors")
+
+    @bot.tree.command(name="silentverify", description="[ADMIN] Sync all ranks silently (no DMs)")
+    @has_admin_role()
+    async def silentverify(interaction: discord.Interaction):
+        """Refresh all ranks silently (Admin only) - pulls from ranks.json, NO DMs sent"""
+        await interaction.response.send_message(
+            "🔄 Silently syncing ranks from GitHub... (no DMs will be sent)",
+            ephemeral=True
+        )
+
+        import STATSRANKS
+
+        guild = interaction.guild
+
+        # Pull latest ranks from GitHub (website source of truth)
+        ranks = await STATSRANKS.async_load_ranks_from_github()
+
+        if not ranks:
+            await interaction.followup.send(
+                "❌ Could not pull ranks from GitHub. Please try again later.",
+                ephemeral=True
+            )
+            return
+
+        updated_count = 0
+        skipped_count = 0
+        error_count = 0
+        not_found_count = 0
+
+        for user_id_str, player_data in ranks.items():
+            try:
+                user_id = int(user_id_str)
+                member = guild.get_member(user_id)
+
+                # Try to fetch if not in cache
+                if not member:
+                    try:
+                        member = await guild.fetch_member(user_id)
+                    except (discord.NotFound, discord.HTTPException):
+                        not_found_count += 1
+                        continue
+
+                if not member:
+                    not_found_count += 1
+                    continue
+
+                # Get current Discord rank
+                current_rank = None
+                for role in member.roles:
+                    if role.name.startswith("Level "):
+                        try:
+                            current_rank = int(role.name.replace("Level ", ""))
+                            break
+                        except:
+                            pass
+
+                # Get highest_rank from ranks.json
+                highest = player_data.get("highest_rank", 1)
+
+                # Skip if already correct
+                if current_rank == highest:
+                    skipped_count += 1
+                    continue
+
+                print(f"  [SILENT SYNC] {member.display_name}: Discord={current_rank}, ranks.json highest_rank={highest}")
+                await STATSRANKS.update_player_rank_role(guild, user_id, highest, send_dm=False)
+                updated_count += 1
+                print(f"  [SILENT] Updated {member.display_name}: Level {current_rank} → Level {highest}")
+
+                # Small delay to avoid rate limits
+                await asyncio.sleep(0.3)
+
+            except Exception as e:
+                print(f"❌ Error updating user {user_id_str}: {e}")
+                error_count += 1
+
+        # Summary
+        await interaction.followup.send(
+            f"✅ Silent rank sync complete!\n"
+            f"**Updated:** {updated_count}\n"
+            f"**Already correct:** {skipped_count}\n"
+            f"**Not in server:** {not_found_count}\n"
+            f"**Errors:** {error_count}",
+            ephemeral=True
+        )
+        log_action(f"[SILENT VERIFY] Synced {updated_count} ranks, skipped {skipped_count}, not found {not_found_count}, {error_count} errors")
+
+    @bot.tree.command(name="mmr", description="[ADMIN] Set a player's MMR")
+    @has_admin_role()
+    @app_commands.describe(
+        player="Player to set MMR for",
+        value="MMR value (e.g., 1500)"
+    )
+    async def set_mmr(interaction: discord.Interaction, player: discord.User, value: int):
+        """Set player MMR (Admin only) - stored in MMR.json for team balancing"""
+        import STATSRANKS
+        import json
+
+        # Validate MMR value
+        if value < 0 or value > 10000:
+            await interaction.response.send_message(
+                "❌ MMR must be between 0 and 10000!",
+                ephemeral=True
+            )
+            return
+
+        # Load MMR.json (separate file for team balancing)
+        mmr_data = STATSRANKS.load_json_file(STATSRANKS.MMR_FILE)
+        user_key = str(player.id)
+
+        # Initialize or update MMR
+        if user_key not in mmr_data:
+            mmr_data[user_key] = {"mmr": value}
+        else:
+            mmr_data[user_key]["mmr"] = value
+
+        # Save to MMR.json
+        with open(STATSRANKS.MMR_FILE, 'w') as f:
+            json.dump(mmr_data, f, indent=2)
+
+        await interaction.response.send_message(
+            f"✅ Set {player.mention}'s MMR to **{value}**",
+            ephemeral=True
+        )
+        log_action(f"[MMR] {interaction.user.name} set {player.name}'s MMR to {value}")
+
+    @bot.tree.command(name="leaderboard", description="View the matchmaking leaderboard")
+    async def leaderboard(interaction: discord.Interaction):
+        """Show leaderboard - reads from ranks.json (website source of truth)"""
+        import STATSRANKS
+        # Pass guild for emoji lookup
+        view = STATSRANKS.LeaderboardView(bot, guild=interaction.guild)
+        embed = await view.build_embed()
+        await interaction.response.send_message(embed=embed, view=view)
 
     return bot
