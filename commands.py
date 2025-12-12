@@ -3520,4 +3520,59 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         # Ephemeral so each player can interact with their own instance
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
+    @bot.tree.command(name="populatestatsrefresh", description="[ADMIN] Clear all stats files and repopulate from scratch")
+    @has_admin_role()
+    async def populatestatsrefresh(interaction: discord.Interaction):
+        """Clear stats JSON files and run populate_stats.py"""
+        await interaction.response.defer(ephemeral=True)
+
+        import subprocess
+
+        # Shell commands to run
+        script = '''cd /home/carnagereport/CarnageReport.com
+rm -f processed_state.json
+rm -f gamestats.json
+rm -f gameshistory.json
+rm -f rankstats.json
+rm -f ranks.json
+rm -f customgames.json
+rm -f "MLG 4v4_matches.json"
+rm -f "MLG 4v4_stats.json"
+rm -f rankhistory.json
+rm -f series.json
+rm -f head_to_head_matches.json
+rm -f head_to_head_stats.json
+rm -f matchhistory.json
+python3 populate_stats.py'''
+
+        try:
+            result = subprocess.run(
+                script,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=300  # 5 minute timeout
+            )
+            success = result.returncode == 0
+            output = result.stdout[-1500:] if result.stdout else ""
+            error = result.stderr[-500:] if result.stderr else ""
+        except subprocess.TimeoutExpired:
+            success = False
+            output = ""
+            error = "Timeout after 5 minutes"
+        except Exception as e:
+            success = False
+            output = ""
+            error = str(e)
+
+        # Build response
+        response = f"**Stats Refresh:** {'✅ Success' if success else '❌ Failed'}\n"
+        if output:
+            response += f"```\n{output}\n```"
+        if error:
+            response += f"\n**Error:**\n```\n{error}\n```"
+
+        log_action(f"Admin {interaction.user.name} ran /populatestatsrefresh - {'success' if success else 'failed'}")
+        await interaction.followup.send(response, ephemeral=True)
+
     return bot
