@@ -172,6 +172,15 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
     # Use test players if provided, otherwise use queue
     players = test_players if test_players else queue_state.queue[:]
 
+    # Lock these players into the match - they cannot leave
+    if not test_mode:
+        queue_state.locked = True
+        queue_state.locked_players = players[:]
+        # Clear the queue so new players can queue for the next match
+        queue_state.queue.clear()
+        queue_state.queue_join_times.clear()
+        log_action(f"Queue locked with {len(players)} players, queue reset for next match")
+
     # Store test mode info
     queue_state.test_mode = test_mode
 
@@ -720,17 +729,7 @@ class TeamSelectionView(View):
             # Found majority - use the winning method
             method = winning_method
 
-        # Delete the pregame embed
-        try:
-            if self.pregame_message:
-                await self.pregame_message.delete()
-            elif hasattr(queue_state, 'pregame_message') and queue_state.pregame_message:
-                await queue_state.pregame_message.delete()
-                queue_state.pregame_message = None
-        except:
-            pass
-        
-        # Execute the selected method
+        # Execute the selected method - edit existing embed instead of posting new ones
         if method == "balanced":
             await self.create_balanced_teams(interaction)
         elif method == "captains":
@@ -854,33 +853,63 @@ class TeamSelectionView(View):
         )
 
     async def start_captains_draft(self, interaction: discord.Interaction):
-        """Start captain draft"""
+        """Start captain draft - edits existing pregame embed"""
+        from searchmatchmaking import queue_state
+
         # Pick 2 random captains
         captains = random.sample(self.players, 2)
         remaining = [p for p in self.players if p not in captains]
 
         embed = discord.Embed(
-            title="Captains Draft",
+            title=f"Captains Draft - {self.match_label}",
             description="Captains will pick their teams!",
             color=discord.Color.purple()
         )
 
         embed.add_field(name=f"<:redteam:{RED_TEAM_EMOJI_ID}> Captain 1 (Red)", value=f"<@{captains[0]}>", inline=True)
         embed.add_field(name=f"<:blueteam:{BLUE_TEAM_EMOJI_ID}> Captain 2 (Blue)", value=f"<@{captains[1]}>", inline=True)
+        embed.add_field(name="Available Players", value="\n".join([f"<@{uid}>" for uid in remaining]), inline=False)
 
-        view = CaptainDraftView(captains, remaining, test_mode=self.test_mode)
-        await interaction.followup.send(embed=embed, view=view)
+        view = CaptainDraftView(captains, remaining, test_mode=self.test_mode, match_label=self.match_label)
+
+        # Edit the existing pregame message instead of posting new one
+        if self.pregame_message:
+            try:
+                await self.pregame_message.edit(embed=embed, view=view)
+                view.draft_message = self.pregame_message
+                return
+            except:
+                pass
+
+        # Fallback: send new message if edit fails
+        msg = await interaction.followup.send(embed=embed, view=view)
+        view.draft_message = msg
 
     async def start_players_pick(self, interaction: discord.Interaction):
-        """Start players pick teams"""
+        """Start players pick teams - edits existing pregame embed"""
         embed = discord.Embed(
-            title="Players Pick Teams",
-            description="Click a button to join a team!",
+            title=f"Players Pick Teams - {self.match_label}",
+            description="Click a button to join a team!\n\nTeams must be **4v4** to proceed.",
             color=discord.Color.green()
         )
 
-        view = PlayersPickView(self.players, test_mode=self.test_mode)
-        await interaction.followup.send(embed=embed, view=view)
+        embed.add_field(name=f"<:redteam:{RED_TEAM_EMOJI_ID}> Red Team (0/4)", value="*No players yet*", inline=True)
+        embed.add_field(name=f"<:blueteam:{BLUE_TEAM_EMOJI_ID}> Blue Team (0/4)", value="*No players yet*", inline=True)
+
+        view = PlayersPickView(self.players, test_mode=self.test_mode, match_label=self.match_label)
+
+        # Edit the existing pregame message instead of posting new one
+        if self.pregame_message:
+            try:
+                await self.pregame_message.edit(embed=embed, view=view)
+                view.pick_message = self.pregame_message
+                return
+            except:
+                pass
+
+        # Fallback: send new message if edit fails
+        msg = await interaction.followup.send(embed=embed, view=view)
+        view.pick_message = msg
 
 
 async def show_balanced_teams_confirmation(
@@ -1050,7 +1079,7 @@ class BalancedTeamsRejectView(View):
 
 
 class CaptainDraftView(View):
-    def __init__(self, captains: List[int], remaining: List[int], test_mode: bool = False):
+    def __init__(self, captains: List[int], remaining: List[int], test_mode: bool = False, match_label: str = "Match"):
         super().__init__(timeout=None)
         self.captain1 = captains[0]
         self.captain2 = captains[1]
@@ -1059,7 +1088,9 @@ class CaptainDraftView(View):
         self.blue_team = [self.captain2]
         self.current_picker = self.captain1
         self.test_mode = test_mode
-        
+        self.match_label = match_label
+        self.draft_message = None  # Will be set after sending/editing
+
         # Add player selection dropdown
         self.update_dropdown()
     
@@ -1089,9 +1120,9 @@ class CaptainDraftView(View):
         if interaction.user.id != self.current_picker:
             await interaction.response.send_message("❌ Not your turn!", ephemeral=True)
             return
-        
+
         selected_id = int(interaction.values[0])
-        
+
         # Add to current team
         if self.current_picker == self.captain1:
             self.red_team.append(selected_id)
@@ -1099,65 +1130,175 @@ class CaptainDraftView(View):
         else:
             self.blue_team.append(selected_id)
             self.current_picker = self.captain1
-        
+
         self.remaining.remove(selected_id)
-        
+
         if not self.remaining:
-            # Draft complete
-            await interaction.response.send_message("✅ Draft complete! Finalizing teams...")
+            # Draft complete - update embed one last time then finalize
+            await interaction.response.defer()
+            embed = self.build_draft_embed(complete=True)
+            try:
+                if self.draft_message:
+                    await self.draft_message.edit(embed=embed, view=None)
+            except:
+                pass
             await finalize_teams(interaction.channel, self.red_team, self.blue_team, test_mode=self.test_mode)
         else:
+            # Update dropdown and embed with current teams
             self.update_dropdown()
-            await interaction.response.edit_message(view=self)
+            embed = self.build_draft_embed()
+            await interaction.response.edit_message(embed=embed, view=self)
+
+    def build_draft_embed(self, complete: bool = False) -> discord.Embed:
+        """Build the captain draft embed showing current team status"""
+        if complete:
+            embed = discord.Embed(
+                title=f"Captains Draft - {self.match_label}",
+                description="✅ **Draft Complete!** Finalizing teams...",
+                color=discord.Color.green()
+            )
+        else:
+            embed = discord.Embed(
+                title=f"Captains Draft - {self.match_label}",
+                description=f"**<@{self.current_picker}>** is picking...",
+                color=discord.Color.purple()
+            )
+
+        # Red team
+        red_text = "\n".join([f"<@{uid}>" for uid in self.red_team])
+        embed.add_field(
+            name=f"<:redteam:{RED_TEAM_EMOJI_ID}> Red Team ({len(self.red_team)}/4)",
+            value=red_text or "*No players yet*",
+            inline=True
+        )
+
+        # Blue team
+        blue_text = "\n".join([f"<@{uid}>" for uid in self.blue_team])
+        embed.add_field(
+            name=f"<:blueteam:{BLUE_TEAM_EMOJI_ID}> Blue Team ({len(self.blue_team)}/4)",
+            value=blue_text or "*No players yet*",
+            inline=True
+        )
+
+        # Available players
+        if self.remaining:
+            remaining_text = "\n".join([f"<@{uid}>" for uid in self.remaining])
+            embed.add_field(name="Available Players", value=remaining_text, inline=False)
+
+        return embed
 
 
 class PlayersPickView(View):
-    def __init__(self, players: List[int], test_mode: bool = False):
+    def __init__(self, players: List[int], test_mode: bool = False, match_label: str = "Match"):
         super().__init__(timeout=None)
         self.players = players
         self.red_team = []
         self.blue_team = []
         self.votes = {}  # user_id -> 'RED' or 'BLUE'
         self.test_mode = test_mode
-    
+        self.match_label = match_label
+        self.pick_message = None  # Will be set after sending/editing
+
     @discord.ui.button(label="Red Team", style=discord.ButtonStyle.danger, custom_id="pick_red")
     async def pick_red(self, interaction: discord.Interaction, button: Button):
         await self.handle_pick(interaction, 'RED')
-    
+
     @discord.ui.button(label="Blue Team", style=discord.ButtonStyle.primary, custom_id="pick_blue")
     async def pick_blue(self, interaction: discord.Interaction, button: Button):
         await self.handle_pick(interaction, 'BLUE')
-    
+
     async def handle_pick(self, interaction: discord.Interaction, team: str):
         """Handle team pick"""
         if interaction.user.id not in self.players:
             await interaction.response.send_message("❌ You're not in this match!", ephemeral=True)
             return
-        
+
         if interaction.user.id in self.votes:
             await interaction.response.send_message("❌ You already picked a team!", ephemeral=True)
             return
-        
+
         self.votes[interaction.user.id] = team
-        
+
         if team == 'RED':
             self.red_team.append(interaction.user.id)
         else:
             self.blue_team.append(interaction.user.id)
-        
-        await interaction.response.send_message(f"✅ You joined {team} team!", ephemeral=True)
-        
+
+        # Update the embed to show current teams
+        embed = self.build_pick_embed()
+
         # Check if all players voted
         if len(self.votes) == len(self.players):
+            await interaction.response.defer()
             await self.finalize_vote(interaction)
-    
+        else:
+            # Update embed with current picks
+            await interaction.response.edit_message(embed=embed, view=self)
+
+    def build_pick_embed(self, complete: bool = False, error: str = None) -> discord.Embed:
+        """Build the players pick embed showing current team status"""
+        if error:
+            embed = discord.Embed(
+                title=f"Players Pick Teams - {self.match_label}",
+                description=f"❌ {error}\n\nClick a button to join a team!",
+                color=discord.Color.red()
+            )
+        elif complete:
+            embed = discord.Embed(
+                title=f"Players Pick Teams - {self.match_label}",
+                description="✅ **Teams Complete!** Finalizing...",
+                color=discord.Color.green()
+            )
+        else:
+            remaining = len(self.players) - len(self.votes)
+            embed = discord.Embed(
+                title=f"Players Pick Teams - {self.match_label}",
+                description=f"Click a button to join a team!\n\n**{remaining} players** still need to pick.",
+                color=discord.Color.green()
+            )
+
+        # Red team
+        red_text = "\n".join([f"<@{uid}>" for uid in self.red_team]) if self.red_team else "*No players yet*"
+        embed.add_field(
+            name=f"<:redteam:{RED_TEAM_EMOJI_ID}> Red Team ({len(self.red_team)}/4)",
+            value=red_text,
+            inline=True
+        )
+
+        # Blue team
+        blue_text = "\n".join([f"<@{uid}>" for uid in self.blue_team]) if self.blue_team else "*No players yet*"
+        embed.add_field(
+            name=f"<:blueteam:{BLUE_TEAM_EMOJI_ID}> Blue Team ({len(self.blue_team)}/4)",
+            value=blue_text,
+            inline=True
+        )
+
+        return embed
+
     async def finalize_vote(self, interaction: discord.Interaction):
         """Finalize after all votes"""
-        # Balance teams if uneven
+        # Check if teams are balanced (4v4)
         if len(self.red_team) != 4 or len(self.blue_team) != 4:
-            await interaction.channel.send("❌ Teams must be 4v4! Please re-pick.")
+            # Teams are uneven - reset and let them try again
+            embed = self.build_pick_embed(error=f"Teams must be 4v4! Currently {len(self.red_team)}v{len(self.blue_team)}. Picks have been reset.")
+            self.red_team = []
+            self.blue_team = []
+            self.votes = {}
+            try:
+                if self.pick_message:
+                    await self.pick_message.edit(embed=embed, view=self)
+            except:
+                pass
             return
-        
+
+        # Update embed to show completion
+        embed = self.build_pick_embed(complete=True)
+        try:
+            if self.pick_message:
+                await self.pick_message.edit(embed=embed, view=None)
+        except:
+            pass
+
         await finalize_teams(interaction.channel, self.red_team, self.blue_team, test_mode=self.test_mode)
 
 

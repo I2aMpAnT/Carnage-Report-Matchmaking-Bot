@@ -1095,7 +1095,7 @@ class PlaylistMatchView(View):
         """Vote to end the series"""
         # Check permissions
         user_roles = [role.name for role in interaction.user.roles]
-        is_staff = any(role in ["Overlord", "Staff", "Server Tech Support"] for role in user_roles)
+        is_staff = any(role in ["Overlord", "Staff", "Server Support"] for role in user_roles)
         all_players = self.match.team1 + self.match.team2
 
         if not is_staff and interaction.user.id not in all_players:
@@ -1124,7 +1124,7 @@ class PlaylistMatchView(View):
             member = interaction.guild.get_member(uid)
             if member:
                 member_roles = [role.name for role in member.roles]
-                if any(role in ["Overlord", "Staff", "Server Tech Support"] for role in member_roles):
+                if any(role in ["Overlord", "Staff", "Server Support"] for role in member_roles):
                     staff_votes += 1
 
         if current_votes >= votes_needed or staff_votes >= 2:
