@@ -153,11 +153,6 @@ async def on_ready():
         print(f"  playlists.py:        v{playlists.MODULE_VERSION}")
     except:
         print(f"  playlists.py:        (no version)")
-    try:
-        import stats_parser
-        print(f"  stats_parser.py:     v{stats_parser.MODULE_VERSION}")
-    except:
-        print(f"  stats_parser.py:     (no version)")
     print("-" * 30)
     print()
     

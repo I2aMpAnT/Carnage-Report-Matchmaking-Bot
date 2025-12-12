@@ -105,7 +105,6 @@ def main():
         print("  - twitch.py")
         print("  - state_manager.py")
         print("  - github_webhook.py")
-        print("  - stats_parser.py")
         sys.exit(1)
 
     print("🚀 Starting bot...")
