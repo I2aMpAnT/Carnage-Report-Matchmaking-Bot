@@ -2661,52 +2661,123 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             await interaction.followup.send(f"❌ Error running script: {e}\n\n{status_msg}", ephemeral=True)
             log_action(f"populate_stats REFRESH error: {e}")
 
+    class BotLogsView(discord.ui.View):
+        """Paginated view for bot logs"""
+        def __init__(self, all_lines: list, lines_per_page: int = 50):
+            super().__init__(timeout=300)  # 5 minute timeout
+            self.all_lines = all_lines
+            self.lines_per_page = lines_per_page
+            self.total_lines = len(all_lines)
+            # Start at page 0 (most recent logs)
+            self.current_page = 0
+            # Calculate total pages
+            self.total_pages = max(1, (self.total_lines + self.lines_per_page - 1) // self.lines_per_page)
+            self.update_buttons()
+
+        def get_page_content(self) -> str:
+            """Get the log content for the current page"""
+            import re
+            # Page 0 = most recent (end of file)
+            # Higher pages = older logs (earlier in file)
+            end_idx = self.total_lines - (self.current_page * self.lines_per_page)
+            start_idx = max(0, end_idx - self.lines_per_page)
+
+            if start_idx >= end_idx:
+                return "No more logs available."
+
+            page_lines = self.all_lines[start_idx:end_idx]
+            content = ''.join(page_lines)
+
+            # Redact MAC addresses (formats: XX:XX:XX:XX:XX:XX or XX-XX-XX-XX-XX-XX)
+            mac_pattern = r'([0-9A-Fa-f]{2}[:\-]){5}[0-9A-Fa-f]{2}'
+            content = re.sub(mac_pattern, '-REDACTED-', content)
+
+            # Truncate if needed for Discord's limit
+            if len(content) > 1800:
+                content = content[-1800:]
+                first_newline = content.find('\n')
+                if first_newline != -1:
+                    content = content[first_newline + 1:]
+                content = f"... (truncated)\n{content}"
+
+            return content
+
+        def get_embed_title(self) -> str:
+            """Get the title showing page info"""
+            return f"Bot Logs - Page {self.current_page + 1}/{self.total_pages} (showing {self.lines_per_page} lines per page)"
+
+        def update_buttons(self):
+            """Update button states based on current page"""
+            # Page Up = go to older logs (higher page number)
+            self.page_up_btn.disabled = (self.current_page >= self.total_pages - 1)
+            # Page Down = go to newer logs (lower page number)
+            self.page_down_btn.disabled = (self.current_page <= 0)
+
+        @discord.ui.button(label="Page Up (Older)", style=discord.ButtonStyle.primary, emoji="⬆️")
+        async def page_up_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+            """Go to older logs"""
+            if self.current_page < self.total_pages - 1:
+                self.current_page += 1
+                self.update_buttons()
+                content = self.get_page_content()
+                await interaction.response.edit_message(
+                    content=f"**{self.get_embed_title()}**\n```\n{content}\n```",
+                    view=self
+                )
+            else:
+                await interaction.response.defer()
+
+        @discord.ui.button(label="Page Down (Newer)", style=discord.ButtonStyle.primary, emoji="⬇️")
+        async def page_down_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+            """Go to newer logs"""
+            if self.current_page > 0:
+                self.current_page -= 1
+                self.update_buttons()
+                content = self.get_page_content()
+                await interaction.response.edit_message(
+                    content=f"**{self.get_embed_title()}**\n```\n{content}\n```",
+                    view=self
+                )
+            else:
+                await interaction.response.defer()
+
     @bot.tree.command(name='botlogs', description='[ADMIN] View recent bot logs')
     @has_admin_role()
     @app_commands.describe(
-        lines="Number of log lines to show (default: 50, max: 100)"
+        lines_per_page="Number of log lines per page (default: 50, max: 100)"
     )
-    async def bot_logs(interaction: discord.Interaction, lines: int = 50):
-        """View recent bot logs"""
+    async def bot_logs(interaction: discord.Interaction, lines_per_page: int = 50):
+        """View recent bot logs with pagination"""
         import os
 
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
 
-        # Cap at 100 lines
-        lines = min(lines, 100)
+        # Cap at 100 lines per page
+        lines_per_page = min(lines_per_page, 100)
 
         log_file = 'log.txt'
         if not os.path.exists(log_file):
-            await interaction.followup.send("❌ No log file found!", ephemeral=True)
+            await interaction.followup.send("No log file found!")
             return
 
         try:
             with open(log_file, 'r') as f:
                 all_lines = f.readlines()
 
-            # Get last N lines
-            recent_lines = all_lines[-lines:] if len(all_lines) >= lines else all_lines
-            log_content = ''.join(recent_lines)
-
-            if not log_content.strip():
-                await interaction.followup.send("📋 Log file is empty!", ephemeral=True)
+            if not all_lines:
+                await interaction.followup.send("Log file is empty!")
                 return
 
-            # Discord message limit is 2000 chars, account for formatting
-            if len(log_content) > 1900:
-                log_content = log_content[-1900:]
-                # Find first newline to start at a complete line
-                first_newline = log_content.find('\n')
-                if first_newline != -1:
-                    log_content = log_content[first_newline + 1:]
-                log_content = f"... (truncated)\n{log_content}"
+            # Create paginated view
+            view = BotLogsView(all_lines, lines_per_page)
+            content = view.get_page_content()
 
             await interaction.followup.send(
-                f"📋 **Last {lines} log entries:**\n```\n{log_content}\n```",
-                ephemeral=True
+                f"**{view.get_embed_title()}**\n```\n{content}\n```",
+                view=view
             )
         except Exception as e:
-            await interaction.followup.send(f"❌ Error reading logs: {e}", ephemeral=True)
+            await interaction.followup.send(f"Error reading logs: {e}")
 
     @bot.tree.command(name='playlistsync', description='[STAFF] Sync game results from website for active matches')
     @has_staff_role()
