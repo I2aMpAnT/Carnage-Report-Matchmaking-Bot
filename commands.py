@@ -3352,73 +3352,51 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
 
         import subprocess
 
-        stats_dir = "/home/carnagereport/CarnageReport.com"
-        files_to_delete = [
-            "processed_state.json",
-            "gamestats.json",
-            "gameshistory.json",
-            "rankstats.json",
-            "ranks.json",
-            "customgames.json",
-            "MLG 4v4_matches.json",
-            "MLG 4v4_stats.json",
-            "rankhistory.json",
-            "series.json",
-            "head_to_head_matches.json",
-            "head_to_head_stats.json",
-            "matchhistory.json",
-        ]
+        # Shell commands to run
+        script = '''cd /home/carnagereport/CarnageReport.com
+rm -f processed_state.json
+rm -f gamestats.json
+rm -f gameshistory.json
+rm -f rankstats.json
+rm -f ranks.json
+rm -f customgames.json
+rm -f "MLG 4v4_matches.json"
+rm -f "MLG 4v4_stats.json"
+rm -f rankhistory.json
+rm -f series.json
+rm -f head_to_head_matches.json
+rm -f head_to_head_stats.json
+rm -f matchhistory.json
+python3 populate_stats.py'''
 
-        deleted = []
-        errors = []
-
-        # Delete each file
-        for filename in files_to_delete:
-            filepath = os.path.join(stats_dir, filename)
-            try:
-                if os.path.exists(filepath):
-                    os.remove(filepath)
-                    deleted.append(filename)
-            except Exception as e:
-                errors.append(f"{filename}: {e}")
-
-        # Run populate_stats.py
         try:
             result = subprocess.run(
-                ["python3", "populate_stats.py"],
-                cwd=stats_dir,
+                script,
+                shell=True,
                 capture_output=True,
                 text=True,
                 timeout=300  # 5 minute timeout
             )
-            populate_success = result.returncode == 0
-            populate_output = result.stdout[-500:] if result.stdout else ""
-            populate_error = result.stderr[-500:] if result.stderr else ""
+            success = result.returncode == 0
+            output = result.stdout[-1500:] if result.stdout else ""
+            error = result.stderr[-500:] if result.stderr else ""
         except subprocess.TimeoutExpired:
-            populate_success = False
-            populate_output = ""
-            populate_error = "Timeout after 5 minutes"
+            success = False
+            output = ""
+            error = "Timeout after 5 minutes"
         except Exception as e:
-            populate_success = False
-            populate_output = ""
-            populate_error = str(e)
+            success = False
+            output = ""
+            error = str(e)
 
         # Build response
-        response = f"**Stats Refresh Results**\n\n"
-        response += f"**Deleted {len(deleted)} files:**\n"
-        if deleted:
-            response += "```\n" + "\n".join(deleted) + "\n```\n"
-        else:
-            response += "No files found to delete.\n"
+        response = f"**Stats Refresh:** {'✅ Success' if success else '❌ Failed'}\n"
+        if output:
+            response += f"```\n{output}\n```"
+        if error:
+            response += f"\n**Error:**\n```\n{error}\n```"
 
-        if errors:
-            response += f"\n**Errors:**\n```\n" + "\n".join(errors) + "\n```\n"
-
-        response += f"\n**populate_stats.py:** {'✅ Success' if populate_success else '❌ Failed'}\n"
-        if populate_error:
-            response += f"```\n{populate_error}\n```"
-
-        log_action(f"Admin {interaction.user.name} ran /populatestatsrefresh - deleted {len(deleted)} files, populate={'success' if populate_success else 'failed'}")
+        log_action(f"Admin {interaction.user.name} ran /populatestatsrefresh - {'success' if success else 'failed'}")
         await interaction.followup.send(response, ephemeral=True)
 
     return bot
