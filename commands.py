@@ -2563,6 +2563,104 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         # Exit and let pm2 restart the process
         sys.exit(0)
 
+    @bot.tree.command(name='populatestats', description='[ADMIN] Run populate_stats.py to sync stats from website')
+    @has_admin_role()
+    async def populate_stats(interaction: discord.Interaction):
+        """Run populate_stats.py script"""
+        import subprocess
+
+        await interaction.response.defer(ephemeral=True)
+        log_action(f"populate_stats.py initiated by {interaction.user.display_name}")
+
+        try:
+            # Run the populate_stats.py script
+            result = subprocess.run(
+                ['python3', '/home/carnagereport/CarnageReport.com/populate_stats.py'],
+                capture_output=True,
+                text=True,
+                timeout=300  # 5 minute timeout
+            )
+
+            if result.returncode == 0:
+                output = result.stdout[-1900:] if len(result.stdout) > 1900 else result.stdout
+                await interaction.followup.send(
+                    f"✅ **populate_stats.py completed successfully!**\n\n```\n{output}\n```",
+                    ephemeral=True
+                )
+                log_action(f"populate_stats.py completed successfully")
+            else:
+                error = result.stderr[-1900:] if len(result.stderr) > 1900 else result.stderr
+                await interaction.followup.send(
+                    f"❌ **populate_stats.py failed!**\n\n```\n{error}\n```",
+                    ephemeral=True
+                )
+                log_action(f"populate_stats.py failed: {result.stderr[:500]}")
+        except subprocess.TimeoutExpired:
+            await interaction.followup.send("❌ Script timed out after 5 minutes!", ephemeral=True)
+            log_action("populate_stats.py timed out")
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error running script: {e}", ephemeral=True)
+            log_action(f"populate_stats.py error: {e}")
+
+    @bot.tree.command(name='populatestatsrefresh', description='[ADMIN] Full reset - delete all stats JSONs and repopulate')
+    @has_admin_role()
+    async def populate_stats_refresh(interaction: discord.Interaction):
+        """Delete all stats JSONs and run populate_stats.py for a full reset"""
+        import subprocess
+        import os
+
+        await interaction.response.defer(ephemeral=True)
+        log_action(f"populate_stats REFRESH initiated by {interaction.user.display_name}")
+
+        # JSON files to delete for full reset
+        stats_files = [
+            '/home/carnagereport/CarnageReport.com/stats/ranks.json',
+            '/home/carnagereport/CarnageReport.com/stats/matches.json',
+            '/home/carnagereport/CarnageReport.com/stats/players.json',
+        ]
+
+        deleted_files = []
+        for filepath in stats_files:
+            if os.path.exists(filepath):
+                try:
+                    os.remove(filepath)
+                    deleted_files.append(os.path.basename(filepath))
+                    log_action(f"Deleted {filepath}")
+                except Exception as e:
+                    log_action(f"Failed to delete {filepath}: {e}")
+
+        status_msg = f"🗑️ Deleted: {', '.join(deleted_files) if deleted_files else 'No files found'}\n\n"
+
+        try:
+            # Run the populate_stats.py script
+            result = subprocess.run(
+                ['python3', '/home/carnagereport/CarnageReport.com/populate_stats.py'],
+                capture_output=True,
+                text=True,
+                timeout=300  # 5 minute timeout
+            )
+
+            if result.returncode == 0:
+                output = result.stdout[-1500:] if len(result.stdout) > 1500 else result.stdout
+                await interaction.followup.send(
+                    f"✅ **Full stats refresh completed!**\n\n{status_msg}```\n{output}\n```",
+                    ephemeral=True
+                )
+                log_action(f"populate_stats REFRESH completed successfully")
+            else:
+                error = result.stderr[-1500:] if len(result.stderr) > 1500 else result.stderr
+                await interaction.followup.send(
+                    f"❌ **populate_stats.py failed!**\n\n{status_msg}```\n{error}\n```",
+                    ephemeral=True
+                )
+                log_action(f"populate_stats REFRESH failed: {result.stderr[:500]}")
+        except subprocess.TimeoutExpired:
+            await interaction.followup.send(f"❌ Script timed out after 5 minutes!\n\n{status_msg}", ephemeral=True)
+            log_action("populate_stats REFRESH timed out")
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error running script: {e}\n\n{status_msg}", ephemeral=True)
+            log_action(f"populate_stats REFRESH error: {e}")
+
     @bot.tree.command(name='botlogs', description='[ADMIN] View recent bot logs')
     @has_admin_role()
     @app_commands.describe(
