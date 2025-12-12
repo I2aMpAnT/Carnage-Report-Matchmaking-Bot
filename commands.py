@@ -3545,6 +3545,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         # Pass guild for emoji lookup
         view = STATSRANKS.LeaderboardView(bot, guild=interaction.guild)
         embed = await view.build_embed()
-        await interaction.response.send_message(embed=embed, view=view)
+        # Ephemeral so each player can interact with their own instance
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     return bot
