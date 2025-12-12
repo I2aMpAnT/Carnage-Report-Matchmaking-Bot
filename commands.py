@@ -3240,4 +3240,52 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
 
         log_action(f"Playlist sync by {interaction.user.display_name}: {playlist}")
 
+    @bot.tree.command(name='syncnames', description='[ADMIN] Update all discord_name fields in players.json from guild')
+    @has_admin_role()
+    async def sync_names(interaction: discord.Interaction):
+        """Loop through all players in players.json and update their discord_name from guild member data"""
+        await interaction.response.defer(ephemeral=True)
+
+        players_file = "players.json"
+        if not os.path.exists(players_file):
+            await interaction.followup.send("❌ No players.json found!", ephemeral=True)
+            return
+
+        with open(players_file, 'r') as f:
+            players = json.load(f)
+
+        updated = 0
+        not_found = 0
+
+        for user_id_str in players.keys():
+            try:
+                user_id = int(user_id_str)
+                member = interaction.guild.get_member(user_id)
+
+                if member:
+                    players[user_id_str]["discord_name"] = member.name
+                    updated += 1
+                else:
+                    not_found += 1
+            except (ValueError, TypeError):
+                continue
+
+        with open(players_file, 'w') as f:
+            json.dump(players, f, indent=2)
+
+        # Sync to GitHub
+        try:
+            github_webhook.update_players_on_github()
+        except Exception as e:
+            log_action(f"Failed to sync players.json to GitHub: {e}")
+
+        await interaction.followup.send(
+            f"✅ **Sync Complete**\n"
+            f"• Updated: **{updated}** players\n"
+            f"• Not in server: **{not_found}** players",
+            ephemeral=True
+        )
+
+        log_action(f"Synced discord_names by {interaction.user.display_name}: {updated} updated")
+
     return bot

@@ -3,7 +3,7 @@ twitch.py - Twitch Integration Module
 Manages player Twitch links and multi-stream URLs
 """
 
-MODULE_VERSION = "1.2.4"
+MODULE_VERSION = "1.2.5"
 
 import discord
 from discord import app_commands
@@ -130,7 +130,7 @@ def get_player_twitch(user_id: int) -> Optional[dict]:
     players = load_players()
     return players.get(str(user_id))
 
-def set_player_twitch(user_id: int, twitch_name: str, display_name: Optional[str] = None):
+def set_player_twitch(user_id: int, twitch_name: str, display_name: Optional[str] = None, discord_name: Optional[str] = None):
     """Set a player's Twitch info (preserves existing MAC/other data)"""
     players = load_players()
     user_key = str(user_id)
@@ -139,12 +139,16 @@ def set_player_twitch(user_id: int, twitch_name: str, display_name: Optional[str
     if user_key not in players:
         players[user_key] = {}
 
-    # Update/add Twitch fields (preserves mac_addresses, discord_name, etc.)
+    # Update/add Twitch fields (preserves mac_addresses, etc.)
     players[user_key]["twitch_name"] = twitch_name
     players[user_key]["twitch_url"] = f"https://twitch.tv/{twitch_name}"
 
     if display_name:
         players[user_key]["display_name"] = display_name
+
+    # Save Discord username for website display
+    if discord_name:
+        players[user_key]["discord_name"] = discord_name
 
     save_players(players)
 
@@ -349,9 +353,12 @@ def setup_twitch_commands(bot: commands.Bot):
                 ephemeral=True
             )
             return
-        
-        set_player_twitch(interaction.user.id, name)
-        await interaction.response.defer()
+
+        set_player_twitch(interaction.user.id, name, discord_name=interaction.user.name)
+        await interaction.response.send_message(
+            f"✅ Linked your Twitch to **{name}**",
+            ephemeral=True
+        )
     
     @bot.tree.command(name="removetwitch", description="[STAFF] Unlink a player's Twitch account")
     @app_commands.describe(user="The user to remove Twitch from (optional, defaults to yourself)")
@@ -475,7 +482,7 @@ def setup_twitch_commands(bot: commands.Bot):
             await interaction.response.send_message("❌ Invalid Twitch username.", ephemeral=True)
             return
 
-        set_player_twitch(user.id, name)
+        set_player_twitch(user.id, name, discord_name=user.name)
         await interaction.response.send_message(
             f"✅ Set {user.display_name}'s Twitch to **{name}**",
             ephemeral=True
