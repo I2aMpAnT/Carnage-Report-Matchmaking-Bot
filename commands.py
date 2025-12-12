@@ -371,29 +371,34 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
     async def reset_queue(interaction: discord.Interaction):
         """Reset queue"""
         from searchmatchmaking import queue_state, update_queue_embed, delete_ping_message
-        
+
         queue_state.queue.clear()
         queue_state.queue_join_times.clear()
         queue_state.pregame_timer_task = None
         queue_state.pregame_timer_end = None
         queue_state.recent_action = None
-        
+        queue_state.current_series = None  # Clear any stuck match state
+        queue_state.locked = False  # Unlock the queue
+        queue_state.locked_players = []
+        queue_state.test_mode = False
+        queue_state.testers = []
+
         log_action(f"Admin {interaction.user.name} reset the queue")
-        
+
         # Delete ping message since queue is empty
         await delete_ping_message()
-        
+
         # Clear saved state
         try:
             import state_manager
             state_manager.clear_state()
         except:
             pass
-        
+
         channel = interaction.guild.get_channel(QUEUE_CHANNEL_ID)
         if channel:
             await update_queue_embed(channel)
-        
+
         # Send confirmation (not defer - that would leave "thinking")
         await interaction.response.send_message("✅ Queue reset!", ephemeral=True)
     
