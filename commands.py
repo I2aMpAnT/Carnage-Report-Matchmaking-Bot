@@ -3575,4 +3575,41 @@ python3 populate_stats.py'''
         log_action(f"Admin {interaction.user.name} ran /populatestatsrefresh - {'success' if success else 'failed'}")
         await interaction.followup.send(response, ephemeral=True)
 
+    @bot.tree.command(name="dotcomrefresh", description="[ADMIN] Pull latest CarnageReport.com data from GitHub")
+    @has_admin_role()
+    async def dotcom_refresh(interaction: discord.Interaction):
+        """Pull latest ranks.json and other data from GitHub"""
+        await interaction.response.defer(ephemeral=True)
+
+        import subprocess
+
+        try:
+            result = subprocess.run(
+                "cd /home/carnagereport/CarnageReport.com && git pull origin main",
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+            success = result.returncode == 0
+            output = result.stdout[-1000:] if result.stdout else ""
+            error = result.stderr[-500:] if result.stderr else ""
+        except subprocess.TimeoutExpired:
+            success = False
+            output = ""
+            error = "Timeout after 60 seconds"
+        except Exception as e:
+            success = False
+            output = ""
+            error = str(e)
+
+        response = f"**CarnageReport.com Refresh:** {'✅ Success' if success else '❌ Failed'}\n"
+        if output:
+            response += f"```\n{output}\n```"
+        if error:
+            response += f"\n**Error:**\n```\n{error}\n```"
+
+        log_action(f"Admin {interaction.user.name} ran /dotcomrefresh - {'success' if success else 'failed'}")
+        await interaction.followup.send(response, ephemeral=True)
+
     return bot
