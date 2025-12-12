@@ -3288,4 +3288,158 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
 
         log_action(f"Synced discord_names by {interaction.user.display_name}: {updated} updated")
 
+    # ========== Twitch Commands ==========
+
+    @bot.tree.command(name='settwitch', description='Link your Twitch account')
+    @app_commands.describe(twitch="Your Twitch username or URL")
+    async def set_twitch(interaction: discord.Interaction, twitch: str):
+        """Link your Twitch account"""
+        import twitch as twitch_module
+        name = twitch_module.extract_twitch_name(twitch)
+        if not name:
+            await interaction.response.send_message(
+                "❌ Invalid Twitch username. Use your username or full URL.",
+                ephemeral=True
+            )
+            return
+
+        twitch_module.set_player_twitch(interaction.user.id, name, discord_name=interaction.user.name)
+        await interaction.response.send_message(
+            f"✅ Linked your Twitch to **{name}**",
+            ephemeral=True
+        )
+
+    @bot.tree.command(name='removetwitch', description='[STAFF] Unlink a player\'s Twitch account')
+    @app_commands.describe(user="The user to remove Twitch from (optional, defaults to yourself)")
+    @has_staff_role()
+    async def remove_twitch(interaction: discord.Interaction, user: discord.Member = None):
+        """Unlink a player's Twitch account (staff only)"""
+        import twitch as twitch_module
+        target_user = user or interaction.user
+        if twitch_module.remove_player_twitch(target_user.id):
+            await interaction.response.send_message(
+                f"✅ Removed Twitch link from **{target_user.display_name}**.",
+                ephemeral=True
+            )
+            log_action(f"{interaction.user.name} removed Twitch from {target_user.display_name}")
+        else:
+            await interaction.response.send_message(
+                f"❌ **{target_user.display_name}** has no Twitch linked.",
+                ephemeral=True
+            )
+
+    @bot.tree.command(name='mytwitch', description='Check your linked Twitch')
+    async def my_twitch(interaction: discord.Interaction):
+        """Check your linked Twitch"""
+        import twitch as twitch_module
+        data = twitch_module.get_player_twitch(interaction.user.id)
+        if data and 'twitch_name' in data:
+            await interaction.response.send_message(
+                f"Your Twitch: **{data['twitch_name']}**\n{data.get('twitch_url', '')}",
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                "❌ No Twitch linked. Use `/settwitch` to link yours.",
+                ephemeral=True
+            )
+
+    @bot.tree.command(name='checktwitch', description='Check someone\'s linked Twitch')
+    @app_commands.describe(user="The user to check")
+    async def check_twitch(interaction: discord.Interaction, user: discord.Member):
+        """Check someone's linked Twitch"""
+        import twitch as twitch_module
+        data = twitch_module.get_player_twitch(user.id)
+        if data and 'twitch_name' in data:
+            await interaction.response.send_message(
+                f"{user.display_name}'s Twitch: **{data['twitch_name']}**\n{data.get('twitch_url', '')}",
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                f"❌ {user.display_name} has no Twitch linked.",
+                ephemeral=True
+            )
+
+    @bot.tree.command(name='stream', description='Get MultiTwitch links for current match')
+    async def stream_command(interaction: discord.Interaction):
+        """Get multistream links for current match"""
+        import twitch as twitch_module
+        from searchmatchmaking import queue_state
+
+        if not queue_state.current_series:
+            await interaction.response.send_message(
+                "❌ No active match.",
+                ephemeral=True
+            )
+            return
+
+        series = queue_state.current_series
+
+        red_twitch = twitch_module.get_team_twitch_names(series.red_team)
+        blue_twitch = twitch_module.get_team_twitch_names(series.blue_team)
+
+        if not red_twitch and not blue_twitch:
+            await interaction.response.send_message(
+                "❌ No players have Twitch linked.",
+                ephemeral=True
+            )
+            return
+
+        embed = discord.Embed(
+            title=f"MultiTwitch - {series.series_number}",
+            color=discord.Color.purple()
+        )
+
+        if red_twitch:
+            embed.add_field(
+                name="🔴 Red Team Streams",
+                value="\n".join([f"[{n}](https://twitch.tv/{n})" for n in red_twitch]),
+                inline=True
+            )
+
+        if blue_twitch:
+            embed.add_field(
+                name="🔵 Blue Team Streams",
+                value="\n".join([f"[{n}](https://twitch.tv/{n})" for n in blue_twitch]),
+                inline=True
+            )
+
+        view = twitch_module.MultiStreamView(red_twitch, blue_twitch)
+        await interaction.response.send_message(embed=embed, view=view)
+
+    @bot.tree.command(name='adminsettwitch', description='[ADMIN] Set someone\'s Twitch')
+    @app_commands.describe(user="The user", twitch="Their Twitch username or URL")
+    @has_admin_role()
+    async def admin_set_twitch(interaction: discord.Interaction, user: discord.Member, twitch: str):
+        """Admin: Set someone's Twitch"""
+        import twitch as twitch_module
+        name = twitch_module.extract_twitch_name(twitch)
+        if not name:
+            await interaction.response.send_message("❌ Invalid Twitch username.", ephemeral=True)
+            return
+
+        twitch_module.set_player_twitch(user.id, name, discord_name=user.name)
+        await interaction.response.send_message(
+            f"✅ Set {user.display_name}'s Twitch to **{name}**",
+            ephemeral=True
+        )
+
+    @bot.tree.command(name='adminremovetwitch', description='[ADMIN] Remove someone\'s Twitch')
+    @app_commands.describe(user="The user")
+    @has_admin_role()
+    async def admin_remove_twitch(interaction: discord.Interaction, user: discord.Member):
+        """Admin: Remove someone's Twitch"""
+        import twitch as twitch_module
+        if twitch_module.remove_player_twitch(user.id):
+            await interaction.response.send_message(
+                f"✅ Removed {user.display_name}'s Twitch link.",
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                f"❌ {user.display_name} has no Twitch linked.",
+                ephemeral=True
+            )
+
     return bot

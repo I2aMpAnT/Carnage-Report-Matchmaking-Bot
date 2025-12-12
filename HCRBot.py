@@ -94,10 +94,6 @@ def setup_module_config():
     # Set constants in twitch module
     twitch.RED_TEAM_EMOJI_ID = RED_TEAM_EMOJI_ID
     twitch.BLUE_TEAM_EMOJI_ID = BLUE_TEAM_EMOJI_ID
-    twitch.ADMIN_ROLES = ADMIN_ROLES
-    
-    # Setup twitch commands
-    twitch.setup_twitch_commands(bot)
 
 # Bot Events
 @bot.event
