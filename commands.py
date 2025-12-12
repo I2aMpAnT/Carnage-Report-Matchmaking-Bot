@@ -371,29 +371,34 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
     async def reset_queue(interaction: discord.Interaction):
         """Reset queue"""
         from searchmatchmaking import queue_state, update_queue_embed, delete_ping_message
-        
+
         queue_state.queue.clear()
         queue_state.queue_join_times.clear()
         queue_state.pregame_timer_task = None
         queue_state.pregame_timer_end = None
         queue_state.recent_action = None
-        
+        queue_state.current_series = None  # Clear any stuck match state
+        queue_state.locked = False  # Unlock the queue
+        queue_state.locked_players = []
+        queue_state.test_mode = False
+        queue_state.testers = []
+
         log_action(f"Admin {interaction.user.name} reset the queue")
-        
+
         # Delete ping message since queue is empty
         await delete_ping_message()
-        
+
         # Clear saved state
         try:
             import state_manager
             state_manager.clear_state()
         except:
             pass
-        
+
         channel = interaction.guild.get_channel(QUEUE_CHANNEL_ID)
         if channel:
             await update_queue_embed(channel)
-        
+
         # Send confirmation (not defer - that would leave "thinking")
         await interaction.response.send_message("✅ Queue reset!", ephemeral=True)
     
@@ -2557,8 +2562,14 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         log_action(f"Bot restart initiated by {interaction.user.display_name}")
         await interaction.response.send_message("🔄 Restarting bot...", ephemeral=True)
 
-        # Give time for the message to send
+        # Give time for the message to be seen
         await asyncio.sleep(1)
+
+        # Delete the ephemeral message before exiting
+        try:
+            await interaction.delete_original_response()
+        except:
+            pass
 
         # Exit and let pm2 restart the process
         sys.exit(0)
@@ -2883,7 +2894,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
     @bot.tree.command(name='syncnames', description='[ADMIN] Update all discord_name fields in players.json from guild')
     @has_admin_role()
     async def sync_names(interaction: discord.Interaction):
-        """Loop through all players in players.json and update their discord_name from guild member data"""
+        """Loop through all players in players.json and update their discord_name with server nickname"""
         await interaction.response.defer(ephemeral=True)
 
         players_file = "players.json"
@@ -2896,14 +2907,23 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
 
         updated = 0
         not_found = 0
+        guild = interaction.guild
 
         for user_id_str in players.keys():
             try:
                 user_id = int(user_id_str)
-                member = interaction.guild.get_member(user_id)
+                # Try to get from cache first, then fetch if not found
+                member = guild.get_member(user_id)
+                if not member:
+                    try:
+                        member = await guild.fetch_member(user_id)
+                    except:
+                        member = None
 
                 if member:
-                    players[user_id_str]["discord_name"] = member.name
+                    # Use server nickname if set, otherwise display_name
+                    nickname = member.nick if member.nick else member.display_name
+                    players[user_id_str]["discord_name"] = nickname
                     updated += 1
                 else:
                     not_found += 1
@@ -2921,12 +2941,12 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
 
         await interaction.followup.send(
             f"✅ **Sync Complete**\n"
-            f"• Updated: **{updated}** players\n"
+            f"• Updated: **{updated}** players with server nicknames\n"
             f"• Not in server: **{not_found}** players",
             ephemeral=True
         )
 
-        log_action(f"Synced discord_names by {interaction.user.display_name}: {updated} updated")
+        log_action(f"Synced discord_names (nicknames) by {interaction.user.display_name}: {updated} updated")
 
     # ========== Twitch Commands ==========
 
@@ -3013,9 +3033,22 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             )
             return
 
+        await interaction.response.defer()
+
         series = queue_state.current_series
         guild = interaction.guild
         players_data = twitch_module.load_players()
+
+        # Helper to get member's server nickname
+        async def get_nickname(user_id):
+            member = guild.get_member(user_id)
+            if not member:
+                try:
+                    member = await guild.fetch_member(user_id)
+                except:
+                    return None
+            # Use nick (server nickname) if set, otherwise display_name
+            return member.nick if member.nick else member.display_name
 
         # Build lists of (discord_name, twitch_name) for each team
         red_streams = []
@@ -3025,22 +3058,24 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             player_data = players_data.get(str(user_id))
             if player_data and 'twitch_name' in player_data:
                 twitch_name = player_data['twitch_name']
-                # Get discord display name from guild member
-                member = guild.get_member(user_id)
-                discord_name = member.display_name if member else player_data.get('discord_name', twitch_name)
+                # Get server nickname from guild member
+                discord_name = await get_nickname(user_id)
+                if not discord_name:
+                    discord_name = player_data.get('discord_name', twitch_name)
                 red_streams.append((discord_name, twitch_name))
 
         for user_id in series.blue_team:
             player_data = players_data.get(str(user_id))
             if player_data and 'twitch_name' in player_data:
                 twitch_name = player_data['twitch_name']
-                # Get discord display name from guild member
-                member = guild.get_member(user_id)
-                discord_name = member.display_name if member else player_data.get('discord_name', twitch_name)
+                # Get server nickname from guild member
+                discord_name = await get_nickname(user_id)
+                if not discord_name:
+                    discord_name = player_data.get('discord_name', twitch_name)
                 blue_streams.append((discord_name, twitch_name))
 
         if not red_streams and not blue_streams:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ No players have Twitch linked.",
                 ephemeral=True
             )
@@ -3070,7 +3105,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         blue_twitch = [t for _, t in blue_streams]
 
         view = twitch_module.MultiStreamView(red_twitch, blue_twitch)
-        await interaction.response.send_message(embed=embed, view=view)
+        await interaction.followup.send(embed=embed, view=view)
 
     @bot.tree.command(name='stream', description='Get MultiTwitch links for current match')
     async def stream_command(interaction: discord.Interaction):
