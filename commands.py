@@ -2557,8 +2557,14 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         log_action(f"Bot restart initiated by {interaction.user.display_name}")
         await interaction.response.send_message("🔄 Restarting bot...", ephemeral=True)
 
-        # Give time for the message to send
+        # Give time for the message to be seen
         await asyncio.sleep(1)
+
+        # Delete the ephemeral message before exiting
+        try:
+            await interaction.delete_original_response()
+        except:
+            pass
 
         # Exit and let pm2 restart the process
         sys.exit(0)
