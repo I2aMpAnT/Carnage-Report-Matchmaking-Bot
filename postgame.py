@@ -512,6 +512,8 @@ async def end_series(series_view, channel: discord.TextChannel):
     queue_state.test_mode = False
     queue_state.test_team = None
     queue_state.testers = []
+    queue_state.locked = False
+    queue_state.locked_players = []
 
     await update_queue_embed(queue_channel if queue_channel else channel)
 

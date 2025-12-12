@@ -18,7 +18,7 @@ import github_webhook
 ADMIN_ROLES = ["Overlord"]
 
 # Staff role configuration (can use staff commands)
-STAFF_ROLES = ["Overlord", "Staff", "Server Tech Support"]
+STAFF_ROLES = ["Overlord", "Staff", "Server Support"]
 
 # Command permission overrides - loaded from file
 COMMAND_PERMISSIONS = {}
@@ -86,7 +86,7 @@ def has_staff_role():
         user_roles = [role.name for role in interaction.user.roles]
         if any(role in STAFF_ROLES for role in user_roles):
             return True
-        await interaction.response.send_message("❌ You need Overlord, Staff, or Server Tech Support role!", ephemeral=True)
+        await interaction.response.send_message("❌ You need Overlord, Staff, or Server Support role!", ephemeral=True)
         return False
     return app_commands.check(predicate)
 
@@ -110,7 +110,7 @@ def check_command_permission(command_name: str):
         elif permission_level == "staff":
             if any(role in STAFF_ROLES for role in user_roles):
                 return True
-            await interaction.response.send_message("❌ You need Overlord, Staff, or Server Tech Support role!", ephemeral=True)
+            await interaction.response.send_message("❌ You need Overlord, Staff, or Server Support role!", ephemeral=True)
             return False
         elif permission_level == "admin":
             if any(role in ADMIN_ROLES for role in user_roles):
@@ -199,7 +199,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
     )
     @app_commands.choices(permission_level=[
         app_commands.Choice(name="Admin Only (Overlord)", value="admin"),
-        app_commands.Choice(name="Staff (Overlord, Staff, Server Tech Support)", value="staff"),
+        app_commands.Choice(name="Staff (Overlord, Staff, Server Support)", value="staff"),
         app_commands.Choice(name="Everyone", value="all")
     ])
     async def role_rule_change(interaction: discord.Interaction, command_name: str, permission_level: str):
@@ -253,7 +253,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         
         level_display = {
             "admin": "Admin Only (Overlord)",
-            "staff": "Staff (Overlord, Staff, Server Tech Support)",
+            "staff": "Staff (Overlord, Staff, Server Support)",
             "all": "Everyone"
         }
         
@@ -514,6 +514,8 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         queue_state.queue.clear()
         queue_state.test_mode = False
         queue_state.testers = []
+        queue_state.locked = False
+        queue_state.locked_players = []
 
         # Clear saved state
         try:
@@ -624,6 +626,8 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         queue_state.queue.clear()
         queue_state.test_mode = False
         queue_state.testers = []
+        queue_state.locked = False
+        queue_state.locked_players = []
 
         # Clear saved state
         try:
@@ -2209,69 +2213,189 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
 
     @bot.tree.command(name='adminarrange', description='[STAFF] Manually set teams and start a match')
     @app_commands.describe(
+        playlist="Which playlist to use",
         red1="Red Team Player 1",
-        red2="Red Team Player 2",
-        red3="Red Team Player 3",
-        red4="Red Team Player 4",
+        red2="Red Team Player 2 (not needed for 1v1)",
+        red3="Red Team Player 3 (only for 4v4)",
+        red4="Red Team Player 4 (only for 4v4)",
         blue1="Blue Team Player 1",
-        blue2="Blue Team Player 2",
-        blue3="Blue Team Player 3",
-        blue4="Blue Team Player 4"
+        blue2="Blue Team Player 2 (not needed for 1v1)",
+        blue3="Blue Team Player 3 (only for 4v4)",
+        blue4="Blue Team Player 4 (only for 4v4)"
     )
+    @app_commands.choices(playlist=[
+        app_commands.Choice(name="MLG 4v4", value="mlg_4v4"),
+        app_commands.Choice(name="Team Hardcore 4v4", value="team_hardcore"),
+        app_commands.Choice(name="Double Team 2v2", value="double_team"),
+        app_commands.Choice(name="Head to Head 1v1", value="head_to_head"),
+    ])
     @has_staff_role()
     async def admin_set_teams(
         interaction: discord.Interaction,
+        playlist: str,
         red1: discord.Member,
-        red2: discord.Member,
-        red3: discord.Member,
-        red4: discord.Member,
         blue1: discord.Member,
-        blue2: discord.Member,
-        blue3: discord.Member,
-        blue4: discord.Member
+        red2: discord.Member = None,
+        blue2: discord.Member = None,
+        red3: discord.Member = None,
+        red4: discord.Member = None,
+        blue3: discord.Member = None,
+        blue4: discord.Member = None
     ):
-        """Manually set teams and start a match immediately"""
+        """Manually set teams and start a match for any playlist"""
         from searchmatchmaking import queue_state, log_action, QUEUE_CHANNEL_ID
         from pregame import finalize_teams
-        
+        from playlists import PlaylistType, PLAYLIST_CONFIG
+
+        # Determine team size based on playlist
+        if playlist == PlaylistType.HEAD_TO_HEAD:
+            team_size = 1
+            playlist_name = "Head to Head 1v1"
+        elif playlist == PlaylistType.DOUBLE_TEAM:
+            team_size = 2
+            playlist_name = "Double Team 2v2"
+        else:  # MLG_4V4 or TEAM_HARDCORE
+            team_size = 4
+            playlist_name = "MLG 4v4" if playlist == PlaylistType.MLG_4V4 else "Team Hardcore 4v4"
+
+        # Build teams based on team size
+        if team_size == 1:
+            # 1v1
+            red_team = [red1.id]
+            blue_team = [blue1.id]
+            red_members = [red1]
+            blue_members = [blue1]
+        elif team_size == 2:
+            # 2v2
+            if not red2 or not blue2:
+                await interaction.response.send_message(
+                    f"❌ **{playlist_name}** requires 2 players per team!\n\n"
+                    f"Please provide: `red1`, `red2`, `blue1`, `blue2`",
+                    ephemeral=True
+                )
+                return
+            red_team = [red1.id, red2.id]
+            blue_team = [blue1.id, blue2.id]
+            red_members = [red1, red2]
+            blue_members = [blue1, blue2]
+        else:
+            # 4v4
+            if not all([red2, red3, red4, blue2, blue3, blue4]):
+                await interaction.response.send_message(
+                    f"❌ **{playlist_name}** requires 4 players per team!\n\n"
+                    f"Please provide: `red1`, `red2`, `red3`, `red4`, `blue1`, `blue2`, `blue3`, `blue4`",
+                    ephemeral=True
+                )
+                return
+            red_team = [red1.id, red2.id, red3.id, red4.id]
+            blue_team = [blue1.id, blue2.id, blue3.id, blue4.id]
+            red_members = [red1, red2, red3, red4]
+            blue_members = [blue1, blue2, blue3, blue4]
+
         # Check for active series
         if queue_state.current_series:
             await interaction.response.send_message("❌ There's already an active match! End it first.", ephemeral=True)
             return
-        
-        # Build teams
-        red_team = [red1.id, red2.id, red3.id, red4.id]
-        blue_team = [blue1.id, blue2.id, blue3.id, blue4.id]
-        
+
         # Check for duplicates
         all_players = red_team + blue_team
         if len(all_players) != len(set(all_players)):
             await interaction.response.send_message("❌ Duplicate players detected! Each player can only be on one team.", ephemeral=True)
             return
-        
+
         # Clear the queue since we're manually setting teams
         queue_state.queue.clear()
         queue_state.queue_join_times.clear()
-        
-        log_action(f"Admin {interaction.user.display_name} manually set teams")
-        log_action(f"Red: {[m.display_name for m in [red1, red2, red3, red4]]}")
-        log_action(f"Blue: {[m.display_name for m in [blue1, blue2, blue3, blue4]]}")
-        
+
+        log_action(f"Admin {interaction.user.display_name} manually set teams for {playlist_name}")
+        log_action(f"Red: {[m.display_name for m in red_members]}")
+        log_action(f"Blue: {[m.display_name for m in blue_members]}")
+
+        red_mentions = ", ".join([m.mention for m in red_members])
+        blue_mentions = ", ".join([m.mention for m in blue_members])
+
         await interaction.response.send_message(
-            f"✅ **Teams Set!**\n\n"
-            f"🔴 **Red Team:** {red1.mention}, {red2.mention}, {red3.mention}, {red4.mention}\n"
-            f"🔵 **Blue Team:** {blue1.mention}, {blue2.mention}, {blue3.mention}, {blue4.mention}\n\n"
+            f"✅ **Teams Set for {playlist_name}!**\n\n"
+            f"🔴 **Red Team:** {red_mentions}\n"
+            f"🔵 **Blue Team:** {blue_mentions}\n\n"
             f"Starting match...",
             ephemeral=True
         )
-        
-        # Get the queue channel
-        channel = interaction.guild.get_channel(QUEUE_CHANNEL_ID)
+
+        # Get the appropriate channel based on playlist
+        playlist_config = PLAYLIST_CONFIG.get(playlist, {})
+        channel_id = playlist_config.get("channel_id", QUEUE_CHANNEL_ID)
+        channel = interaction.guild.get_channel(channel_id)
+        if not channel:
+            channel = interaction.guild.get_channel(QUEUE_CHANNEL_ID)
         if not channel:
             channel = interaction.channel
-        
-        # Start the match
-        await finalize_teams(channel, red_team, blue_team, test_mode=False)
+
+        # Start the match - route through appropriate system based on playlist
+        if playlist == PlaylistType.MLG_4V4:
+            # MLG 4v4 uses the main queue system
+            await finalize_teams(channel, red_team, blue_team, test_mode=False)
+        else:
+            # Other playlists use the playlists system
+            from playlists import (
+                playlist_states, PlaylistMatch, show_playlist_match_embed,
+                save_match_to_history, get_player_mmr
+            )
+
+            # Get or create playlist state
+            ps = playlist_states.get(playlist)
+            if not ps:
+                from playlists import PlaylistQueueState
+                ps = PlaylistQueueState(playlist)
+                playlist_states[playlist] = ps
+
+            # Create match object
+            all_player_list = red_team + blue_team
+            ps.match_counter += 1
+            match = PlaylistMatch(ps, all_player_list, red_team, blue_team)
+            match.match_number = ps.match_counter
+            ps.current_match = match
+
+            # Create voice channels
+            voice_category_id = 1403916181554860112
+            category = channel.guild.get_channel(voice_category_id)
+
+            if team_size == 1:
+                # 1v1: Create shared VC
+                p1 = channel.guild.get_member(red_team[0])
+                p2 = channel.guild.get_member(blue_team[0])
+                p1_name = p1.display_name if p1 else "Player 1"
+                p2_name = p2.display_name if p2 else "Player 2"
+                vc = await channel.guild.create_voice_channel(
+                    name=f"{p1_name} vs {p2_name}",
+                    category=category
+                )
+                match.shared_vc_id = vc.id
+            else:
+                # Team match: Create team VCs
+                team1_mmrs = [await get_player_mmr(uid) for uid in red_team]
+                team2_mmrs = [await get_player_mmr(uid) for uid in blue_team]
+                team1_avg = int(sum(team1_mmrs) / len(team1_mmrs)) if team1_mmrs else 1500
+                team2_avg = int(sum(team2_mmrs) / len(team2_mmrs)) if team2_mmrs else 1500
+
+                team1_vc = await channel.guild.create_voice_channel(
+                    name=f"Red {match.get_match_label()} - {team1_avg} MMR",
+                    category=category
+                )
+                team2_vc = await channel.guild.create_voice_channel(
+                    name=f"Blue {match.get_match_label()} - {team2_avg} MMR",
+                    category=category
+                )
+                match.team1_vc_id = team1_vc.id
+                match.team2_vc_id = team2_vc.id
+
+            # Show match embed
+            await show_playlist_match_embed(channel, match)
+
+            # Save to history
+            save_match_to_history(match, "STARTED", channel.guild)
+
+            log_action(f"{playlist_name} match started - Red: {red_team}, Blue: {blue_team}")
     
     @bot.tree.command(name='adminguestmatch', description='[STAFF] Set teams with guests (use guest:HostName format)')
     @app_commands.describe(

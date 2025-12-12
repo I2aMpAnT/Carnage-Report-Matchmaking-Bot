@@ -50,6 +50,8 @@ class QueueState:
         self.paused: bool = False  # Matchmaking paused flag
         self.inactivity_pending: dict = {}  # user_id -> {"prompt_time": datetime, "dm_message": Message, "general_message": Message}
         self.inactivity_timer_task: Optional[asyncio.Task] = None  # Background task for inactivity checks
+        self.locked: bool = False  # Queue locked when full - prevents leaving
+        self.locked_players: List[int] = []  # Players locked into current match
 
 # Global queue state
 queue_state = QueueState()
@@ -152,6 +154,11 @@ class InactivityConfirmView(View):
             await interaction.response.send_message("This confirmation is not for you!", ephemeral=True)
             return
 
+        # Check if user is locked into a match
+        if self.user_id in queue_state.locked_players:
+            await interaction.response.send_message("❌ Queue is locked! You cannot leave once the match has started.", ephemeral=True)
+            return
+
         self.responded = True
 
         # Remove from queue
@@ -187,6 +194,10 @@ class InactivityConfirmView(View):
 async def remove_inactive_user(guild: discord.Guild, user_id: int, reason: str = "inactivity"):
     """Remove a user from queue due to inactivity"""
     if user_id not in queue_state.queue:
+        return
+
+    # Don't remove if user is locked into a match
+    if user_id in queue_state.locked_players:
         return
 
     # Calculate time in queue
@@ -487,7 +498,12 @@ class QueueView(View):
     @discord.ui.button(label="Leave Matchmaking", style=discord.ButtonStyle.danger, custom_id="leave_queue")
     async def leave_queue(self, interaction: discord.Interaction, button: discord.ui.Button):
         user_id = interaction.user.id
-        
+
+        # Check if user is locked into a match
+        if user_id in queue_state.locked_players:
+            await interaction.response.send_message("❌ Queue is locked! You cannot leave once the match has started.", ephemeral=True)
+            return
+
         if user_id not in queue_state.queue:
             await interaction.response.send_message("You're not in matchmaking!", ephemeral=True)
             return

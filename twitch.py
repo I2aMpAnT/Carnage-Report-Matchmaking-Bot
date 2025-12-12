@@ -40,7 +40,7 @@ BLUE_TEAM_EMOJI_ID = None
 
 # Admin and Staff roles
 ADMIN_ROLES = ["Overlord", "Staff", "Server Support"]
-STAFF_ROLES = ["Overlord", "Staff", "Server Tech Support"]
+STAFF_ROLES = ["Overlord", "Staff", "Server Support"]
 
 def has_staff_role():
     """Check if user has staff role"""
@@ -48,7 +48,7 @@ def has_staff_role():
         user_roles = [role.name for role in interaction.user.roles]
         if any(role in STAFF_ROLES for role in user_roles):
             return True
-        await interaction.response.send_message("❌ You need Overlord, Staff, or Server Tech Support role!", ephemeral=True)
+        await interaction.response.send_message("❌ You need Overlord, Staff, or Server Support role!", ephemeral=True)
         return False
     return app_commands.check(predicate)
 
