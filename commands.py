@@ -777,96 +777,6 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             log_action(f"Error in /deletematch: {e}")
             await interaction.followup.send(f"❌ Error deleting match: {e}", ephemeral=True)
 
-    @bot.tree.command(name="correctcurrent", description="[STAFF] Correct a game result in a match")
-    @has_staff_role()
-    @app_commands.describe(
-        playlist="Which playlist's match to correct",
-        game_number="The game number to correct (1, 2, 3, etc.)",
-        winner="The correct winner (RED/BLUE or TEAM1/TEAM2 or P1/P2)"
-    )
-    @app_commands.choices(playlist=[
-        app_commands.Choice(name="MLG 4v4", value="mlg_4v4"),
-        app_commands.Choice(name="Team Hardcore", value="team_hardcore"),
-        app_commands.Choice(name="Double Team", value="double_team"),
-        app_commands.Choice(name="Head to Head", value="head_to_head"),
-    ])
-    async def correct_current(interaction: discord.Interaction, playlist: str, game_number: int, winner: str):
-        """Correct a game result in any playlist"""
-        from searchmatchmaking import queue_state
-        from ingame import show_series_embed
-
-        if playlist == "mlg_4v4":
-            # Original MLG 4v4 queue
-            if not queue_state.current_series:
-                await interaction.response.send_message("❌ No active MLG 4v4 match!", ephemeral=True)
-                return
-
-            series = queue_state.current_series
-
-            if game_number < 1 or game_number > len(series.games):
-                await interaction.response.send_message(
-                    f"❌ Invalid game number! Must be between 1 and {len(series.games)}",
-                    ephemeral=True
-                )
-                return
-
-            winner_upper = winner.upper()
-            if winner_upper not in ['RED', 'BLUE']:
-                await interaction.response.send_message(
-                    "❌ Winner must be 'RED' or 'BLUE'!",
-                    ephemeral=True
-                )
-                return
-
-            old_winner = series.games[game_number - 1]
-            series.games[game_number - 1] = winner_upper
-
-            log_action(f"Staff {interaction.user.name} corrected Game {game_number} from {old_winner} to {winner_upper} in MLG 4v4 Match #{series.match_number}")
-
-            await interaction.response.defer()
-            await show_series_embed(interaction.channel)
-        else:
-            # Other playlists
-            try:
-                import playlists
-                ps = playlists.get_playlist_state(playlist)
-
-                if not ps.current_match:
-                    await interaction.response.send_message(f"❌ No active {ps.name} match!", ephemeral=True)
-                    return
-
-                match = ps.current_match
-
-                if game_number < 1 or game_number > len(match.games):
-                    await interaction.response.send_message(
-                        f"❌ Invalid game number! Must be between 1 and {len(match.games)}",
-                        ephemeral=True
-                    )
-                    return
-
-                winner_upper = winner.upper()
-                # Accept multiple formats
-                if winner_upper in ['RED', 'TEAM1', 'P1', '1']:
-                    winner_upper = 'TEAM1'
-                elif winner_upper in ['BLUE', 'TEAM2', 'P2', '2']:
-                    winner_upper = 'TEAM2'
-                else:
-                    await interaction.response.send_message(
-                        "❌ Winner must be 'RED/BLUE', 'TEAM1/TEAM2', or 'P1/P2'!",
-                        ephemeral=True
-                    )
-                    return
-
-                old_winner = match.games[game_number - 1]
-                match.games[game_number - 1] = winner_upper
-
-                log_action(f"Staff {interaction.user.name} corrected Game {game_number} from {old_winner} to {winner_upper} in {match.get_match_label()}")
-
-                await interaction.response.defer()
-                await playlists.show_playlist_match_embed(interaction.channel, match)
-            except Exception as e:
-                await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
-    
     @bot.tree.command(name="bannedroles", description="[ADMIN] Set roles that cannot queue (comma separated)")
     @has_admin_role()
     async def banned_roles(interaction: discord.Interaction, roles: str):
@@ -925,127 +835,6 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         await interaction.response.defer()
         log_action(f"Admin {interaction.user.name} set required roles: {role_list}")
 
-    # ==== TEST COMMANDS ====
-    
-    @bot.tree.command(name='testmatchmaking', description='[STAFF] Start a 4v4 test match with 2 testers + 6 random players with MMR')
-    @has_staff_role()
-    async def test_matchmaking(interaction: discord.Interaction):
-        """Start a 4v4 test match - 2 testers from VC + 6 random players with MMR (only testers can vote)"""
-        await interaction.response.defer()
-        
-        from searchmatchmaking import queue_state, log_action
-        from pregame import start_pregame, PREGAME_LOBBY_ID
-        import STATSRANKS
-        
-        guild = interaction.guild
-        
-        # Check if there's already a match in progress
-        if queue_state.current_series:
-            await interaction.followup.send("❌ A match is already in progress!", ephemeral=True)
-            return
-        
-        # Check if pregame is active
-        if hasattr(queue_state, 'pregame_vc_id') and queue_state.pregame_vc_id:
-            await interaction.followup.send("❌ A pregame is already in progress!", ephemeral=True)
-            return
-        
-        # Get members from test voice channel
-        TEST_VC_ID = 1099821085714808883
-        test_vc = guild.get_channel(TEST_VC_ID)
-        
-        if not test_vc:
-            await interaction.followup.send("❌ Test voice channel not found!", ephemeral=True)
-            return
-        
-        # Get members in the voice channel (exclude bots)
-        vc_members = [m for m in test_vc.members if not m.bot]
-        
-        if len(vc_members) < 2:
-            await interaction.followup.send(
-                f"❌ Need at least 2 people in <#{TEST_VC_ID}> to start test match.\n"
-                f"Currently: {len(vc_members)} member(s)",
-                ephemeral=True
-            )
-            return
-        
-        # Use first 2 members as testers (they can vote)
-        tester1 = vc_members[0]
-        tester2 = vc_members[1]
-        tester_ids = [tester1.id, tester2.id]
-        
-        # Check if testers have existing MMR stats
-        tester1_stats = STATSRANKS.get_existing_player_stats(tester1.id)
-        tester2_stats = STATSRANKS.get_existing_player_stats(tester2.id)
-        
-        if not tester1_stats or 'mmr' not in tester1_stats:
-            await interaction.followup.send(
-                f"❌ {tester1.mention} doesn't have MMR stats!\n"
-                f"They need to be given an MMR before testing.",
-                ephemeral=True
-            )
-            return
-        
-        if not tester2_stats or 'mmr' not in tester2_stats:
-            await interaction.followup.send(
-                f"❌ {tester2.mention} doesn't have MMR stats!\n"
-                f"They need to be given an MMR before testing.",
-                ephemeral=True
-            )
-            return
-        
-        tester1_mmr = tester1_stats['mmr']
-        tester2_mmr = tester2_stats['mmr']
-        
-        log_action(f"Tester 1: {tester1.display_name} - MMR: {tester1_mmr}")
-        log_action(f"Tester 2: {tester2.display_name} - MMR: {tester2_mmr}")
-        
-        # Get members with EXISTING stats only (exclude bots and testers)
-        members_with_mmr = []
-        for member in guild.members:
-            if member.bot or member.id in tester_ids:
-                continue
-            # Only include players who already have stats in the file
-            stats = STATSRANKS.get_existing_player_stats(member.id)
-            if stats and 'mmr' in stats:
-                members_with_mmr.append((member, stats['mmr']))
-        
-        if len(members_with_mmr) < 6:
-            await interaction.followup.send(
-                f"❌ Not enough members with MMR stats!\n"
-                f"Found: {len(members_with_mmr)} players with MMR\n"
-                f"Need: 6 players for fillers\n\n"
-                f"Use `/setmmr` to give players an MMR rating.",
-                ephemeral=True
-            )
-            return
-        
-        # Randomly select 6 players with stats
-        filler_players = random.sample(members_with_mmr, 6)
-        filler_ids = [m.id for m, mmr in filler_players]
-        
-        # Log selected fillers with their MMR
-        for member, mmr in filler_players:
-            log_action(f"Filler: {member.display_name} - MMR: {mmr}")
-        
-        # All 8 players for the match
-        all_test_players = tester_ids + filler_ids
-        
-        log_action(f"Test matchmaking started: {tester1.display_name} ({tester1_mmr}) and {tester2.display_name} ({tester2_mmr}) + 6 fillers")
-        log_action(f"Only testers can vote: {tester1.display_name}, {tester2.display_name}")
-        
-        # Store testers list in queue_state so pregame/ingame can access it
-        queue_state.testers = tester_ids
-        
-        # Start pregame with all 8 players - this shows the team selection screen
-        await start_pregame(interaction.channel, test_mode=True, test_players=all_test_players)
-        
-        # Send a followup to dismiss the "thinking" message (delete it immediately)
-        try:
-            msg = await interaction.followup.send("✅", ephemeral=True)
-            await msg.delete()
-        except:
-            pass
-    
     @bot.tree.command(name='swap', description='Swap a player on Red team with a player on Blue team')
     @app_commands.describe(
         red_player="Player currently on RED team to swap",
@@ -1160,70 +949,6 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             ephemeral=True
         )
     
-    @bot.tree.command(name='setgamestats', description='[STAFF] Set map and gametype for a completed game')
-    @app_commands.describe(
-        game_number="The game number (1, 2, 3, etc.)",
-        map_name="The map played",
-        gametype="The gametype played"
-    )
-    @has_staff_role()
-    async def set_game_stats(
-        interaction: discord.Interaction,
-        game_number: int,
-        map_name: str,
-        gametype: str
-    ):
-        """Set map and gametype stats for a completed game"""
-        from searchmatchmaking import queue_state, log_action
-        
-        # Check if there's an active series
-        if not queue_state.current_series:
-            await interaction.response.send_message("❌ No active match!", ephemeral=True)
-            return
-        
-        series = queue_state.current_series
-        
-        # Validate game number
-        if game_number < 1:
-            await interaction.response.send_message("❌ Game number must be 1 or higher!", ephemeral=True)
-            return
-        
-        if game_number > len(series.games):
-            await interaction.response.send_message(
-                f"❌ Game {game_number} hasn't been played yet! Only {len(series.games)} game(s) completed.",
-                ephemeral=True
-            )
-            return
-        
-        # Set the stats
-        series.game_stats[game_number] = {
-            "map": map_name.strip(),
-            "gametype": gametype.strip()
-        }
-        
-        log_action(f"Game {game_number} stats set: {map_name} - {gametype}")
-        
-        # Update series embed
-        from ingame import SeriesView
-        if series.series_message:
-            try:
-                view = SeriesView(series)
-                await view.update_series_embed(interaction.channel)
-            except Exception as e:
-                log_action(f"Failed to update series embed: {e}")
-        
-        # Update general chat embed
-        try:
-            from ingame import update_general_chat_embed
-            await update_general_chat_embed(interaction.guild, series)
-        except Exception as e:
-            log_action(f"Failed to update general chat embed: {e}")
-        
-        await interaction.response.send_message(
-            f"✅ Set Game {game_number} stats: **{map_name}** - **{gametype}**",
-            ephemeral=True
-        )
-    
     # ========== ALIAS COMMANDS ==========
     
     @bot.tree.command(name="linkalias", description="Link an in-game alias to your Discord account")
@@ -1285,11 +1010,11 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         )
         log_action(f"{interaction.user.name} linked alias: {alias}")
     
-    @bot.tree.command(name="unlinkalias", description="[STAFF] Remove an in-game alias from a player")
+    @bot.tree.command(name="unlinkalias", description="[ADMIN] Remove an in-game alias from a player")
     @app_commands.describe(alias="The alias to remove", user="The user to remove alias from (optional, defaults to yourself)")
-    @has_staff_role()
+    @has_admin_role()
     async def unlink_alias(interaction: discord.Interaction, alias: str, user: discord.Member = None):
-        """Remove an in-game alias (staff only)"""
+        """Remove an in-game alias (admin only)"""
         import twitch
 
         # Target user (defaults to command user if not specified)
@@ -3107,9 +2832,8 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                 ephemeral=True
             )
 
-    @bot.tree.command(name='stream', description='Get MultiTwitch links for current match')
-    async def stream_command(interaction: discord.Interaction):
-        """Get multistream links for current match"""
+    async def _get_stream_links(interaction: discord.Interaction):
+        """Shared helper for stream/twitch/transmission commands"""
         import twitch as twitch_module
         from searchmatchmaking import queue_state
 
@@ -3154,6 +2878,21 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         view = twitch_module.MultiStreamView(red_twitch, blue_twitch)
         await interaction.response.send_message(embed=embed, view=view)
 
+    @bot.tree.command(name='stream', description='Get MultiTwitch links for current match')
+    async def stream_command(interaction: discord.Interaction):
+        """Get multistream links for current match"""
+        await _get_stream_links(interaction)
+
+    @bot.tree.command(name='twitch', description='Get MultiTwitch links for current match')
+    async def twitch_command(interaction: discord.Interaction):
+        """Get multistream links for current match (alias for /stream)"""
+        await _get_stream_links(interaction)
+
+    @bot.tree.command(name='transmission', description='Get MultiTwitch links for current match')
+    async def transmission_command(interaction: discord.Interaction):
+        """Get multistream links for current match (alias for /stream)"""
+        await _get_stream_links(interaction)
+
     @bot.tree.command(name='adminsettwitch', description='[ADMIN] Set someone\'s Twitch')
     @app_commands.describe(user="The user", twitch="Their Twitch username or URL")
     @has_admin_role()
@@ -3189,67 +2928,6 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             )
 
     # ========== STATS COMMANDS (from STATSRANKS.py) ==========
-
-    @bot.tree.command(name="addgamestats", description="[ADMIN] Add game statistics")
-    @has_admin_role()
-    @app_commands.describe(
-        match_number="Match number",
-        game_number="Game number within the match",
-        map_name="Map that was played",
-        gametype="Gametype that was played"
-    )
-    @app_commands.choices(
-        map_name=[
-            app_commands.Choice(name="Midship", value="Midship"),
-            app_commands.Choice(name="Beaver Creek", value="Beaver Creek"),
-            app_commands.Choice(name="Lockout", value="Lockout"),
-            app_commands.Choice(name="Warlock", value="Warlock"),
-            app_commands.Choice(name="Sanctuary", value="Sanctuary"),
-        ],
-        gametype=[
-            app_commands.Choice(name="MLG CTF5", value="MLG CTF5"),
-            app_commands.Choice(name="MLG CTF3", value="MLG CTF3"),
-            app_commands.Choice(name="MLG Team Slayer", value="MLG Team Slayer"),
-            app_commands.Choice(name="MLG Oddball", value="MLG Oddball"),
-            app_commands.Choice(name="MLG Bomb", value="MLG Bomb"),
-        ]
-    )
-    async def addgamestats(
-        interaction: discord.Interaction,
-        match_number: int,
-        game_number: int,
-        map_name: str,
-        gametype: str
-    ):
-        """Add game statistics"""
-        import STATSRANKS
-
-        # Validate combination
-        if gametype not in STATSRANKS.MAP_GAMETYPES.get(map_name, []):
-            await interaction.response.send_message(
-                f"❌ Sorry, **{gametype}** is not played on **{map_name}**\n\n"
-                f"Valid gametypes for {map_name}: {', '.join(STATSRANKS.MAP_GAMETYPES[map_name])}",
-                ephemeral=True
-            )
-            return
-
-        # Add to stats
-        success = STATSRANKS.add_game_stats(match_number, game_number, map_name, gametype)
-
-        if success:
-            await interaction.response.send_message(
-                f"✅ Game stats added!\n"
-                f"**Match #{match_number}** - Game {game_number}\n"
-                f"**Map:** {map_name}\n"
-                f"**Gametype:** {gametype}",
-                ephemeral=True
-            )
-            log_action(f"[STATS] Game stats added: Match {match_number}, Game {game_number}, {map_name}, {gametype}")
-        else:
-            await interaction.response.send_message(
-                "❌ Failed to add game stats!",
-                ephemeral=True
-            )
 
     @bot.tree.command(name="playerstats", description="View player matchmaking statistics")
     @app_commands.describe(user="User to view stats for (optional)")
@@ -3564,14 +3242,14 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         )
         log_action(f"[SILENT VERIFY] Synced {updated_count} ranks, skipped {skipped_count}, not found {not_found_count}, {error_count} errors")
 
-    @bot.tree.command(name="mmr", description="[ADMIN] Set a player's MMR")
-    @has_admin_role()
+    @bot.tree.command(name="mmr", description="[STAFF] Set a player's MMR")
+    @has_staff_role()
     @app_commands.describe(
         player="Player to set MMR for",
         value="MMR value (e.g., 1500)"
     )
     async def set_mmr(interaction: discord.Interaction, player: discord.User, value: int):
-        """Set player MMR (Admin only) - stored in MMR.json for team balancing"""
+        """Set player MMR (Staff only) - stored in MMR.json for team balancing"""
         import STATSRANKS
         import json
 
