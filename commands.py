@@ -2872,7 +2872,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             )
             return
 
-        twitch_module.set_player_twitch(interaction.user.id, name, discord_name=interaction.user.name)
+        twitch_module.set_player_twitch(interaction.user.id, name)
         await interaction.response.send_message(
             f"✅ Linked your Twitch to **{name}**",
             ephemeral=True
@@ -3027,7 +3027,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             await interaction.response.send_message("❌ Invalid Twitch username.", ephemeral=True)
             return
 
-        twitch_module.set_player_twitch(user.id, name, discord_name=user.name)
+        twitch_module.set_player_twitch(user.id, name)
         await interaction.response.send_message(
             f"✅ Set {user.display_name}'s Twitch to **{name}**",
             ephemeral=True

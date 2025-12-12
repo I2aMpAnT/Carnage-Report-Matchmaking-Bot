@@ -130,7 +130,7 @@ def get_player_twitch(user_id: int) -> Optional[dict]:
     players = load_players()
     return players.get(str(user_id))
 
-def set_player_twitch(user_id: int, twitch_name: str, display_name: Optional[str] = None, discord_name: Optional[str] = None):
+def set_player_twitch(user_id: int, twitch_name: str):
     """Set a player's Twitch info (preserves existing MAC/other data)"""
     players = load_players()
     user_key = str(user_id)
@@ -139,16 +139,9 @@ def set_player_twitch(user_id: int, twitch_name: str, display_name: Optional[str
     if user_key not in players:
         players[user_key] = {}
 
-    # Update/add Twitch fields (preserves mac_addresses, etc.)
+    # Update/add Twitch fields only (preserves mac_addresses, etc.)
     players[user_key]["twitch_name"] = twitch_name
     players[user_key]["twitch_url"] = f"https://twitch.tv/{twitch_name}"
-
-    if display_name:
-        players[user_key]["display_name"] = display_name
-
-    # Save Discord username for website display
-    if discord_name:
-        players[user_key]["discord_name"] = discord_name
 
     save_players(players)
 
