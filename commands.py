@@ -3251,14 +3251,31 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
     async def playerstats(interaction: discord.Interaction, user: discord.User = None):
         """Show player stats with per-playlist ranks - reads from ranks.json (website source of truth)"""
         import STATSRANKS
+        from github_webhook import async_pull_emblems_from_github
 
         target_user = user or interaction.user
+        guild = interaction.guild
+
+        # Helper function to get rank emoji
+        def get_rank_emoji(level: int) -> str:
+            """Get the custom rank emoji for a level (e.g., :15: or :6_:)"""
+            if guild:
+                emoji_name = str(level)
+                emoji = discord.utils.get(guild.emojis, name=emoji_name)
+                if emoji:
+                    return str(emoji)
+                # For single-digit levels (1-9), try with underscore suffix
+                if level <= 9:
+                    emoji = discord.utils.get(guild.emojis, name=f"{level}_")
+                    if emoji:
+                        return str(emoji)
+            return f"Lv{level}"
 
         # Get stats from ranks.json (website source of truth)
         player_stats = STATSRANKS.get_player_stats(target_user.id)
 
-        # Get highest rank
-        highest_rank = player_stats.get("highest_rank", 1)
+        # Get highest rank (current rank of highest playlist, not peak)
+        highest_rank = STATSRANKS.calculate_highest_rank(player_stats)
 
         # Calculate win rate
         total_games = player_stats["total_games"]
@@ -3269,6 +3286,9 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         # Get MMR (from MMR.json if available)
         mmr = player_stats.get("mmr")
         mmr_display = f"**{mmr:.1f}**" if mmr else "N/A"
+
+        # Get rank emoji for highest rank
+        highest_rank_emoji = get_rank_emoji(highest_rank)
 
         # Create embed
         embed = discord.Embed(
@@ -3291,7 +3311,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
 
         embed.add_field(
             name="HIGHEST RANK",
-            value=f"**Level {highest_rank}**",
+            value=highest_rank_emoji,
             inline=True
         )
 
@@ -3303,12 +3323,13 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         ranks_text = ""
         for ptype in STATSRANKS.PLAYLIST_TYPES:
             pdata = playlists.get(ptype, {})
-            # ranks.json uses "rank" for current rank, "highest_rank" for highest achieved
-            p_rank = pdata.get("rank", pdata.get("highest_rank", 1))
+            # ranks.json uses "rank" for current rank
+            p_rank = pdata.get("rank", 1)
             pwins = pdata.get("wins", 0)
             plosses = pdata.get("losses", 0)
             if pwins > 0 or plosses > 0:  # Only show playlists with activity
-                ranks_text += f"**{ptype}**: Level {p_rank} - {pwins}W/{plosses}L\n"
+                p_rank_emoji = get_rank_emoji(p_rank)
+                ranks_text += f"**{ptype}**: {p_rank_emoji} - {pwins}W/{plosses}L\n"
 
         embed.add_field(
             name="📊 PLAYLIST RANKS",
@@ -3339,7 +3360,26 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             inline=True
         )
 
-        embed.set_thumbnail(url=target_user.display_avatar.url)
+        # Get player's emblem from emblems.json and use as thumbnail
+        emblem_set = False
+        try:
+            emblems = await async_pull_emblems_from_github() or {}
+            user_key = str(target_user.id)
+            if user_key in emblems:
+                emblem_data = emblems[user_key]
+                emblem_url = emblem_data.get("emblem_url") if isinstance(emblem_data, dict) else emblem_data
+                if emblem_url:
+                    emblem_png = STATSRANKS.get_emblem_png_url(emblem_url)
+                    if emblem_png:
+                        embed.set_thumbnail(url=emblem_png)
+                        emblem_set = True
+        except Exception as e:
+            log_action(f"Failed to load emblem for {target_user.name}: {e}")
+
+        # Fallback to Discord avatar if no emblem
+        if not emblem_set:
+            embed.set_thumbnail(url=target_user.display_avatar.url)
+
         embed.set_footer(text=f"Total Games: {total_games} | Series W/L: {player_stats['series_wins']}/{player_stats['series_losses']}")
 
         await interaction.response.send_message(embed=embed)
