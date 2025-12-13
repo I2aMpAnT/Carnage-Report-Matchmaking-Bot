@@ -43,14 +43,20 @@ def save_state():
             "red_team": series.red_team,
             "blue_team": series.blue_team,
             "games": series.games,
+            "game_stats": getattr(series, 'game_stats', {}),
             "current_game": series.current_game,
             "test_mode": series.test_mode,
+            "testers": getattr(series, 'testers', []),
             "match_number": series.match_number,
             "series_number": series.series_number,
             "red_vc_id": series.red_vc_id,
             "blue_vc_id": series.blue_vc_id,
             "text_channel_id": getattr(series, 'text_channel_id', None),
             "swap_history": getattr(series, 'swap_history', []),
+            "start_time": series.start_time.isoformat() if hasattr(series, 'start_time') and series.start_time else None,
+            "end_time": series.end_time.isoformat() if hasattr(series, 'end_time') and series.end_time else None,
+            "results_channel_id": getattr(series, 'results_channel_id', None),
+            "results_message_id": series.results_message.id if hasattr(series, 'results_message') and series.results_message else None,
             "series_message_id": series.series_message.id if series.series_message else None,
             "series_message_channel_id": series.series_message.channel.id if series.series_message else None,
             "general_message_id": series.general_message.id if hasattr(series, 'general_message') and series.general_message else None
@@ -117,8 +123,12 @@ async def restore_state(bot) -> bool:
             series.red_team = series_data["red_team"]
             series.blue_team = series_data["blue_team"]
             series.games = series_data["games"]
+            # Restore game_stats with integer keys (JSON converts them to strings)
+            raw_game_stats = series_data.get("game_stats", {})
+            series.game_stats = {int(k): v for k, v in raw_game_stats.items()}
             series.current_game = series_data["current_game"]
             series.test_mode = series_data["test_mode"]
+            series.testers = series_data.get("testers", [])
             series.match_number = series_data["match_number"]
             series.series_number = series_data["series_number"]
             series.red_vc_id = series_data["red_vc_id"]
@@ -129,6 +139,18 @@ async def restore_state(bot) -> bool:
             series.end_series_votes = set()
             series.series_message = None
             series.general_message = None
+            series.results_message = None
+            series.results_channel_id = series_data.get("results_channel_id")
+
+            # Restore time attributes (critical for /endmatch)
+            start_time_str = series_data.get("start_time")
+            if start_time_str:
+                series.start_time = datetime.fromisoformat(start_time_str)
+            else:
+                series.start_time = datetime.now()  # Fallback for old state files
+
+            end_time_str = series_data.get("end_time")
+            series.end_time = datetime.fromisoformat(end_time_str) if end_time_str else None
             
             queue_state.current_series = series
             
