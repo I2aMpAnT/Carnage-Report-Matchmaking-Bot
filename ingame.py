@@ -280,22 +280,27 @@ class SeriesView(View):
                     elif any(role in ["Staff", "Server Support"] for role in member_roles):
                         staff_votes += 1
 
-            # End conditions: majority (5 of 8) OR 2 admin votes OR 2 staff votes
+            # End conditions: majority (5 of 8) OR 1 admin vote OR 2 staff votes
             majority_needed = (len(all_players) // 2) + 1
             total_votes = len(self.end_voters)
 
-            log_action(f"[VOTE] Counts: {total_votes} total, {admin_votes} admin, {staff_votes} staff. Need {majority_needed} majority OR 2 admin OR 2 staff")
+            log_action(f"[VOTE] Counts: {total_votes} total, {admin_votes} admin, {staff_votes} staff. Need {majority_needed} majority OR 1 admin OR 2 staff")
+
+            should_end = False
+            end_reason = ""
 
             if total_votes >= majority_needed:
-                log_action(f"[VOTE] Majority threshold met ({total_votes}/{majority_needed}) - ending series")
-                from postgame import end_series
-                await end_series(self, interaction.channel)
-            elif admin_votes >= 2:
-                log_action(f"[VOTE] Admin threshold met ({admin_votes}/2) - ending series")
-                from postgame import end_series
-                await end_series(self, interaction.channel)
+                should_end = True
+                end_reason = f"Majority threshold met ({total_votes}/{majority_needed})"
+            elif admin_votes >= 1:
+                should_end = True
+                end_reason = f"Admin vote ({admin_votes})"
             elif staff_votes >= 2:
-                log_action(f"[VOTE] Staff threshold met ({staff_votes}/2) - ending series")
+                should_end = True
+                end_reason = f"Staff threshold met ({staff_votes}/2)"
+
+            if should_end:
+                log_action(f"[VOTE] {end_reason} - ending series")
                 from postgame import end_series
                 await end_series(self, interaction.channel)
         except Exception as e:
@@ -303,7 +308,11 @@ class SeriesView(View):
             import traceback
             log_action(f"[VOTE ERROR] Traceback: {traceback.format_exc()}")
             try:
-                await interaction.response.send_message(f"❌ Error processing vote: {e}", ephemeral=True)
+                # Try followup first (if already deferred), then response
+                try:
+                    await interaction.followup.send(f"❌ Error processing vote: {e}", ephemeral=True)
+                except:
+                    await interaction.response.send_message(f"❌ Error processing vote: {e}", ephemeral=True)
             except:
                 pass
     
