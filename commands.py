@@ -654,7 +654,8 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
     @bot.tree.command(name="endmatch", description="[ADMIN] End an active match (properly records results)")
     @has_admin_role()
     @app_commands.describe(
-        playlist="Which playlist's match to end"
+        playlist="Which playlist's match to end",
+        match_number="Match number to end (leave blank for current)"
     )
     @app_commands.choices(playlist=[
         app_commands.Choice(name="MLG 4v4", value="mlg_4v4"),
@@ -662,7 +663,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         app_commands.Choice(name="Double Team", value="double_team"),
         app_commands.Choice(name="Head to Head", value="head_to_head"),
     ])
-    async def end_match(interaction: discord.Interaction, playlist: str):
+    async def end_match(interaction: discord.Interaction, playlist: str, match_number: int = None):
         """End an active match - properly records results and cleans up"""
         await interaction.response.defer(ephemeral=True)
 
@@ -676,13 +677,24 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                 return
 
             series = queue_state.current_series
+
+            # If match_number specified, verify it matches current
+            if match_number is not None and series.match_number != match_number:
+                await interaction.followup.send(
+                    f"❌ Match #{match_number} not found! Current active match is #{series.match_number}",
+                    ephemeral=True
+                )
+                return
+
             match_num = series.match_number
 
             # Find the channel where the series message is
             channel = None
-            if series.series_message:
+            if series.text_channel_id:
+                channel = interaction.guild.get_channel(series.text_channel_id)
+            if not channel and series.series_message:
                 channel = series.series_message.channel
-            else:
+            if not channel:
                 channel = interaction.guild.get_channel(QUEUE_CHANNEL_ID)
 
             if channel:
@@ -722,6 +734,15 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                 return
 
             match = ps.current_match
+
+            # If match_number specified, verify it matches current
+            if match_number is not None and match.match_number != match_number:
+                await interaction.followup.send(
+                    f"❌ Match #{match_number} not found! Current active match is #{match.match_number}",
+                    ephemeral=True
+                )
+                return
+
             match_num = match.match_number
 
             # Find the channel
@@ -3296,21 +3317,20 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
 
         # Get MMR (from MMR.json if available)
         mmr = player_stats.get("mmr")
-        mmr_display = f"**{mmr:.1f}**" if mmr else "N/A"
+        mmr_display = f"**{int(mmr)}**" if mmr else "N/A"
 
         # Get rank emoji for highest rank
         highest_rank_emoji = get_rank_emoji(highest_rank)
 
-        # Create embed
+        # Create embed (no title - emblem/avatar is the visual header)
         embed = discord.Embed(
-            title=f"{display_name}'s Matchmaking Stats",
             color=discord.Color.from_rgb(0, 112, 192)
         )
 
         # Header with player name and MMR
         embed.add_field(
-            name="PLAYER",
-            value=f"**{display_name}**",
+            name=f"{display_name}",
+            value="\u200b",
             inline=True
         )
 
@@ -3343,7 +3363,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                 ranks_text += f"**{ptype}**: {p_rank_emoji} - {pwins}W/{plosses}L\n"
 
         embed.add_field(
-            name="📊 PLAYLIST RANKS",
+            name="PLAYLIST RANKS",
             value=ranks_text.strip() if ranks_text else "No playlist data yet",
             inline=False
         )
@@ -3758,5 +3778,50 @@ python3 populate_stats.py'''
 
         log_action(f"Admin {interaction.user.name} ran /dotcomrefresh - {'success' if success else 'failed'}")
         await interaction.followup.send(response, ephemeral=True)
+
+    @bot.tree.command(name="voicervb", description="[STAFF] Create Red vs Blue voice channels")
+    @has_staff_role()
+    async def voice_rvb(interaction: discord.Interaction):
+        """Create manual Red Team and Blue Team voice channels"""
+        await interaction.response.defer(ephemeral=True)
+
+        guild = interaction.guild
+
+        # Voice Channels category
+        voice_category_id = 1403916181554860112
+        category = guild.get_channel(voice_category_id)
+
+        if not category:
+            await interaction.followup.send("❌ Could not find Voice Channels category!", ephemeral=True)
+            return
+
+        try:
+            # Create Red Team voice channel
+            red_vc = await guild.create_voice_channel(
+                name="🔴 Red Team",
+                category=category,
+                user_limit=None,
+                position=999
+            )
+
+            # Create Blue Team voice channel
+            blue_vc = await guild.create_voice_channel(
+                name="🔵 Blue Team",
+                category=category,
+                user_limit=None,
+                position=999
+            )
+
+            log_action(f"[VOICE] {interaction.user.name} created RvB voice channels: Red={red_vc.id}, Blue={blue_vc.id}")
+
+            await interaction.followup.send(
+                f"✅ Created voice channels:\n"
+                f"• {red_vc.mention}\n"
+                f"• {blue_vc.mention}",
+                ephemeral=True
+            )
+        except Exception as e:
+            log_action(f"[VOICE] Failed to create RvB channels: {e}")
+            await interaction.followup.send(f"❌ Failed to create channels: {e}", ephemeral=True)
 
     return bot

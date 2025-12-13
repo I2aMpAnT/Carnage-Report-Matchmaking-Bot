@@ -915,13 +915,16 @@ class LeaderboardView(discord.ui.View):
 
     async def _send_personal_view(self, interaction: discord.Interaction):
         """Send a personal ephemeral leaderboard view to the user who clicked"""
+        # Defer first to avoid 3-second timeout while building embed
+        await interaction.response.defer(ephemeral=True)
+
         # Create a new view for this user's personal interaction
         new_view = LeaderboardView(self.bot, guild=self.guild)
         new_view.current_view = self.current_view
         new_view.current_sort = self.current_sort
         new_view.current_page = self.current_page
         embed = await new_view.build_embed()
-        await interaction.response.send_message(embed=embed, view=new_view, ephemeral=True)
+        await interaction.followup.send(embed=embed, view=new_view, ephemeral=True)
 
     # Row 0: Playlist tabs
     @discord.ui.button(label="Overall", style=discord.ButtonStyle.primary, custom_id="lb_overall", row=0)
