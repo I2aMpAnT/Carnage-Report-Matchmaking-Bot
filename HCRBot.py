@@ -386,10 +386,10 @@ async def on_message(message: discord.Message):
         await repost_queue_embed_if_needed(message)
         return
 
-    # Handle general chat - keep match embed at bottom during active series
-    if message.channel.id == GENERAL_CHANNEL_ID:
-        await repost_match_embed_if_needed(message)
-        return
+    # Handle general chat - disabled auto-refresh to avoid spam
+    # if message.channel.id == GENERAL_CHANNEL_ID:
+    #     await repost_match_embed_if_needed(message)
+    #     return
 
 
 async def repost_queue_embed_if_needed(message: discord.Message):
