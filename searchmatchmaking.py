@@ -457,12 +457,28 @@ class QueueView(View):
                     embed=embed
                 )
             return
-        
+
         # Check if already in queue
         if user_id in queue_state.queue:
             await interaction.response.send_message("You're already in matchmaking!", ephemeral=True)
             return
-        
+
+        # Check if in another playlist queue (except Head to Head which is exempt)
+        try:
+            from playlists import get_all_playlists, PlaylistType
+            for ps in get_all_playlists():
+                if ps.playlist_type == PlaylistType.HEAD_TO_HEAD:
+                    continue  # Head to Head exempt from 1 queue rule
+                if user_id in ps.queue:
+                    await interaction.response.send_message(
+                        f"You're already in the **{ps.name}** queue!\n"
+                        "Leave that queue first before joining MLG 4v4.",
+                        ephemeral=True
+                    )
+                    return
+        except:
+            pass
+
         # Check if queue is full
         if len(queue_state.queue) >= MAX_QUEUE_SIZE:
             await interaction.response.send_message("Matchmaking is full!", ephemeral=True)

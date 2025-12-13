@@ -261,6 +261,9 @@ async def on_ready():
         import traceback
         traceback.print_exc()
 
+    # Initialize permanent leaderboard
+    await initialize_leaderboard()
+
 @bot.event
 async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandNotFound):
@@ -341,6 +344,12 @@ async def on_interaction(interaction: discord.Interaction):
 # Channel ID for populate_stats.py refresh trigger
 REFRESH_TRIGGER_CHANNEL_ID = 1427929973125156924
 
+# Leaderboard channel ID - permanent leaderboard embed
+LEADERBOARD_CHANNEL_ID = 1403859019235463189
+
+# Store leaderboard message reference
+leaderboard_message = None
+
 @bot.event
 async def on_message(message: discord.Message):
     """Handle messages - keep queue embeds and match embeds at bottom of their channels"""
@@ -386,6 +395,11 @@ async def on_message(message: discord.Message):
     # Handle queue channels - keep queue embed at bottom
     if message.channel.id in QUEUE_CHANNELS:
         await repost_queue_embed_if_needed(message)
+        return
+
+    # Handle leaderboard channel - keep leaderboard at bottom
+    if message.channel.id == LEADERBOARD_CHANNEL_ID:
+        await repost_leaderboard_if_needed(message)
         return
 
     # Handle general chat - disabled auto-refresh to avoid spam
@@ -499,6 +513,80 @@ async def repost_match_embed_if_needed(message: discord.Message):
 
     except Exception as e:
         print(f"Error reposting match embed: {e}")
+
+
+async def repost_leaderboard_if_needed(message: discord.Message):
+    """Repost leaderboard embed to keep it at the bottom of the leaderboard channel"""
+    global leaderboard_message
+    from searchmatchmaking import log_action
+
+    try:
+        channel = message.channel
+
+        # Find and delete the old leaderboard message
+        if leaderboard_message:
+            try:
+                await leaderboard_message.delete()
+            except:
+                pass
+            leaderboard_message = None
+
+        # Also search for any existing leaderboard embeds
+        async for msg in channel.history(limit=20):
+            if msg.author.bot and msg.embeds:
+                title = msg.embeds[0].title or ""
+                if "Leaderboard" in title:
+                    try:
+                        await msg.delete()
+                    except:
+                        pass
+
+        # Create and post new leaderboard
+        import STATSRANKS
+        view = STATSRANKS.LeaderboardView(bot, guild=message.guild)
+        embed = await view.build_embed()
+        leaderboard_message = await channel.send(embed=embed, view=view)
+        log_action(f"Reposted leaderboard to bottom (triggered by {message.author.display_name})")
+
+    except Exception as e:
+        print(f"Error reposting leaderboard: {e}")
+
+
+async def initialize_leaderboard():
+    """Initialize the permanent leaderboard embed on bot start"""
+    global leaderboard_message
+    from searchmatchmaking import log_action
+
+    try:
+        channel = bot.get_channel(LEADERBOARD_CHANNEL_ID)
+        if not channel:
+            print(f"⚠️ Could not find leaderboard channel {LEADERBOARD_CHANNEL_ID}")
+            return
+
+        # Delete any existing leaderboard embeds
+        async for msg in channel.history(limit=50):
+            if msg.author.bot and msg.embeds:
+                title = msg.embeds[0].title or ""
+                if "Leaderboard" in title:
+                    try:
+                        await msg.delete()
+                    except:
+                        pass
+
+        # Create and post new leaderboard
+        import STATSRANKS
+        guild = channel.guild
+        view = STATSRANKS.LeaderboardView(bot, guild=guild)
+        embed = await view.build_embed()
+        leaderboard_message = await channel.send(embed=embed, view=view)
+        print(f"✅ Permanent leaderboard created in {channel.name}")
+        log_action("Permanent leaderboard initialized")
+
+    except Exception as e:
+        print(f"⚠️ Error initializing leaderboard: {e}")
+        import traceback
+        traceback.print_exc()
+
 
 # Run bot - works both when imported and when run directly
 if not TOKEN:

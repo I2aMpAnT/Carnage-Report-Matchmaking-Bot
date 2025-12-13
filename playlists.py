@@ -608,6 +608,35 @@ class PlaylistQueueView(View):
             await interaction.response.send_message("You're already in this queue!", ephemeral=True)
             return
 
+        # Check if in another queue (Head to Head is exempt from this rule)
+        if ps.playlist_type != PlaylistType.HEAD_TO_HEAD:
+            # Check MLG 4v4 queue
+            try:
+                from searchmatchmaking import queue_state as mlg_queue
+                if user_id in mlg_queue.queue:
+                    await interaction.response.send_message(
+                        "You're already in the **MLG 4v4** queue!\n"
+                        f"Leave that queue first before joining {ps.name}.",
+                        ephemeral=True
+                    )
+                    return
+            except:
+                pass
+
+            # Check other playlist queues (except Head to Head)
+            for other_ps in get_all_playlists():
+                if other_ps == ps:
+                    continue  # Skip self
+                if other_ps.playlist_type == PlaylistType.HEAD_TO_HEAD:
+                    continue  # Head to Head exempt
+                if user_id in other_ps.queue:
+                    await interaction.response.send_message(
+                        f"You're already in the **{other_ps.name}** queue!\n"
+                        f"Leave that queue first before joining {ps.name}.",
+                        ephemeral=True
+                    )
+                    return
+
         if len(ps.queue) >= ps.max_players:
             await interaction.response.send_message("Queue is full!", ephemeral=True)
             return
@@ -748,6 +777,35 @@ class PlaylistPingJoinView(View):
         if user_id in ps.queue:
             await interaction.response.send_message("You're already in this queue!", ephemeral=True)
             return
+
+        # Check if in another queue (Head to Head is exempt from this rule)
+        if ps.playlist_type != PlaylistType.HEAD_TO_HEAD:
+            # Check MLG 4v4 queue
+            try:
+                from searchmatchmaking import queue_state as mlg_queue
+                if user_id in mlg_queue.queue:
+                    await interaction.response.send_message(
+                        "You're already in the **MLG 4v4** queue!\n"
+                        f"Leave that queue first before joining {ps.name}.",
+                        ephemeral=True
+                    )
+                    return
+            except:
+                pass
+
+            # Check other playlist queues (except Head to Head)
+            for other_ps in get_all_playlists():
+                if other_ps == ps:
+                    continue  # Skip self
+                if other_ps.playlist_type == PlaylistType.HEAD_TO_HEAD:
+                    continue  # Head to Head exempt
+                if user_id in other_ps.queue:
+                    await interaction.response.send_message(
+                        f"You're already in the **{other_ps.name}** queue!\n"
+                        f"Leave that queue first before joining {ps.name}.",
+                        ephemeral=True
+                    )
+                    return
 
         if len(ps.queue) >= ps.max_players:
             await interaction.response.send_message("Queue is full!", ephemeral=True)
