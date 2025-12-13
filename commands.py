@@ -651,6 +651,94 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         else:
             await interaction.followup.send(f"✅ Pregame cancelled!", ephemeral=True)
 
+    @bot.tree.command(name="endmatch", description="[ADMIN] End an active match (properly records results)")
+    @has_admin_role()
+    @app_commands.describe(
+        playlist="Which playlist's match to end"
+    )
+    @app_commands.choices(playlist=[
+        app_commands.Choice(name="MLG 4v4", value="mlg_4v4"),
+        app_commands.Choice(name="Team Hardcore", value="team_hardcore"),
+        app_commands.Choice(name="Double Team", value="double_team"),
+        app_commands.Choice(name="Head to Head", value="head_to_head"),
+    ])
+    async def end_match(interaction: discord.Interaction, playlist: str):
+        """End an active match - properly records results and cleans up"""
+        await interaction.response.defer(ephemeral=True)
+
+        if playlist == "mlg_4v4":
+            # MLG 4v4 series
+            from searchmatchmaking import queue_state
+            from postgame import end_series
+
+            if not queue_state.current_series:
+                await interaction.followup.send("❌ No active MLG 4v4 match!", ephemeral=True)
+                return
+
+            series = queue_state.current_series
+            match_num = series.match_number
+
+            # Find the channel where the series message is
+            channel = None
+            if series.series_message:
+                channel = series.series_message.channel
+            else:
+                channel = interaction.guild.get_channel(QUEUE_CHANNEL_ID)
+
+            if channel:
+                try:
+                    await end_series(channel, series=series, admin_ended=True)
+                    log_action(f"Admin {interaction.user.name} ended MLG 4v4 Match #{match_num}")
+                    await interaction.followup.send(f"✅ MLG 4v4 Match #{match_num} ended!", ephemeral=True)
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    await interaction.followup.send(f"❌ Error ending match: {e}", ephemeral=True)
+            else:
+                await interaction.followup.send("❌ Could not find match channel!", ephemeral=True)
+        else:
+            # Other playlists
+            from playlists import playlist_states, end_playlist_match, PlaylistType
+
+            # Map choice to playlist type
+            playlist_map = {
+                "team_hardcore": PlaylistType.TEAM_HARDCORE,
+                "double_team": PlaylistType.DOUBLE_TEAM,
+                "head_to_head": PlaylistType.HEAD_TO_HEAD,
+            }
+
+            ptype = playlist_map.get(playlist)
+            if not ptype:
+                await interaction.followup.send("❌ Invalid playlist!", ephemeral=True)
+                return
+
+            ps = playlist_states.get(ptype)
+            if not ps:
+                await interaction.followup.send("❌ Playlist not initialized!", ephemeral=True)
+                return
+
+            if not ps.current_match:
+                await interaction.followup.send(f"❌ No active {ps.name} match!", ephemeral=True)
+                return
+
+            match = ps.current_match
+            match_num = match.match_number
+
+            # Find the channel
+            channel = ps.queue_channel
+            if not channel:
+                channel = interaction.guild.get_channel(ps.channel_id)
+
+            if channel:
+                try:
+                    await end_playlist_match(channel, match, admin_ended=True)
+                    log_action(f"Admin {interaction.user.name} ended {ps.name} #{match_num}")
+                    await interaction.followup.send(f"✅ {ps.name} #{match_num} ended!", ephemeral=True)
+                except Exception as e:
+                    await interaction.followup.send(f"❌ Error ending match: {e}", ephemeral=True)
+            else:
+                await interaction.followup.send("❌ Could not find match channel!", ephemeral=True)
+
     @bot.tree.command(name="deletematch", description="[STAFF] Delete a match from history by playlist and match number")
     @has_staff_role()
     @app_commands.describe(

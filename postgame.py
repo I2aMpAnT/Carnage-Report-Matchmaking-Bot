@@ -5,7 +5,7 @@ MODULE_VERSION = "1.3.0"
 import discord
 from discord.ui import View, Button
 from typing import List
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import json
 import os
 
@@ -18,14 +18,19 @@ BLUE_TEAM_EMOJI_ID = None
 # Active match file
 ACTIVE_MATCH_FILE = 'activematch.json'
 
-# Timezone for consistent logging (UTC)
-TIMEZONE = timezone.utc
-TIMEZONE_NAME = "UTC"
+# Timezone for consistent logging (EST = UTC-5)
+EST = timezone(timedelta(hours=-5))
+TIMEZONE = EST
+TIMEZONE_NAME = "EST"
 
 
-def get_utc_now():
-    """Get current time in UTC"""
+def get_est_now():
+    """Get current time in EST"""
     return datetime.now(TIMEZONE)
+
+
+# Alias for backwards compatibility
+get_utc_now = get_est_now
 
 
 def format_timestamp(dt: datetime) -> dict:
@@ -380,11 +385,23 @@ def log_individual_game(series, game_number: int, winner: str):
         except Exception as e:
             log_action(f"Failed to push game to GitHub: {e}")
 
-async def end_series(series_view, channel: discord.TextChannel):
-    """End series - closes the stats matching window and posts results embed"""
+async def end_series(series_view_or_channel, channel: discord.TextChannel = None, series=None, admin_ended=False):
+    """End series - closes the stats matching window and posts results embed
+
+    Can be called two ways:
+    1. end_series(series_view, channel) - from vote button
+    2. end_series(channel, series=series, admin_ended=True) - from admin command
+    """
     from datetime import datetime
 
-    series = series_view.series
+    # Handle both call signatures
+    if series is not None:
+        # Called with series directly (admin command)
+        if channel is None:
+            channel = series_view_or_channel
+    else:
+        # Called with series_view (vote button)
+        series = series_view_or_channel.series
 
     # Record end time for stats matching window
     series.end_time = datetime.now()
@@ -453,8 +470,10 @@ async def end_series(series_view, channel: discord.TextChannel):
     else:
         embed.add_field(name="Game Results", value="*No games recorded yet - will update from parsed stats*", inline=False)
 
-    # Add stats matching info
-    embed.set_footer(text=f"Stats window: {series.start_time.strftime('%H:%M')} - {series.end_time.strftime('%H:%M')}")
+    # Add stats matching info (convert to EST if needed)
+    start_est = series.start_time.astimezone(EST) if series.start_time.tzinfo else series.start_time
+    end_est = series.end_time.astimezone(EST) if series.end_time.tzinfo else series.end_time
+    embed.set_footer(text=f"Stats window: {start_est.strftime('%H:%M')} - {end_est.strftime('%H:%M')} EST")
 
     # Post to queue channel and store reference for later updates
     queue_channel = channel.guild.get_channel(QUEUE_CHANNEL_ID)

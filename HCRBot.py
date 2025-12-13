@@ -350,21 +350,23 @@ async def on_message(message: discord.Message):
         if message.author.bot and not message.webhook_id:
             return
         if message.content == "!refresh_ranks_trigger":
-            print("Received rank refresh trigger from populate_stats.py")
+            print("[RANKS] Received rank refresh trigger from webhook")
             try:
                 import STATSRANKS
-                # Get all players from rankstats
-                stats = STATSRANKS.load_json_file(STATSRANKS.RANKSTATS_FILE)
-                player_ids = [int(uid) for uid in stats.keys() if uid.isdigit()]
+                # Get all players from ranks.json (website source of truth)
+                ranks = STATSRANKS.load_json_file(STATSRANKS.RANKS_FILE)
+                player_ids = [int(uid) for uid in ranks.keys() if uid.isdigit()]
 
                 # Refresh all ranks
                 await STATSRANKS.refresh_all_ranks(message.guild, player_ids, send_dm=False)
 
                 # Delete the trigger message
                 await message.delete()
-                print("Rank refresh completed successfully")
+                print(f"[RANKS] Rank refresh completed - {len(player_ids)} players updated")
             except Exception as e:
-                print(f"Error during rank refresh: {e}")
+                print(f"[RANKS] Error during rank refresh: {e}")
+                import traceback
+                traceback.print_exc()
             return
 
     # Ignore bot messages for other handlers

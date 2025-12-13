@@ -8,7 +8,10 @@ MODULE_VERSION = "1.2.2"
 import json
 import base64
 import os
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+
+# EST timezone
+EST = timezone(timedelta(hours=-5))
 
 # Try to import requests, but don't fail if not available
 try:
@@ -45,8 +48,8 @@ JSON_FILES = {
 }
 
 def log_github_action(message: str):
-    """Log GitHub webhook actions"""
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    """Log GitHub webhook actions (EST timezone)"""
+    timestamp = datetime.now(EST).strftime('%Y-%m-%d %H:%M:%S EST')
     print(f"[GITHUB] [{timestamp}] {message}")
 
 
@@ -196,7 +199,7 @@ def push_file_to_github(local_file: str, github_path: str, commit_message: str =
         
         # Auto-generate commit message if not provided
         if commit_message is None:
-            commit_message = f"Auto-update: {local_file} {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            commit_message = f"Auto-update: {local_file} {datetime.now(EST).strftime('%Y-%m-%d %H:%M:%S EST')}"
         
         # Prepare payload
         payload = {

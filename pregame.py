@@ -188,6 +188,18 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
     queue_channel = guild.get_channel(QUEUE_CHANNEL_ID)
     target_channel = queue_channel if queue_channel else channel
 
+    # Delete the old queue embed before posting pregame embed
+    try:
+        async for msg in target_channel.history(limit=20):
+            if msg.author.bot and msg.embeds:
+                title = msg.embeds[0].title or ""
+                if "MLG 4v4 Matchmaking" in title:
+                    await msg.delete()
+                    log_action("Deleted queue embed - pregame starting")
+                    break
+    except Exception as e:
+        log_action(f"Failed to delete queue embed: {e}")
+
     # Get the next match number for naming
     from ingame import Series
     if test_mode:
@@ -668,8 +680,17 @@ class TeamSelectionView(View):
             pass
     
     async def handle_vote(self, interaction: discord.Interaction, method: str):
-        """Handle team selection vote - requires majority (5+ of 8 players)"""
+        """Handle team selection vote - requires majority (5+ of 8) OR 2 staff OR 2 admin"""
         from searchmatchmaking import queue_state
+
+        # Define roles
+        ADMIN_ROLES = ["Overlord"]
+        STAFF_ROLES = ["Staff", "Server Support"]
+
+        # Check user roles
+        user_roles = [role.name for role in interaction.user.roles]
+        is_admin = any(role in ADMIN_ROLES for role in user_roles)
+        is_staff = any(role in STAFF_ROLES for role in user_roles)
 
         # In test mode, only testers can vote and both must agree
         if self.test_mode and self.testers:
@@ -699,34 +720,79 @@ class TeamSelectionView(View):
             # All testers agree - proceed
             await interaction.response.defer()
         else:
-            # Normal mode - require majority vote (5+ of 8 players)
-            if interaction.user.id not in self.players:
-                await interaction.response.send_message("❌ Only players in this match can vote!", ephemeral=True)
+            # Normal mode - players, staff, and admins can vote
+            # Admins can ALWAYS vote (even if not in match)
+            # Players in match can vote
+            # Staff can vote
+            can_vote = (interaction.user.id in self.players) or is_admin or is_staff
+
+            if not can_vote:
+                await interaction.response.send_message("❌ Only players in this match, staff, or admins can vote!", ephemeral=True)
                 return
 
-            # Record/update vote (allows changing vote)
+            # Initialize vote tracking if needed
+            if not hasattr(self, 'admin_votes'):
+                self.admin_votes = {}  # admin_id -> method
+            if not hasattr(self, 'staff_votes'):
+                self.staff_votes = {}  # staff_id -> method
+
+            # Record vote in appropriate category
+            if is_admin:
+                self.admin_votes[interaction.user.id] = method
+            elif is_staff:
+                self.staff_votes[interaction.user.id] = method
+
+            # Always record in main votes too
             self.votes[interaction.user.id] = method
             await interaction.response.defer()
 
-            # Count votes for each option
-            vote_counts = {}
-            for vote in self.votes.values():
-                vote_counts[vote] = vote_counts.get(vote, 0) + 1
+            # Check win conditions:
+            # 1. 2 admins agree on same method
+            # 2. 2 staff agree on same method
+            # 3. Majority of players (5+ of 8)
 
-            # Check if any option has majority (5+ of 8)
-            majority_needed = (len(self.players) // 2) + 1  # 5 for 8 players
             winning_method = None
-            for option, count in vote_counts.items():
-                if count >= majority_needed:
+
+            # Check admin votes (2 admins agreeing wins)
+            admin_vote_counts = {}
+            for vote in self.admin_votes.values():
+                admin_vote_counts[vote] = admin_vote_counts.get(vote, 0) + 1
+            for option, count in admin_vote_counts.items():
+                if count >= 2:
                     winning_method = option
+                    log_action(f"Team selection decided by 2 admins: {option}")
                     break
 
+            # Check staff votes (2 staff agreeing wins)
             if not winning_method:
-                # No majority yet - update embed to show votes
+                staff_vote_counts = {}
+                for vote in self.staff_votes.values():
+                    staff_vote_counts[vote] = staff_vote_counts.get(vote, 0) + 1
+                for option, count in staff_vote_counts.items():
+                    if count >= 2:
+                        winning_method = option
+                        log_action(f"Team selection decided by 2 staff: {option}")
+                        break
+
+            # Check player majority (5+ of 8)
+            if not winning_method:
+                vote_counts = {}
+                for vote in self.votes.values():
+                    vote_counts[vote] = vote_counts.get(vote, 0) + 1
+
+                majority_needed = (len(self.players) // 2) + 1  # 5 for 8 players
+                for option, count in vote_counts.items():
+                    if count >= majority_needed:
+                        winning_method = option
+                        log_action(f"Team selection decided by majority: {option}")
+                        break
+
+            if not winning_method:
+                # No winner yet - update embed to show votes
                 await self.update_embed_with_votes(interaction)
                 return
 
-            # Found majority - use the winning method
+            # Found winner - use the winning method
             method = winning_method
 
         # Execute the selected method - edit existing embed instead of posting new ones
@@ -849,7 +915,8 @@ class TeamSelectionView(View):
         # If majority doesn't vote NO, teams proceed automatically
         await show_balanced_teams_confirmation(
             interaction.channel, best_red, best_blue, player_mmrs,
-            self.players, self.test_mode, self.testers, self.pregame_vc_id, self.match_label
+            self.players, self.test_mode, self.testers, self.pregame_vc_id, self.match_label,
+            self.pregame_message  # Pass the existing message to edit
         )
 
     async def start_captains_draft(self, interaction: discord.Interaction):
@@ -921,10 +988,12 @@ async def show_balanced_teams_confirmation(
     test_mode: bool,
     testers: List[int],
     pregame_vc_id: int,
-    match_label: str
+    match_label: str,
+    pregame_message: discord.Message = None
 ):
     """Show balanced teams with 30-second confirmation timer.
-    If majority doesn't reject, teams proceed automatically."""
+    If majority doesn't reject, teams proceed automatically.
+    Edits existing pregame_message instead of creating new one."""
     import asyncio
     from searchmatchmaking import get_queue_progress_image
 
@@ -932,6 +1001,7 @@ async def show_balanced_teams_confirmation(
 
     # Create confirmation view
     view = BalancedTeamsRejectView(all_players, test_mode, testers)
+    view.confirmation_message = pregame_message  # Use existing message
 
     # Build team display (just player names, no MMR)
     red_mentions = "\n".join([f"<@{uid}>" for uid in red_team])
@@ -967,14 +1037,14 @@ async def show_balanced_teams_confirmation(
 
         embed.set_image(url=get_queue_progress_image(8))
 
-        if seconds_left == 10:
-            # First message
-            view.confirmation_message = await channel.send(embed=embed, view=view)
-        else:
+        # Edit existing message or create new one if needed
+        if view.confirmation_message:
             try:
                 await view.confirmation_message.edit(embed=embed, view=view)
             except:
-                pass
+                view.confirmation_message = await channel.send(embed=embed, view=view)
+        else:
+            view.confirmation_message = await channel.send(embed=embed, view=view)
 
         # Check if majority rejected
         if view.rejected:

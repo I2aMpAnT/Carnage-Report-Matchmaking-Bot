@@ -65,8 +65,10 @@ INACTIVITY_CHECK_MINUTES = 60  # Time before prompting user (1 hour)
 INACTIVITY_RESPONSE_MINUTES = 5  # Time user has to respond
 
 def log_action(message: str):
-    """Log actions to log.txt"""
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    """Log actions to log.txt (EST timezone)"""
+    from datetime import timezone, timedelta
+    EST = timezone(timedelta(hours=-5))
+    timestamp = datetime.now(EST).strftime('%Y-%m-%d %H:%M:%S EST')
     with open('log.txt', 'a') as f:
         f.write(f"[{timestamp}] {message}\n")
     print(f"[LOG] {message}")
@@ -616,17 +618,21 @@ class QueueView(View):
             except:
                 pass
 
-        # Create two embeds - header and content
+        # Create two embeds with same URL (Discord renders them closer together)
         current_count = len(queue_state.queue)
         needed = MAX_QUEUE_SIZE - current_count
 
-        # First embed: header image (full width)
-        header_embed = discord.Embed(color=discord.Color.green())
+        # Shared URL makes Discord render embeds with minimal gap
+        shared_url = "https://carnagereport.com"
+
+        # First embed: header image
+        header_embed = discord.Embed(url=shared_url, color=discord.Color.green())
         header_embed.set_image(url=HEADER_IMAGE_URL)
 
-        # Second embed: content with progress image (full width)
+        # Second embed: content with progress image
         content_embed = discord.Embed(
             title="MLG 4v4 - Players Needed!",
+            url=shared_url,  # Same URL = minimal gap
             description=f"We have **{current_count}/{MAX_QUEUE_SIZE}** players searching.\nNeed **{needed}** more to start!",
             color=discord.Color.green()
         )
@@ -645,7 +651,7 @@ class QueueView(View):
         except:
             pass
 
-        # Send both embeds together
+        # Send both embeds with shared URL (minimal gap)
         queue_state.ping_message = await general_channel.send(embeds=[header_embed, content_embed], view=view)
 
         log_action(f"{interaction.user.display_name} pinged general chat for queue ({current_count}/{MAX_QUEUE_SIZE})")
@@ -811,16 +817,18 @@ async def update_ping_message(guild: discord.Guild):
             pass
         return
     
-    # Update with both embeds - header and progress
+    # Update with both embeds - shared URL for minimal gap
     needed = MAX_QUEUE_SIZE - current_count
+    shared_url = "https://carnagereport.com"
 
-    # First embed: header image (full width)
-    header_embed = discord.Embed(color=discord.Color.green())
+    # First embed: header image
+    header_embed = discord.Embed(url=shared_url, color=discord.Color.green())
     header_embed.set_image(url=HEADER_IMAGE_URL)
 
-    # Second embed: content with progress image (full width)
+    # Second embed: content with progress image
     content_embed = discord.Embed(
         title="MLG 4v4 - Players Needed!",
+        url=shared_url,  # Same URL = minimal gap
         description=f"We have **{current_count}/{MAX_QUEUE_SIZE}** players searching.\nNeed **{needed}** more to start!",
         color=discord.Color.green()
     )

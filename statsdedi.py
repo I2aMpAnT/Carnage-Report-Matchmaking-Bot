@@ -227,19 +227,22 @@ async def wait_for_instance_ready(instance_id: str, user: discord.User, initial_
 
                 try:
                     embed = discord.Embed(
-                        title="Stats Dedi Ready!",
-                        description="Your Stats Dedi is now ready to use!",
+                        title=f"Stats Dedi Ready! - {user.display_name}",
+                        description=f"**{user.display_name}**'s Stats Dedi is now ready to use!",
                         color=discord.Color.green()
                     )
+                    embed.add_field(name="Requested By", value=user.mention, inline=True)
                     embed.add_field(name="IP Address", value=f"`{main_ip}`", inline=True)
                     embed.add_field(name="Password", value=f"`{DEDI_PASSWORD}`", inline=True)
                     embed.add_field(name="Spin-up Time", value=elapsed_str, inline=True)
                     embed.set_footer(text="Connect via Remote Desktop (RDP)")
 
                     await user.send(embed=embed)
-                    print(f"[DEDI] {user.name}'s StatsDedi is ready at {main_ip} (took {elapsed_str})")
+                    print(f"[DEDI] ✅ {user.name}'s StatsDedi is ready at {main_ip} (took {elapsed_str}) - DM sent")
                 except discord.Forbidden:
-                    print(f"[DEDI] Could not DM {user.name} - DMs disabled")
+                    print(f"[DEDI] ❌ Could not DM {user.name} - DMs disabled")
+                except Exception as e:
+                    print(f"[DEDI] ❌ Error sending ready DM to {user.name}: {e}")
                 return
 
         except Exception as e:
@@ -349,8 +352,8 @@ class StatsDediView(View):
             # Send confirmation in channel
             await interaction.followup.send(
                 embed=discord.Embed(
-                    title="Stats Dedi Creating",
-                    description=f"Creating **{user_label}**...\n\nYou will receive a DM with connection details.",
+                    title=f"Stats Dedi Creating - {interaction.user.display_name}",
+                    description=f"Creating **{user_label}** for {interaction.user.mention}...\n\nYou will receive a DM with connection details.",
                     color=discord.Color.green()
                 ),
                 ephemeral=True
@@ -376,19 +379,20 @@ class StatsDediView(View):
                     estimate_text = f"Average spin-up time: {avg_time}" if avg_time else "This usually takes 1-3 minutes."
 
                     dm_embed = discord.Embed(
-                        title="Stats Dedi Creating",
-                        description=f"Your Stats Dedi is being set up. {estimate_text}",
+                        title=f"Stats Dedi Creating - {interaction.user.display_name}",
+                        description=f"**{interaction.user.display_name}**'s Stats Dedi is being set up. {estimate_text}",
                         color=discord.Color.gold()
                     )
+                    dm_embed.add_field(name="Requested By", value=interaction.user.mention, inline=True)
                     dm_embed.add_field(name="IP Address", value=f"`{main_ip}`", inline=True)
                     dm_embed.add_field(name="Password", value=f"`{DEDI_PASSWORD}`", inline=True)
-                    dm_embed.add_field(name="Status", value="Setting up...", inline=False)
+                    dm_embed.add_field(name="Status", value="🟡 Setting up...", inline=False)
                     dm_embed.set_footer(text="You'll receive another message when it's ready!")
 
                     await interaction.user.send(embed=dm_embed)
-                    print(f"[DEDI] Creating {user_label} (ID: {instance_id}) - IP: {main_ip}")
+                    print(f"[DEDI] 📤 Creating {user_label} (ID: {instance_id}) - IP: {main_ip} - Initial DM sent")
                 except discord.Forbidden:
-                    print(f"[DEDI] Could not DM {interaction.user.name} - DMs disabled")
+                    print(f"[DEDI] ❌ Could not DM {interaction.user.name} - DMs disabled")
             else:
                 main_ip = "Unknown"
                 print(f"[DEDI] Creating {user_label} (ID: {instance_id}) - IP not yet assigned")
@@ -473,14 +477,14 @@ class DediDestroySelectView(View):
 
                 await interaction.followup.send(
                     embed=discord.Embed(
-                        title="Stats Dedi Destroyed",
-                        description=f"**{label}** has been destroyed.\n\n"
+                        title=f"Stats Dedi Destroyed - {interaction.user.display_name}",
+                        description=f"**{label}** has been destroyed by {interaction.user.mention}.\n\n"
                                     f"**Estimated Cost:** ${estimated_cost:.2f}",
                         color=discord.Color.green()
                     ),
                     ephemeral=True
                 )
-                print(f"[DEDI] Admin destroyed {label} (ID: {instance_id})")
+                print(f"[DEDI] 🗑️ {interaction.user.name} destroyed {label} (ID: {instance_id})")
             except Exception as e:
                 await interaction.followup.send(f"Error: {e}", ephemeral=True)
 
