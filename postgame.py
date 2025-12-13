@@ -1,6 +1,6 @@
 # postgame.py - Postgame Processing, Stats Recording, and Cleanup
 
-MODULE_VERSION = "1.3.0"
+MODULE_VERSION = "1.4.0"
 
 import discord
 from discord.ui import View, Button
@@ -92,6 +92,7 @@ def add_to_active_matches(series):
                 "voice_channel_id": getattr(series, 'blue_vc_id', None)
             }
         },
+        "text_channel_id": getattr(series, 'text_channel_id', None),
         "games": []
     }
 
@@ -506,9 +507,9 @@ async def end_series(series_view_or_channel, channel: discord.TextChannel = None
         print(f"✅ Refreshed ranks for {len(all_players)} players")
 
     # Delete the series embed
-    if series_view.series.series_message:
+    if series.series_message:
         try:
-            await series_view.series.series_message.delete()
+            await series.series_message.delete()
             log_action("Deleted series embed")
         except:
             pass
@@ -577,24 +578,38 @@ def save_series_for_stats_matching(series):
     log_action(f"Saved series #{series.match_number} for stats matching")
 
 async def cleanup_after_series(series, guild: discord.Guild):
-    """Move players to postgame and delete team VCs"""
+    """Move ALL users (not just players) to postgame and delete team VCs"""
     # Move to Postgame Carnage Report (ID: 1424845826362048643) FIRST before deleting VCs
     POSTGAME_CARNAGE_REPORT_ID = 1424845826362048643
     postgame_vc = guild.get_channel(POSTGAME_CARNAGE_REPORT_ID)
+
+    # Move ALL users from team VCs to postgame (not just players - includes spectators/staff)
     if postgame_vc:
-        all_players = series.red_team + series.blue_team
-        for user_id in all_players:
-            member = guild.get_member(user_id)
-            if member and member.voice:
-                try:
-                    await member.move_to(postgame_vc)
-                    log_action(f"Moved {member.name} to Postgame Carnage Report")
-                except:
-                    pass
+        # Move everyone from Red VC
+        if series.red_vc_id:
+            red_vc = guild.get_channel(series.red_vc_id)
+            if red_vc and red_vc.members:
+                for member in list(red_vc.members):  # Use list() to avoid modification during iteration
+                    try:
+                        await member.move_to(postgame_vc)
+                        log_action(f"Moved {member.name} to Postgame Carnage Report")
+                    except:
+                        pass
+
+        # Move everyone from Blue VC
+        if series.blue_vc_id:
+            blue_vc = guild.get_channel(series.blue_vc_id)
+            if blue_vc and blue_vc.members:
+                for member in list(blue_vc.members):  # Use list() to avoid modification during iteration
+                    try:
+                        await member.move_to(postgame_vc)
+                        log_action(f"Moved {member.name} to Postgame Carnage Report")
+                    except:
+                        pass
     else:
         log_action(f"Warning: Postgame Carnage Report channel {POSTGAME_CARNAGE_REPORT_ID} not found")
-    
-    # Delete the created voice channels AFTER moving players
+
+    # Delete the created voice channels AFTER moving all users
     if series.red_vc_id:
         red_vc = guild.get_channel(series.red_vc_id)
         if red_vc:
@@ -603,7 +618,7 @@ async def cleanup_after_series(series, guild: discord.Guild):
                 log_action(f"Deleted Red Team voice channel")
             except Exception as e:
                 log_action(f"Failed to delete red VC: {e}")
-    
+
     if series.blue_vc_id:
         blue_vc = guild.get_channel(series.blue_vc_id)
         if blue_vc:
@@ -612,7 +627,17 @@ async def cleanup_after_series(series, guild: discord.Guild):
                 log_action(f"Deleted Blue Team voice channel")
             except Exception as e:
                 log_action(f"Failed to delete blue VC: {e}")
-    
+
+    # Delete the series text channel (results already posted to queue channel)
+    if hasattr(series, 'text_channel_id') and series.text_channel_id:
+        text_channel = guild.get_channel(series.text_channel_id)
+        if text_channel:
+            try:
+                await text_channel.delete(reason="Series ended - results saved to queue channel")
+                log_action(f"Deleted series text channel: {text_channel.name}")
+            except Exception as e:
+                log_action(f"Failed to delete series text channel: {e}")
+
     # Clear saved state since series ended
     try:
         import state_manager

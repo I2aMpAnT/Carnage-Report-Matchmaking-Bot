@@ -3,7 +3,7 @@ state_manager.py - Matchmaking State Persistence
 Saves and restores queue/match state across bot restarts
 """
 
-MODULE_VERSION = "1.1.0"
+MODULE_VERSION = "1.2.0"
 
 import json
 import os
@@ -49,6 +49,7 @@ def save_state():
             "series_number": series.series_number,
             "red_vc_id": series.red_vc_id,
             "blue_vc_id": series.blue_vc_id,
+            "text_channel_id": getattr(series, 'text_channel_id', None),
             "swap_history": getattr(series, 'swap_history', []),
             "series_message_id": series.series_message.id if series.series_message else None,
             "series_message_channel_id": series.series_message.channel.id if series.series_message else None,
@@ -122,6 +123,7 @@ async def restore_state(bot) -> bool:
             series.series_number = series_data["series_number"]
             series.red_vc_id = series_data["red_vc_id"]
             series.blue_vc_id = series_data["blue_vc_id"]
+            series.text_channel_id = series_data.get("text_channel_id")
             series.swap_history = series_data.get("swap_history", [])
             series.votes = {}
             series.end_series_votes = set()

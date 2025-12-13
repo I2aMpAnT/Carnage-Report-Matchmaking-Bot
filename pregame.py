@@ -2,7 +2,7 @@
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 # Supports ALL playlists: MLG 4v4 (voting), Team Hardcore/Double Team (auto-balance), Head to Head (1v1)
 
-MODULE_VERSION = "1.5.0"
+MODULE_VERSION = "1.6.0"
 
 import discord
 from discord.ui import View, Button, Select
@@ -1400,29 +1400,43 @@ async def finalize_teams(channel: discord.TextChannel, red_team: List[int], blue
     red_avg_mmr = int(sum(red_mmrs) / len(red_mmrs)) if red_mmrs else 1500
     blue_avg_mmr = int(sum(blue_mmrs) / len(blue_mmrs)) if blue_mmrs else 1500
     log_action(f"Team averages - Red: {red_avg_mmr}, Blue: {blue_avg_mmr}")
-    
+
     # Create series first to get the series number
     from ingame import Series, show_series_embed
     from searchmatchmaking import queue_state
-    
+
     temp_series = Series(red_team, blue_team, test_mode, testers=testers)
     series_label = temp_series.series_number  # "Series 1" or "Test 1"
+
+    # Create series text channel - format: "Series # - 🔴avgmmr vs 🔵avgmmr"
+    # Use a text channel category (Matchmaking category)
+    text_category_id = 1403855141857337501  # Matchmaking category
+    text_category = guild.get_channel(text_category_id)
+
+    series_text_channel_name = f"{series_label} - 🔴{red_avg_mmr} vs 🔵{blue_avg_mmr}"
+    series_text_channel = await guild.create_text_channel(
+        name=series_text_channel_name,
+        category=text_category,
+        topic=f"Series channel for {series_label} - Auto-deleted when series ends"
+    )
+    temp_series.text_channel_id = series_text_channel.id
+    log_action(f"Created series text channel: {series_text_channel.name} (ID: {series_text_channel.id})")
     
     # Get the Voice Channels category (not the Matchmaking category)
     voice_category_id = 1403916181554860112
     category = guild.get_channel(voice_category_id)
     
-    # Create Red Team voice channel with team emoji (red circle) and series number
-    red_vc_name = f"🔴 Red {series_label} - {red_avg_mmr} MMR"
+    # Create Red Team voice channel with team emoji and series number (no "Red" text)
+    red_vc_name = f"🔴 {series_label}"
     red_vc = await guild.create_voice_channel(
         name=red_vc_name,
         category=category,
         user_limit=None,
         position=999  # Position at bottom
     )
-    
-    # Create Blue Team voice channel with team emoji (blue circle) and series number
-    blue_vc_name = f"🔵 Blue {series_label} - {blue_avg_mmr} MMR"
+
+    # Create Blue Team voice channel with team emoji and series number (no "Blue" text)
+    blue_vc_name = f"🔵 {series_label}"
     blue_vc = await guild.create_voice_channel(
         name=blue_vc_name,
         category=category,
@@ -1431,6 +1445,9 @@ async def finalize_teams(channel: discord.TextChannel, red_team: List[int], blue
     )
 
     # Move players from pregame (or any voice channel) to their team channels
+    # Track players who couldn't be moved (not in voice)
+    players_not_moved = []
+
     # In test mode, only move testers (they're the only real players in voice)
     # In real mode, move all players who are in voice
     if test_mode and testers:
@@ -1444,7 +1461,10 @@ async def finalize_teams(channel: discord.TextChannel, red_team: List[int], blue
                         log_action(f"Moved tester {member.name} to Red VC")
                     except Exception as e:
                         log_action(f"Failed to move tester {user_id} to red VC: {e}")
-        
+                        players_not_moved.append(user_id)
+                else:
+                    players_not_moved.append(user_id)
+
         for user_id in blue_team:
             if user_id in testers:
                 member = guild.get_member(user_id)
@@ -1454,6 +1474,9 @@ async def finalize_teams(channel: discord.TextChannel, red_team: List[int], blue
                         log_action(f"Moved tester {member.name} to Blue VC")
                     except Exception as e:
                         log_action(f"Failed to move tester {user_id} to blue VC: {e}")
+                        players_not_moved.append(user_id)
+                else:
+                    players_not_moved.append(user_id)
     else:
         # Real mode - move all players in voice
         for user_id in red_team:
@@ -1464,6 +1487,9 @@ async def finalize_teams(channel: discord.TextChannel, red_team: List[int], blue
                     log_action(f"Moved {member.name} to Red VC")
                 except Exception as e:
                     log_action(f"Failed to move {user_id} to red VC: {e}")
+                    players_not_moved.append(user_id)
+            else:
+                players_not_moved.append(user_id)
 
         for user_id in blue_team:
             member = guild.get_member(user_id)
@@ -1473,6 +1499,9 @@ async def finalize_teams(channel: discord.TextChannel, red_team: List[int], blue
                     log_action(f"Moved {member.name} to Blue VC")
                 except Exception as e:
                     log_action(f"Failed to move {user_id} to blue VC: {e}")
+                    players_not_moved.append(user_id)
+            else:
+                players_not_moved.append(user_id)
     
     # NOW delete the pregame VC (after players have been moved)
     if hasattr(queue_state, 'pregame_vc_id') and queue_state.pregame_vc_id:
@@ -1519,6 +1548,38 @@ async def finalize_teams(channel: discord.TextChannel, red_team: List[int], blue
             log_action("Updated queue embed after match started")
 
     await show_series_embed(channel)
+
+    # Notify players who couldn't be moved to voice
+    if players_not_moved and series_text_channel:
+        # Ping them in the series text channel
+        mentions = " ".join([f"<@{uid}>" for uid in players_not_moved])
+        warning_msg = await series_text_channel.send(
+            f"⚠️ **Could not move to team voice channel:** {mentions}\n"
+            f"Please join your team's voice channel manually!"
+        )
+        log_action(f"Notified {len(players_not_moved)} players not in voice: {players_not_moved}")
+
+        # Also DM each player
+        for uid in players_not_moved:
+            member = guild.get_member(uid)
+            if member:
+                try:
+                    team_name = "Red" if uid in red_team else "Blue"
+                    team_vc = red_vc if uid in red_team else blue_vc
+                    dm_embed = discord.Embed(
+                        title=f"⚠️ {series_label} - Join Voice Channel!",
+                        description=(
+                            f"Your match has started but you weren't in voice chat.\n\n"
+                            f"Please join **{team_vc.name}** to play with your team!"
+                        ),
+                        color=discord.Color.orange()
+                    )
+                    await member.send(embed=dm_embed)
+                    log_action(f"Sent join voice DM to {member.name}")
+                except discord.Forbidden:
+                    log_action(f"Could not DM {member.name} - DMs disabled")
+                except Exception as e:
+                    log_action(f"Error sending voice DM to {member.name}: {e}")
 
     # Save to active_matches
     try:

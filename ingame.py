@@ -1,6 +1,6 @@
 # ingame.py - In-Game Series Management and Voting
 
-MODULE_VERSION = "1.3.0"
+MODULE_VERSION = "1.4.0"
 
 import discord
 from discord.ui import View, Button
@@ -182,6 +182,9 @@ class Series:
         # Results message for updating after stats parse
         self.results_message: Optional[discord.Message] = None
         self.results_channel_id: Optional[int] = None
+
+        # Series text channel (created for each match)
+        self.text_channel_id: Optional[int] = None
 
 class SeriesView(View):
     def __init__(self, series: Series):
@@ -368,13 +371,21 @@ class SeriesView(View):
             log_action(f"Failed to update general chat embed: {e}")
 
 async def show_series_embed(channel: discord.TextChannel):
-    """Show initial series embed - ALWAYS in queue channel"""
+    """Show initial series embed - in series text channel if available, otherwise queue channel"""
     from searchmatchmaking import queue_state
     series = queue_state.current_series
 
-    # Always post embed to queue channel, regardless of where command was run
-    queue_channel = channel.guild.get_channel(QUEUE_CHANNEL_ID)
-    target_channel = queue_channel if queue_channel else channel
+    # Use series text channel if available, otherwise fall back to queue channel
+    if series.text_channel_id:
+        target_channel = channel.guild.get_channel(series.text_channel_id)
+        if not target_channel:
+            # Fallback to queue channel if series channel not found
+            queue_channel = channel.guild.get_channel(QUEUE_CHANNEL_ID)
+            target_channel = queue_channel if queue_channel else channel
+    else:
+        # No series text channel, use queue channel
+        queue_channel = channel.guild.get_channel(QUEUE_CHANNEL_ID)
+        target_channel = queue_channel if queue_channel else channel
 
     total_players = len(series.red_team + series.blue_team)
 
