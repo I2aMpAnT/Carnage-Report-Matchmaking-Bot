@@ -2269,7 +2269,11 @@ async def post_tournament_to_general(guild: discord.Guild, match, red_captain_na
         blue_twitch = twitch.get_team_twitch_names(match.team2)
 
         if red_twitch or blue_twitch:
-            view = twitch.MultiStreamView(red_twitch, blue_twitch)
+            view = twitch.MultiStreamView(
+                red_twitch, blue_twitch,
+                red_label=f"Team {red_captain_name}",
+                blue_label=f"Team {blue_captain_name}"
+            )
 
     except Exception as e:
         log_action(f"Twitch module error in tournament, falling back: {e}")
