@@ -48,6 +48,7 @@ class PlaylistType:
     TEAM_HARDCORE = "team_hardcore"  # 4v4 auto-balanced, hidden queue
     DOUBLE_TEAM = "double_team"      # 2v2 auto-balanced, hidden queue
     HEAD_TO_HEAD = "head_to_head"    # 1v1 hidden queue
+    TOURNAMENT = "tournament"        # 4v4 players pick only (pre-set teams)
 
 
 # Playlist configuration
@@ -92,6 +93,17 @@ PLAYLIST_CONFIG = {
         "show_map_gametype": True,  # Random 1v1 map
         "description": "1v1 matchmaking",
     },
+    PlaylistType.TOURNAMENT: {
+        "name": "Tournament Matches",
+        "channel_id": 1449414157605671124,
+        "max_players": 8,
+        "team_size": 4,
+        "hidden_queue": False,
+        "auto_balance": False,  # Uses players pick only
+        "show_map_gametype": False,  # Selected in pregame
+        "players_pick_only": True,  # Skip team selection vote, go straight to players pick
+        "description": "Tournament 4v4 with pre-set teams (players pick only)",
+    },
 }
 
 # Match history files - each playlist gets {playlist}_matches.json
@@ -100,6 +112,7 @@ PLAYLIST_MATCHES_FILES = {
     "team_hardcore": "team_hardcore_matches.json",
     "double_team": "double_team_matches.json",
     "head_to_head": "head_to_head_matches.json",
+    "tournament": "tournament_matches.json",
 }
 
 # Stats files - each playlist gets {playlist}_stats.json (written by popstats.py or manual matches)
@@ -108,6 +121,7 @@ PLAYLIST_STATS_FILES = {
     "team_hardcore": "team_hardcore_stats.json",
     "double_team": "double_team_stats.json",
     "head_to_head": "head_to_head_stats.json",
+    "tournament": "tournament_stats.json",
 }
 
 # Gametype simplification mapping (MLG variant -> simple name)

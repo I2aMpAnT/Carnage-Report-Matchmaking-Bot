@@ -81,8 +81,10 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
         # MLG 4v4: voting (Balanced, Captains, Players Pick)
         # Team Hardcore/Double Team: auto_balance (skip voting)
         # Head to Head: no teams (1v1)
+        # Tournament: players_pick_only (skip voting, go straight to players pick)
         auto_balance = ps.auto_balance
         is_1v1 = ps.playlist_type == PlaylistType.HEAD_TO_HEAD
+        players_pick_only = ps.config.get("players_pick_only", False)
 
         # Create pregame lobby VC
         pregame_vc = await guild.create_voice_channel(
@@ -156,7 +158,7 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
         asyncio.create_task(wait_for_playlist_players(
             channel, pregame_message, players, pregame_vc.id,
             playlist_state=ps, match_number=match_number, match_label=match_label,
-            auto_balance=auto_balance, is_1v1=is_1v1
+            auto_balance=auto_balance, is_1v1=is_1v1, players_pick_only=players_pick_only
         ))
         return
 
@@ -1660,7 +1662,8 @@ async def wait_for_playlist_players(
     match_number: int,
     match_label: str,
     auto_balance: bool = False,
-    is_1v1: bool = False
+    is_1v1: bool = False,
+    players_pick_only: bool = False
 ):
     """Wait for all players to join pregame VC for playlist matches, then assign teams"""
     import asyncio
@@ -1733,7 +1736,7 @@ async def wait_for_playlist_players(
     # All players are in voice - proceed with team assignment
     await proceed_with_playlist_teams(
         channel, pregame_message, players, pregame_vc_id,
-        ps, match_number, match_label, auto_balance, is_1v1
+        ps, match_number, match_label, auto_balance, is_1v1, players_pick_only
     )
 
 
@@ -1746,7 +1749,8 @@ async def proceed_with_playlist_teams(
     match_number: int,
     match_label: str,
     auto_balance: bool,
-    is_1v1: bool
+    is_1v1: bool,
+    players_pick_only: bool = False
 ):
     """Assign teams and start the match for playlist matches"""
     from playlists import (
@@ -1770,6 +1774,14 @@ async def proceed_with_playlist_teams(
         team1 = [players[0]]
         team2 = [players[1]]
         log_action(f"{match_label}: 1v1 match - {players[0]} vs {players[1]}")
+    elif players_pick_only:
+        # Players pick their own teams (Tournament mode)
+        log_action(f"{match_label}: Starting players pick (tournament mode)")
+        await start_playlist_players_pick(
+            channel, pregame_message, players, pregame_vc_id,
+            ps, match_number, match_label
+        )
+        return  # Players pick flow will handle the rest
     elif auto_balance:
         # Auto-balance by MMR
         team1, team2 = await balance_teams_by_mmr(players, ps.team_size)
@@ -1911,3 +1923,286 @@ async def cancel_playlist_match(
     await update_playlist_embed(channel, ps)
 
     log_action(f"{match_label} cancelled - players did not join pregame")
+
+
+# ============================================================================
+# PLAYLIST PLAYERS PICK (Tournament mode - players pick their own teams)
+# ============================================================================
+
+async def start_playlist_players_pick(
+    channel: discord.TextChannel,
+    pregame_message: discord.Message,
+    players: List[int],
+    pregame_vc_id: int,
+    playlist_state: 'PlaylistQueueState',
+    match_number: int,
+    match_label: str
+):
+    """Start players pick for playlist matches (Tournament mode)"""
+    ps = playlist_state
+
+    # Delete pregame message
+    try:
+        await pregame_message.delete()
+    except:
+        pass
+
+    # Create players pick view
+    view = PlaylistPlayersPickView(
+        players=players,
+        playlist_state=ps,
+        match_number=match_number,
+        match_label=match_label,
+        pregame_vc_id=pregame_vc_id,
+        team_size=ps.team_size
+    )
+
+    # Build initial embed
+    embed = view.build_pick_embed()
+
+    # Send the players pick message
+    pings = " ".join([f"<@{uid}>" for uid in players])
+    pick_message = await channel.send(content=pings, embed=embed, view=view)
+    view.pick_message = pick_message
+
+    log_action(f"{match_label}: Players pick started")
+
+
+class PlaylistPlayersPickView(View):
+    """Players pick view for playlist matches (Tournament mode)"""
+
+    def __init__(self, players: List[int], playlist_state: 'PlaylistQueueState',
+                 match_number: int, match_label: str, pregame_vc_id: int, team_size: int = 4):
+        super().__init__(timeout=None)
+        self.players = players
+        self.playlist_state = playlist_state
+        self.match_number = match_number
+        self.match_label = match_label
+        self.pregame_vc_id = pregame_vc_id
+        self.team_size = team_size
+        self.red_team = []
+        self.blue_team = []
+        self.votes = {}  # user_id -> 'RED' or 'BLUE'
+        self.ready = set()  # Players who clicked SET TEAMS
+        self.pick_message = None
+
+    @discord.ui.button(label="Red Team", style=discord.ButtonStyle.danger, custom_id="playlist_pick_red")
+    async def pick_red(self, interaction: discord.Interaction, button: Button):
+        await self.handle_pick(interaction, 'RED')
+
+    @discord.ui.button(label="Blue Team", style=discord.ButtonStyle.primary, custom_id="playlist_pick_blue")
+    async def pick_blue(self, interaction: discord.Interaction, button: Button):
+        await self.handle_pick(interaction, 'BLUE')
+
+    @discord.ui.button(label="SET TEAMS", style=discord.ButtonStyle.success, custom_id="playlist_set_teams", row=1)
+    async def set_teams(self, interaction: discord.Interaction, button: Button):
+        await self.handle_ready(interaction)
+
+    async def handle_pick(self, interaction: discord.Interaction, team: str):
+        """Handle team pick - allows switching until SET TEAMS clicked"""
+        if interaction.user.id not in self.players:
+            await interaction.response.send_message("❌ You're not in this match!", ephemeral=True)
+            return
+
+        if interaction.user.id in self.ready:
+            await interaction.response.send_message("❌ You already locked in! Can't switch teams.", ephemeral=True)
+            return
+
+        current_team = self.votes.get(interaction.user.id)
+
+        if current_team == team:
+            await interaction.response.send_message(f"You're already on {team} team!", ephemeral=True)
+            return
+
+        # Remove from old team if switching
+        if current_team == 'RED':
+            self.red_team.remove(interaction.user.id)
+        elif current_team == 'BLUE':
+            self.blue_team.remove(interaction.user.id)
+
+        # Add to new team
+        self.votes[interaction.user.id] = team
+        if team == 'RED':
+            self.red_team.append(interaction.user.id)
+        else:
+            self.blue_team.append(interaction.user.id)
+
+        embed = self.build_pick_embed()
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    async def handle_ready(self, interaction: discord.Interaction):
+        """Handle SET TEAMS button"""
+        if interaction.user.id not in self.players:
+            await interaction.response.send_message("❌ You're not in this match!", ephemeral=True)
+            return
+
+        if interaction.user.id not in self.votes:
+            await interaction.response.send_message("❌ Pick a team first before locking in!", ephemeral=True)
+            return
+
+        # Toggle ready
+        if interaction.user.id in self.ready:
+            self.ready.remove(interaction.user.id)
+        else:
+            self.ready.add(interaction.user.id)
+
+        # Check if all ready
+        if len(self.ready) == len(self.players):
+            await interaction.response.defer()
+            await self.finalize_teams(interaction)
+        else:
+            embed = self.build_pick_embed()
+            await interaction.response.edit_message(embed=embed, view=self)
+
+    def build_pick_embed(self, complete: bool = False, error: str = None) -> discord.Embed:
+        """Build the players pick embed"""
+        if error:
+            embed = discord.Embed(
+                title=f"Players Pick Teams - {self.match_label}",
+                description=f"❌ {error}\n\nClick a button to join a team!",
+                color=discord.Color.red()
+            )
+        elif complete:
+            embed = discord.Embed(
+                title=f"Players Pick Teams - {self.match_label}",
+                description="✅ **Teams Complete!** Starting match...",
+                color=discord.Color.green()
+            )
+        else:
+            not_ready = len(self.players) - len(self.ready)
+            embed = discord.Embed(
+                title=f"Players Pick Teams - {self.match_label}",
+                description=(
+                    f"Click **Red Team** or **Blue Team** to pick your team.\n"
+                    f"Click **SET TEAMS** when you're happy with your choice.\n"
+                    f"You can switch teams until you click SET TEAMS!\n\n"
+                    f"**{not_ready} players** need to click SET TEAMS."
+                ),
+                color=discord.Color.green()
+            )
+
+        # Red team
+        red_text = ""
+        for uid in self.red_team:
+            ready_mark = " ✓" if uid in self.ready else ""
+            red_text += f"<@{uid}>{ready_mark}\n"
+        red_text = red_text.strip() if red_text else "*No players yet*"
+        embed.add_field(
+            name=f"<:redteam:{RED_TEAM_EMOJI_ID}> Red Team ({len(self.red_team)}/{self.team_size})",
+            value=red_text,
+            inline=True
+        )
+
+        # Blue team
+        blue_text = ""
+        for uid in self.blue_team:
+            ready_mark = " ✓" if uid in self.ready else ""
+            blue_text += f"<@{uid}>{ready_mark}\n"
+        blue_text = blue_text.strip() if blue_text else "*No players yet*"
+        embed.add_field(
+            name=f"<:blueteam:{BLUE_TEAM_EMOJI_ID}> Blue Team ({len(self.blue_team)}/{self.team_size})",
+            value=blue_text,
+            inline=True
+        )
+
+        return embed
+
+    async def finalize_teams(self, interaction: discord.Interaction):
+        """Finalize teams and start the playlist match"""
+        from playlists import (
+            PlaylistMatch, show_playlist_match_embed, save_match_to_history,
+            get_player_mmr
+        )
+
+        # Check teams are balanced
+        if len(self.red_team) != self.team_size or len(self.blue_team) != self.team_size:
+            embed = self.build_pick_embed(
+                error=f"Teams must be {self.team_size}v{self.team_size}! Currently {len(self.red_team)}v{len(self.blue_team)}. Everyone has been unreadied - rearrange teams!"
+            )
+            self.ready.clear()
+            try:
+                if self.pick_message:
+                    await self.pick_message.edit(embed=embed, view=self)
+            except:
+                pass
+            return
+
+        # Teams are valid - complete
+        embed = self.build_pick_embed(complete=True)
+        try:
+            if self.pick_message:
+                await self.pick_message.edit(embed=embed, view=None)
+        except:
+            pass
+
+        guild = interaction.guild
+        ps = self.playlist_state
+        voice_category_id = 1403916181554860112
+        category = guild.get_channel(voice_category_id)
+
+        # Create match object
+        ps.match_counter -= 1  # Will be incremented back in __init__
+        match = PlaylistMatch(ps, self.players, self.red_team, self.blue_team)
+        match.match_number = self.match_number
+        ps.current_match = match
+
+        # Find highest MMR player on each team (captain)
+        red_mmrs = [(uid, await get_player_mmr(uid)) for uid in self.red_team]
+        blue_mmrs = [(uid, await get_player_mmr(uid)) for uid in self.blue_team]
+
+        # Sort by MMR descending, get captain (highest MMR)
+        red_captain_id = max(red_mmrs, key=lambda x: x[1])[0] if red_mmrs else self.red_team[0]
+        blue_captain_id = max(blue_mmrs, key=lambda x: x[1])[0] if blue_mmrs else self.blue_team[0]
+
+        red_captain = guild.get_member(red_captain_id)
+        blue_captain = guild.get_member(blue_captain_id)
+        red_captain_name = red_captain.display_name if red_captain else "Red"
+        blue_captain_name = blue_captain.display_name if blue_captain else "Blue"
+
+        # Create team voice channels with captain names
+        red_vc = await guild.create_voice_channel(
+            name=f"🔴 - Team {red_captain_name}",
+            category=category,
+            user_limit=self.team_size + 2
+        )
+
+        blue_vc = await guild.create_voice_channel(
+            name=f"🔵 - Team {blue_captain_name}",
+            category=category,
+            user_limit=self.team_size + 2
+        )
+
+        match.red_vc_id = red_vc.id
+        match.blue_vc_id = blue_vc.id
+
+        # Delete pregame VC
+        if self.pregame_vc_id:
+            pregame_vc = guild.get_channel(self.pregame_vc_id)
+            if pregame_vc:
+                # Move players before deleting
+                for uid in self.red_team:
+                    member = guild.get_member(uid)
+                    if member and member.voice and member.voice.channel == pregame_vc:
+                        try:
+                            await member.move_to(red_vc)
+                        except:
+                            pass
+                for uid in self.blue_team:
+                    member = guild.get_member(uid)
+                    if member and member.voice and member.voice.channel == pregame_vc:
+                        try:
+                            await member.move_to(blue_vc)
+                        except:
+                            pass
+                try:
+                    await pregame_vc.delete()
+                except:
+                    pass
+
+        # Show match embed
+        await show_playlist_match_embed(interaction.channel, match)
+
+        # Save to history
+        save_match_to_history(match, "IN_PROGRESS")
+
+        log_action(f"{self.match_label}: Teams finalized - Red: {self.red_team}, Blue: {self.blue_team}")

@@ -662,6 +662,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         app_commands.Choice(name="Team Hardcore", value="team_hardcore"),
         app_commands.Choice(name="Double Team", value="double_team"),
         app_commands.Choice(name="Head to Head", value="head_to_head"),
+        app_commands.Choice(name="Tournament Matches", value="tournament"),
     ])
     async def end_match(interaction: discord.Interaction, playlist: str, match_number: int = None):
         """End an active match - properly records results and cleans up"""
@@ -717,6 +718,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                 "team_hardcore": PlaylistType.TEAM_HARDCORE,
                 "double_team": PlaylistType.DOUBLE_TEAM,
                 "head_to_head": PlaylistType.HEAD_TO_HEAD,
+                "tournament": PlaylistType.TOURNAMENT,
             }
 
             ptype = playlist_map.get(playlist)
@@ -771,6 +773,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         app_commands.Choice(name="Team Hardcore", value="team_hardcore"),
         app_commands.Choice(name="Double Team", value="double_team"),
         app_commands.Choice(name="Head to Head", value="head_to_head"),
+        app_commands.Choice(name="Tournament Matches", value="tournament"),
     ])
     async def delete_match(interaction: discord.Interaction, playlist: str, match_number: int):
         """Delete a match from history by playlist and match number"""
@@ -789,7 +792,8 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                 "mlg_4v4": "MLG 4v4",
                 "team_hardcore": "Team Hardcore",
                 "double_team": "Double Team",
-                "head_to_head": "Head to Head"
+                "head_to_head": "Head to Head",
+                "tournament": "Tournament Matches"
             }
             playlist_name = playlist_names.get(playlist, playlist)
 
