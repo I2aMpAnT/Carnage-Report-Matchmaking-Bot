@@ -2140,6 +2140,10 @@ class PlaylistPlayersPickView(View):
         voice_category_id = 1403916181554860112
         category = guild.get_channel(voice_category_id)
 
+        # Text channel category (Matchmaking)
+        text_category_id = 1403855141857337501
+        text_category = guild.get_channel(text_category_id)
+
         # Create match object
         ps.match_counter -= 1  # Will be incremented back in __init__
         match = PlaylistMatch(ps, self.players, self.red_team, self.blue_team)
@@ -2159,6 +2163,16 @@ class PlaylistPlayersPickView(View):
         red_captain_name = red_captain.display_name if red_captain else "Red"
         blue_captain_name = blue_captain.display_name if blue_captain else "Blue"
 
+        # Create text channel for this match: "Team {captain1} vs Team {captain2}"
+        text_channel_name = f"Team {red_captain_name} vs Team {blue_captain_name}"
+        match_text_channel = await guild.create_text_channel(
+            name=text_channel_name,
+            category=text_category,
+            topic=f"{self.match_label} - Auto-deleted when match ends"
+        )
+        match.text_channel_id = match_text_channel.id
+        log_action(f"Created tournament text channel: {text_channel_name} (ID: {match_text_channel.id})")
+
         # Create team voice channels with captain names
         red_vc = await guild.create_voice_channel(
             name=f"🔴 - Team {red_captain_name}",
@@ -2172,8 +2186,8 @@ class PlaylistPlayersPickView(View):
             user_limit=self.team_size + 2
         )
 
-        match.red_vc_id = red_vc.id
-        match.blue_vc_id = blue_vc.id
+        match.team1_vc_id = red_vc.id
+        match.team2_vc_id = blue_vc.id
 
         # Delete pregame VC
         if self.pregame_vc_id:
@@ -2199,8 +2213,8 @@ class PlaylistPlayersPickView(View):
                 except:
                     pass
 
-        # Show match embed
-        await show_playlist_match_embed(interaction.channel, match)
+        # Show match embed in the new text channel
+        await show_playlist_match_embed(match_text_channel, match)
 
         # Save to history
         save_match_to_history(match, "IN_PROGRESS")
