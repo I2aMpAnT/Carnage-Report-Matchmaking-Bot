@@ -3296,21 +3296,21 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
 
         # Get MMR (from MMR.json if available)
         mmr = player_stats.get("mmr")
-        mmr_display = f"**{mmr:.1f}**" if mmr else "N/A"
+        mmr_display = f"**{int(mmr)}**" if mmr else "N/A"
 
         # Get rank emoji for highest rank
         highest_rank_emoji = get_rank_emoji(highest_rank)
 
         # Create embed
         embed = discord.Embed(
-            title=f"{display_name}'s Matchmaking Stats",
+            title=f"Matchmaking Stats",
             color=discord.Color.from_rgb(0, 112, 192)
         )
 
         # Header with player name and MMR
         embed.add_field(
-            name="PLAYER",
-            value=f"**{display_name}**",
+            name=f"{display_name}",
+            value="\u200b",
             inline=True
         )
 
@@ -3343,7 +3343,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                 ranks_text += f"**{ptype}**: {p_rank_emoji} - {pwins}W/{plosses}L\n"
 
         embed.add_field(
-            name="📊 PLAYLIST RANKS",
+            name="PLAYLIST RANKS",
             value=ranks_text.strip() if ranks_text else "No playlist data yet",
             inline=False
         )

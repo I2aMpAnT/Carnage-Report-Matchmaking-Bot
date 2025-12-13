@@ -1265,6 +1265,7 @@ class PlayersPickView(View):
         self.red_team = []
         self.blue_team = []
         self.votes = {}  # user_id -> 'RED' or 'BLUE'
+        self.ready = set()  # Players who clicked SET TEAMS
         self.test_mode = test_mode
         self.match_label = match_label
         self.pick_message = None  # Will be set after sending/editing
@@ -1277,32 +1278,70 @@ class PlayersPickView(View):
     async def pick_blue(self, interaction: discord.Interaction, button: Button):
         await self.handle_pick(interaction, 'BLUE')
 
+    @discord.ui.button(label="SET TEAMS", style=discord.ButtonStyle.success, custom_id="set_teams", row=1)
+    async def set_teams(self, interaction: discord.Interaction, button: Button):
+        await self.handle_ready(interaction)
+
     async def handle_pick(self, interaction: discord.Interaction, team: str):
-        """Handle team pick"""
+        """Handle team pick - allows switching teams until SET TEAMS is clicked"""
         if interaction.user.id not in self.players:
             await interaction.response.send_message("❌ You're not in this match!", ephemeral=True)
             return
 
-        if interaction.user.id in self.votes:
-            await interaction.response.send_message("❌ You already picked a team!", ephemeral=True)
+        # If already ready, can't switch
+        if interaction.user.id in self.ready:
+            await interaction.response.send_message("❌ You already locked in! Can't switch teams.", ephemeral=True)
             return
 
-        self.votes[interaction.user.id] = team
+        # Get current team (if any)
+        current_team = self.votes.get(interaction.user.id)
 
+        # If switching to same team, do nothing
+        if current_team == team:
+            await interaction.response.send_message(f"You're already on {team} team!", ephemeral=True)
+            return
+
+        # Remove from old team if switching
+        if current_team == 'RED':
+            self.red_team.remove(interaction.user.id)
+        elif current_team == 'BLUE':
+            self.blue_team.remove(interaction.user.id)
+
+        # Add to new team
+        self.votes[interaction.user.id] = team
         if team == 'RED':
             self.red_team.append(interaction.user.id)
         else:
             self.blue_team.append(interaction.user.id)
 
-        # Update the embed to show current teams
+        # Update embed with current picks
         embed = self.build_pick_embed()
+        await interaction.response.edit_message(embed=embed, view=self)
 
-        # Check if all players voted
-        if len(self.votes) == len(self.players):
+    async def handle_ready(self, interaction: discord.Interaction):
+        """Handle SET TEAMS button - locks in player's team choice"""
+        if interaction.user.id not in self.players:
+            await interaction.response.send_message("❌ You're not in this match!", ephemeral=True)
+            return
+
+        # Must pick a team first
+        if interaction.user.id not in self.votes:
+            await interaction.response.send_message("❌ Pick a team first before locking in!", ephemeral=True)
+            return
+
+        # Toggle ready status
+        if interaction.user.id in self.ready:
+            self.ready.remove(interaction.user.id)
+        else:
+            self.ready.add(interaction.user.id)
+
+        # Check if all players are ready
+        if len(self.ready) == len(self.players):
             await interaction.response.defer()
             await self.finalize_vote(interaction)
         else:
             # Update embed with current picks
+            embed = self.build_pick_embed()
             await interaction.response.edit_message(embed=embed, view=self)
 
     def build_pick_embed(self, complete: bool = False, error: str = None) -> discord.Embed:
@@ -1320,23 +1359,37 @@ class PlayersPickView(View):
                 color=discord.Color.green()
             )
         else:
-            remaining = len(self.players) - len(self.votes)
+            not_picked = len(self.players) - len(self.votes)
+            not_ready = len(self.players) - len(self.ready)
             embed = discord.Embed(
                 title=f"Players Pick Teams - {self.match_label}",
-                description=f"Click a button to join a team!\n\n**{remaining} players** still need to pick.",
+                description=(
+                    f"Click **Red Team** or **Blue Team** to pick your team.\n"
+                    f"Click **SET TEAMS** when you're happy with your choice.\n"
+                    f"You can switch teams until you click SET TEAMS!\n\n"
+                    f"**{not_ready} players** need to click SET TEAMS."
+                ),
                 color=discord.Color.green()
             )
 
-        # Red team
-        red_text = "\n".join([f"<@{uid}>" for uid in self.red_team]) if self.red_team else "*No players yet*"
+        # Red team - show who's ready with ✓
+        red_text = ""
+        for uid in self.red_team:
+            ready_mark = " ✓" if uid in self.ready else ""
+            red_text += f"<@{uid}>{ready_mark}\n"
+        red_text = red_text.strip() if red_text else "*No players yet*"
         embed.add_field(
             name=f"<:redteam:{RED_TEAM_EMOJI_ID}> Red Team ({len(self.red_team)}/4)",
             value=red_text,
             inline=True
         )
 
-        # Blue team
-        blue_text = "\n".join([f"<@{uid}>" for uid in self.blue_team]) if self.blue_team else "*No players yet*"
+        # Blue team - show who's ready with ✓
+        blue_text = ""
+        for uid in self.blue_team:
+            ready_mark = " ✓" if uid in self.ready else ""
+            blue_text += f"<@{uid}>{ready_mark}\n"
+        blue_text = blue_text.strip() if blue_text else "*No players yet*"
         embed.add_field(
             name=f"<:blueteam:{BLUE_TEAM_EMOJI_ID}> Blue Team ({len(self.blue_team)}/4)",
             value=blue_text,
@@ -1346,14 +1399,12 @@ class PlayersPickView(View):
         return embed
 
     async def finalize_vote(self, interaction: discord.Interaction):
-        """Finalize after all votes"""
+        """Finalize after all players clicked SET TEAMS"""
         # Check if teams are balanced (4v4)
         if len(self.red_team) != 4 or len(self.blue_team) != 4:
-            # Teams are uneven - reset and let them try again
-            embed = self.build_pick_embed(error=f"Teams must be 4v4! Currently {len(self.red_team)}v{len(self.blue_team)}. Picks have been reset.")
-            self.red_team = []
-            self.blue_team = []
-            self.votes = {}
+            # Teams are uneven - unready everyone and let them try again
+            embed = self.build_pick_embed(error=f"Teams must be 4v4! Currently {len(self.red_team)}v{len(self.blue_team)}. Everyone has been unreadied - rearrange teams!")
+            self.ready.clear()
             try:
                 if self.pick_message:
                     await self.pick_message.edit(embed=embed, view=self)
