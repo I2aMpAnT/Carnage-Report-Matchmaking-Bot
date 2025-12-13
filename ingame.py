@@ -205,69 +205,104 @@ class SeriesView(View):
     
     async def vote_end_series(self, interaction: discord.Interaction):
         """Process end series vote"""
-        all_players = self.series.red_team + self.series.blue_team
-        total_players = len(all_players)
-        
-        # Test mode: only testers can vote, need 2 votes to end
-        if self.series.test_mode:
-            # Check if user is a tester (if testers list exists)
-            if self.series.testers and interaction.user.id not in self.series.testers:
+        try:
+            all_players = self.series.red_team + self.series.blue_team
+            total_players = len(all_players)
+
+            log_action(f"[VOTE] {interaction.user.display_name} clicked End Series button")
+
+            # Test mode: only testers can vote, need 2 votes to end
+            if self.series.test_mode:
+                # Check if user is a tester (if testers list exists)
+                if self.series.testers and interaction.user.id not in self.series.testers:
+                    await interaction.response.send_message(
+                        "❌ Only testers can vote in test mode!",
+                        ephemeral=True
+                    )
+                    return
+
+                # Toggle vote - if already voted, remove vote
+                if interaction.user.id in self.end_voters:
+                    self.end_voters.remove(interaction.user.id)
+                    log_action(f"[VOTE] {interaction.user.display_name} removed test vote")
+                else:
+                    self.end_voters.add(interaction.user.id)
+                    log_action(f"[VOTE] {interaction.user.display_name} added test vote")
+
+                await interaction.response.defer()
+                await self.update_series_embed(interaction.channel)
+
+                # In test mode, need 2 tester votes to end
+                tester_end_votes = sum(1 for uid in self.end_voters if uid in self.series.testers)
+                log_action(f"[VOTE] Test mode: {tester_end_votes}/2 tester votes")
+                if tester_end_votes >= 2:
+                    log_action(f"[VOTE] Test mode threshold met - ending series")
+                    from postgame import end_series
+                    await end_series(self, interaction.channel)
+                return
+
+            # Real mode
+            user_roles = [role.name for role in interaction.user.roles]
+            is_admin = "Overlord" in user_roles
+            is_staff = any(role in ["Staff", "Server Support"] for role in user_roles)
+            is_privileged = is_admin or is_staff
+
+            if not is_privileged and interaction.user.id not in all_players:
                 await interaction.response.send_message(
-                    "❌ Only testers can vote in test mode!",
+                    "❌ Only players or Staff can vote!",
                     ephemeral=True
                 )
                 return
-            
+
             # Toggle vote - if already voted, remove vote
             if interaction.user.id in self.end_voters:
                 self.end_voters.remove(interaction.user.id)
+                log_action(f"[VOTE] {interaction.user.display_name} removed end series vote")
             else:
                 self.end_voters.add(interaction.user.id)
-            
+                log_action(f"[VOTE] {interaction.user.display_name} added end series vote (admin={is_admin}, staff={is_staff})")
+
             await interaction.response.defer()
             await self.update_series_embed(interaction.channel)
-            
-            # In test mode, need 2 tester votes to end
-            tester_end_votes = sum(1 for uid in self.end_voters if uid in self.series.testers)
-            if tester_end_votes >= 2:
+
+            # Count admin and staff votes separately
+            admin_votes = 0
+            staff_votes = 0
+            for uid in self.end_voters:
+                member = interaction.guild.get_member(uid)
+                if member:
+                    member_roles = [role.name for role in member.roles]
+                    if "Overlord" in member_roles:
+                        admin_votes += 1
+                    elif any(role in ["Staff", "Server Support"] for role in member_roles):
+                        staff_votes += 1
+
+            # End conditions: majority (5 of 8) OR 2 admin votes OR 2 staff votes
+            majority_needed = (len(all_players) // 2) + 1
+            total_votes = len(self.end_voters)
+
+            log_action(f"[VOTE] Counts: {total_votes} total, {admin_votes} admin, {staff_votes} staff. Need {majority_needed} majority OR 2 admin OR 2 staff")
+
+            if total_votes >= majority_needed:
+                log_action(f"[VOTE] Majority threshold met ({total_votes}/{majority_needed}) - ending series")
                 from postgame import end_series
                 await end_series(self, interaction.channel)
-            return
-        
-        # Real mode
-        user_roles = [role.name for role in interaction.user.roles]
-        is_staff = any(role in ADMIN_ROLES for role in user_roles)
-        
-        if not is_staff and interaction.user.id not in all_players:
-            await interaction.response.send_message(
-                "❌ Only players or Staff can vote!",
-                ephemeral=True
-            )
-            return
-        
-        # Toggle vote - if already voted, remove vote
-        if interaction.user.id in self.end_voters:
-            self.end_voters.remove(interaction.user.id)
-        else:
-            self.end_voters.add(interaction.user.id)
-        
-        await interaction.response.defer()
-        await self.update_series_embed(interaction.channel)
-        
-        # Count staff votes (handle case where member might not be cached)
-        staff_votes = 0
-        for uid in self.end_voters:
-            member = interaction.guild.get_member(uid)
-            if member:
-                member_roles = [role.name for role in member.roles]
-                if any(role in ADMIN_ROLES for role in member_roles):
-                    staff_votes += 1
-
-        # End conditions: majority (5 of 8) total votes OR 2 staff votes
-        majority_needed = (len(all_players) // 2) + 1
-        if len(self.end_voters) >= majority_needed or staff_votes >= 2:
-            from postgame import end_series
-            await end_series(self, interaction.channel)
+            elif admin_votes >= 2:
+                log_action(f"[VOTE] Admin threshold met ({admin_votes}/2) - ending series")
+                from postgame import end_series
+                await end_series(self, interaction.channel)
+            elif staff_votes >= 2:
+                log_action(f"[VOTE] Staff threshold met ({staff_votes}/2) - ending series")
+                from postgame import end_series
+                await end_series(self, interaction.channel)
+        except Exception as e:
+            log_action(f"[VOTE ERROR] vote_end_series failed: {e}")
+            import traceback
+            log_action(f"[VOTE ERROR] Traceback: {traceback.format_exc()}")
+            try:
+                await interaction.response.send_message(f"❌ Error processing vote: {e}", ephemeral=True)
+            except:
+                pass
     
     async def update_series_embed(self, channel: discord.TextChannel):
         """Update the series embed"""

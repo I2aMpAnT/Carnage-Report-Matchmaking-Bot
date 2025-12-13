@@ -3386,7 +3386,15 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
 
         embed.set_footer(text=f"Total Games: {total_games} | Series W/L: {player_stats['series_wins']}/{player_stats['series_losses']}")
 
-        await interaction.response.send_message(embed=embed)
+        # Create view with website link button
+        view = discord.ui.View()
+        view.add_item(discord.ui.Button(
+            label="See more at CarnageReport.com",
+            url="https://www.carnagereport.com",
+            style=discord.ButtonStyle.link
+        ))
+
+        await interaction.response.send_message(embed=embed, view=view)
 
     @bot.tree.command(name="verifystats", description="Update your rank role based on your current stats")
     async def verifystats(interaction: discord.Interaction):
@@ -3649,8 +3657,8 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         # Pass guild for emoji lookup
         view = STATSRANKS.LeaderboardView(bot, guild=interaction.guild)
         embed = await view.build_embed()
-        # Ephemeral so each player can interact with their own instance
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        # Public message - button clicks give each user their own private view
+        await interaction.response.send_message(embed=embed, view=view)
 
     @bot.tree.command(name="populatestatsrefresh", description="[ADMIN] Clear all stats files and repopulate from scratch")
     @has_admin_role()

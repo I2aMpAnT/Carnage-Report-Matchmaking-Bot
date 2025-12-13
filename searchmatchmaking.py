@@ -354,6 +354,20 @@ async def check_queue_inactivity():
                                 await remove_inactive_user(guild, user_id, reason="did not respond to inactivity check")
                     continue
 
+                # Check if user is in a voice channel (exempt from AFK if in voice and not deafened)
+                if queue_state.queue_channel:
+                    guild = queue_state.queue_channel.guild
+                    member = guild.get_member(user_id)
+                    if member and member.voice:
+                        voice_state = member.voice
+                        # Check if they're in the AFK channel
+                        is_in_afk = guild.afk_channel and voice_state.channel == guild.afk_channel
+                        # Exempt if: in voice, NOT in AFK channel, and NOT deafened
+                        if not is_in_afk and not voice_state.self_deaf and not voice_state.deaf:
+                            # User is active in voice - reset their timer silently
+                            queue_state.queue_join_times[user_id] = now
+                            continue
+
                 # Check how long they've been in queue
                 join_time = queue_state.queue_join_times.get(user_id)
                 if join_time:
@@ -443,12 +457,28 @@ class QueueView(View):
                     embed=embed
                 )
             return
-        
+
         # Check if already in queue
         if user_id in queue_state.queue:
             await interaction.response.send_message("You're already in matchmaking!", ephemeral=True)
             return
-        
+
+        # Check if in another playlist queue (except Head to Head which is exempt)
+        try:
+            from playlists import get_all_playlists, PlaylistType
+            for ps in get_all_playlists():
+                if ps.playlist_type == PlaylistType.HEAD_TO_HEAD:
+                    continue  # Head to Head exempt from 1 queue rule
+                if user_id in ps.queue:
+                    await interaction.response.send_message(
+                        f"You're already in the **{ps.name}** queue!\n"
+                        "Leave that queue first before joining MLG 4v4.",
+                        ephemeral=True
+                    )
+                    return
+        except:
+            pass
+
         # Check if queue is full
         if len(queue_state.queue) >= MAX_QUEUE_SIZE:
             await interaction.response.send_message("Matchmaking is full!", ephemeral=True)
@@ -618,15 +648,10 @@ class QueueView(View):
             except:
                 pass
 
-        # Create two embeds stacked vertically
+        # Create embed with progress image (no banner)
         current_count = len(queue_state.queue)
         needed = MAX_QUEUE_SIZE - current_count
 
-        # First embed: header banner image
-        header_embed = discord.Embed(color=discord.Color.green())
-        header_embed.set_image(url=HEADER_IMAGE_URL)
-
-        # Second embed: content with progress image
         content_embed = discord.Embed(
             title="MLG 4v4 - Players Needed!",
             description=f"We have **{current_count}/{MAX_QUEUE_SIZE}** players searching.\nNeed **{needed}** more to start!",
@@ -647,8 +672,8 @@ class QueueView(View):
         except:
             pass
 
-        # Send both embeds stacked vertically
-        queue_state.ping_message = await general_channel.send(embeds=[header_embed, content_embed], view=view)
+        # Send embed
+        queue_state.ping_message = await general_channel.send(embed=content_embed, view=view)
 
         log_action(f"{interaction.user.display_name} pinged general chat for queue ({current_count}/{MAX_QUEUE_SIZE})")
 
@@ -813,14 +838,9 @@ async def update_ping_message(guild: discord.Guild):
             pass
         return
     
-    # Update with two embeds stacked vertically
+    # Update embed (no banner)
     needed = MAX_QUEUE_SIZE - current_count
 
-    # First embed: header banner image
-    header_embed = discord.Embed(color=discord.Color.green())
-    header_embed.set_image(url=HEADER_IMAGE_URL)
-
-    # Second embed: content with progress image
     content_embed = discord.Embed(
         title="MLG 4v4 - Players Needed!",
         description=f"We have **{current_count}/{MAX_QUEUE_SIZE}** players searching.\nNeed **{needed}** more to start!",
@@ -831,7 +851,7 @@ async def update_ping_message(guild: discord.Guild):
         content_embed.set_image(url=progress_image)
 
     try:
-        await queue_state.ping_message.edit(embeds=[header_embed, content_embed])
+        await queue_state.ping_message.edit(embed=content_embed)
     except:
         pass
 
