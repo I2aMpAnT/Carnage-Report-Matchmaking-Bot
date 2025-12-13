@@ -1412,17 +1412,17 @@ async def finalize_teams(channel: discord.TextChannel, red_team: List[int], blue
     voice_category_id = 1403916181554860112
     category = guild.get_channel(voice_category_id)
     
-    # Create Red Team voice channel with team emoji (red circle) and series number
-    red_vc_name = f"🔴 Red {series_label} - {red_avg_mmr} MMR"
+    # Create Red Team voice channel with team emoji and series number (no "Red" text)
+    red_vc_name = f"🔴 {series_label}"
     red_vc = await guild.create_voice_channel(
         name=red_vc_name,
         category=category,
         user_limit=None,
         position=999  # Position at bottom
     )
-    
-    # Create Blue Team voice channel with team emoji (blue circle) and series number
-    blue_vc_name = f"🔵 Blue {series_label} - {blue_avg_mmr} MMR"
+
+    # Create Blue Team voice channel with team emoji and series number (no "Blue" text)
+    blue_vc_name = f"🔵 {series_label}"
     blue_vc = await guild.create_voice_channel(
         name=blue_vc_name,
         category=category,

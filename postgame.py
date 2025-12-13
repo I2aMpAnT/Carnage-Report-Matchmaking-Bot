@@ -577,24 +577,38 @@ def save_series_for_stats_matching(series):
     log_action(f"Saved series #{series.match_number} for stats matching")
 
 async def cleanup_after_series(series, guild: discord.Guild):
-    """Move players to postgame and delete team VCs"""
+    """Move ALL users (not just players) to postgame and delete team VCs"""
     # Move to Postgame Carnage Report (ID: 1424845826362048643) FIRST before deleting VCs
     POSTGAME_CARNAGE_REPORT_ID = 1424845826362048643
     postgame_vc = guild.get_channel(POSTGAME_CARNAGE_REPORT_ID)
+
+    # Move ALL users from team VCs to postgame (not just players - includes spectators/staff)
     if postgame_vc:
-        all_players = series.red_team + series.blue_team
-        for user_id in all_players:
-            member = guild.get_member(user_id)
-            if member and member.voice:
-                try:
-                    await member.move_to(postgame_vc)
-                    log_action(f"Moved {member.name} to Postgame Carnage Report")
-                except:
-                    pass
+        # Move everyone from Red VC
+        if series.red_vc_id:
+            red_vc = guild.get_channel(series.red_vc_id)
+            if red_vc and red_vc.members:
+                for member in list(red_vc.members):  # Use list() to avoid modification during iteration
+                    try:
+                        await member.move_to(postgame_vc)
+                        log_action(f"Moved {member.name} to Postgame Carnage Report")
+                    except:
+                        pass
+
+        # Move everyone from Blue VC
+        if series.blue_vc_id:
+            blue_vc = guild.get_channel(series.blue_vc_id)
+            if blue_vc and blue_vc.members:
+                for member in list(blue_vc.members):  # Use list() to avoid modification during iteration
+                    try:
+                        await member.move_to(postgame_vc)
+                        log_action(f"Moved {member.name} to Postgame Carnage Report")
+                    except:
+                        pass
     else:
         log_action(f"Warning: Postgame Carnage Report channel {POSTGAME_CARNAGE_REPORT_ID} not found")
-    
-    # Delete the created voice channels AFTER moving players
+
+    # Delete the created voice channels AFTER moving all users
     if series.red_vc_id:
         red_vc = guild.get_channel(series.red_vc_id)
         if red_vc:
@@ -603,7 +617,7 @@ async def cleanup_after_series(series, guild: discord.Guild):
                 log_action(f"Deleted Red Team voice channel")
             except Exception as e:
                 log_action(f"Failed to delete red VC: {e}")
-    
+
     if series.blue_vc_id:
         blue_vc = guild.get_channel(series.blue_vc_id)
         if blue_vc:

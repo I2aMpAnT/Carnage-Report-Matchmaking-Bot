@@ -1995,11 +1995,11 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         interaction: discord.Interaction,
         playlist: str,
         red1: discord.Member,
-        blue1: discord.Member,
         red2: discord.Member = None,
-        blue2: discord.Member = None,
         red3: discord.Member = None,
         red4: discord.Member = None,
+        blue1: discord.Member = None,
+        blue2: discord.Member = None,
         blue3: discord.Member = None,
         blue4: discord.Member = None
     ):
@@ -2019,16 +2019,23 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             team_size = 4
             playlist_name = "MLG 4v4" if playlist == PlaylistType.MLG_4V4 else "Team Hardcore 4v4"
 
-        # Build teams based on team size
+        # Build teams based on team size (all red first, then all blue)
         if team_size == 1:
             # 1v1
+            if not blue1:
+                await interaction.response.send_message(
+                    f"❌ **{playlist_name}** requires 1 player per team!\n\n"
+                    f"Please provide: `red1`, `blue1`",
+                    ephemeral=True
+                )
+                return
             red_team = [red1.id]
             blue_team = [blue1.id]
             red_members = [red1]
             blue_members = [blue1]
         elif team_size == 2:
             # 2v2
-            if not red2 or not blue2:
+            if not all([red2, blue1, blue2]):
                 await interaction.response.send_message(
                     f"❌ **{playlist_name}** requires 2 players per team!\n\n"
                     f"Please provide: `red1`, `red2`, `blue1`, `blue2`",
@@ -2041,7 +2048,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             blue_members = [blue1, blue2]
         else:
             # 4v4
-            if not all([red2, red3, red4, blue2, blue3, blue4]):
+            if not all([red2, red3, red4, blue1, blue2, blue3, blue4]):
                 await interaction.response.send_message(
                     f"❌ **{playlist_name}** requires 4 players per team!\n\n"
                     f"Please provide: `red1`, `red2`, `red3`, `red4`, `blue1`, `blue2`, `blue3`, `blue4`",
