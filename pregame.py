@@ -2146,21 +2146,28 @@ class PlaylistPlayersPickView(View):
         match.match_number = self.match_number
         ps.current_match = match
 
-        # Calculate average MMRs for voice channel names
-        red_mmrs = [await get_player_mmr(uid) for uid in self.red_team]
-        blue_mmrs = [await get_player_mmr(uid) for uid in self.blue_team]
-        red_avg = int(sum(red_mmrs) / len(red_mmrs)) if red_mmrs else 1500
-        blue_avg = int(sum(blue_mmrs) / len(blue_mmrs)) if blue_mmrs else 1500
+        # Find highest MMR player on each team (captain)
+        red_mmrs = [(uid, await get_player_mmr(uid)) for uid in self.red_team]
+        blue_mmrs = [(uid, await get_player_mmr(uid)) for uid in self.blue_team]
 
-        # Create team voice channels
+        # Sort by MMR descending, get captain (highest MMR)
+        red_captain_id = max(red_mmrs, key=lambda x: x[1])[0] if red_mmrs else self.red_team[0]
+        blue_captain_id = max(blue_mmrs, key=lambda x: x[1])[0] if blue_mmrs else self.blue_team[0]
+
+        red_captain = guild.get_member(red_captain_id)
+        blue_captain = guild.get_member(blue_captain_id)
+        red_captain_name = red_captain.display_name if red_captain else "Red"
+        blue_captain_name = blue_captain.display_name if blue_captain else "Blue"
+
+        # Create team voice channels with captain names
         red_vc = await guild.create_voice_channel(
-            name=f"🔴 {self.match_label} - {red_avg} MMR",
+            name=f"🔴 - Team {red_captain_name}",
             category=category,
             user_limit=self.team_size + 2
         )
 
         blue_vc = await guild.create_voice_channel(
-            name=f"🔵 {self.match_label} - {blue_avg} MMR",
+            name=f"🔵 - Team {blue_captain_name}",
             category=category,
             user_limit=self.team_size + 2
         )
