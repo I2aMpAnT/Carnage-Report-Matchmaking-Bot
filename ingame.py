@@ -112,15 +112,7 @@ async def update_general_chat_embed(guild: discord.Guild, series):
                 except:
                     pass
     
-    # Send new message - only ping @here for real matches, not test matches
-    if not is_test:
-        here_msg = await channel.send("@here")
-        try:
-            await here_msg.delete()
-        except:
-            pass
-    
-    # Send the actual embed with multistream buttons
+    # Send the actual embed with multistream buttons (no @here ping)
     if view:
         series.general_message = await channel.send(embed=embed, view=view)
     else:

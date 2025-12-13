@@ -222,6 +222,9 @@ class PlaylistMatch:
         self.shared_vc_id: Optional[int] = None  # For Head to Head
         self.pregame_vc_id: Optional[int] = None  # Pregame lobby
 
+        # Text channel ID (for tournament matches)
+        self.text_channel_id: Optional[int] = None
+
         # Message references
         self.match_message: Optional[discord.Message] = None
         self.general_message: Optional[discord.Message] = None
@@ -582,6 +585,10 @@ class PlaylistQueueView(View):
         self.join_btn.custom_id = f"join_{playlist_state.playlist_type}"
         self.leave_btn.custom_id = f"leave_{playlist_state.playlist_type}"
         self.ping_btn.custom_id = f"ping_{playlist_state.playlist_type}"
+
+        # Remove ping button for tournament playlist
+        if playlist_state.playlist_type == PlaylistType.TOURNAMENT:
+            self.remove_item(self.ping_btn)
 
     @discord.ui.button(label="Join Queue", style=discord.ButtonStyle.success)
     async def join_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1270,6 +1277,16 @@ async def end_playlist_match(channel: discord.TextChannel, match: PlaylistMatch,
         if vc:
             try:
                 await vc.delete()
+            except:
+                pass
+
+    # Delete text channel (tournament matches)
+    if match.text_channel_id:
+        text_ch = guild.get_channel(match.text_channel_id)
+        if text_ch:
+            try:
+                await text_ch.delete()
+                log_action(f"Deleted tournament text channel: {text_ch.name}")
             except:
                 pass
 

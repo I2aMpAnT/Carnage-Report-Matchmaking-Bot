@@ -227,33 +227,38 @@ def format_team_with_links(team_ids: List[int], guild: discord.Guild) -> str:
 
 class MultiStreamView(View):
     """View with multi-stream buttons for Red, Blue, and All streams"""
-    def __init__(self, red_names: List[str], blue_names: List[str]):
+    def __init__(self, red_names: List[str], blue_names: List[str],
+                 red_label: str = None, blue_label: str = None):
         super().__init__(timeout=None)
-        
+
         all_names = red_names + blue_names
-        
+
+        # Use custom labels if provided, otherwise default to "Red Team" / "Blue Team"
+        red_label = red_label or "Red Team"
+        blue_label = blue_label or "Blue Team"
+
         # Note: Discord link buttons are always grey - we use emoji in labels for color indication
         # Red Team button
         if red_names:
             red_url = make_multitwitch(red_names)
             red_emoji = f"<:redteam:{RED_TEAM_EMOJI_ID}>" if RED_TEAM_EMOJI_ID else "🔴"
             self.add_item(Button(
-                label=f"Red Team ({len(red_names)})",
+                label=f"{red_label} ({len(red_names)})",
                 emoji=discord.PartialEmoji.from_str(f"redteam:{RED_TEAM_EMOJI_ID}") if RED_TEAM_EMOJI_ID else None,
                 url=red_url,
                 style=discord.ButtonStyle.link
             ))
-        
+
         # Blue Team button
         if blue_names:
             blue_url = make_multitwitch(blue_names)
             self.add_item(Button(
-                label=f"Blue Team ({len(blue_names)})",
+                label=f"{blue_label} ({len(blue_names)})",
                 emoji=discord.PartialEmoji.from_str(f"blueteam:{BLUE_TEAM_EMOJI_ID}") if BLUE_TEAM_EMOJI_ID else None,
                 url=blue_url,
                 style=discord.ButtonStyle.link
             ))
-        
+
         # All streams button (white/neutral)
         if all_names:
             all_url = make_multitwitch(all_names)

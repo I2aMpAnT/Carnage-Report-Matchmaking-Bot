@@ -2140,6 +2140,10 @@ class PlaylistPlayersPickView(View):
         voice_category_id = 1403916181554860112
         category = guild.get_channel(voice_category_id)
 
+        # Text channel category (Matchmaking)
+        text_category_id = 1403855141857337501
+        text_category = guild.get_channel(text_category_id)
+
         # Create match object
         ps.match_counter -= 1  # Will be incremented back in __init__
         match = PlaylistMatch(ps, self.players, self.red_team, self.blue_team)
@@ -2159,6 +2163,16 @@ class PlaylistPlayersPickView(View):
         red_captain_name = red_captain.display_name if red_captain else "Red"
         blue_captain_name = blue_captain.display_name if blue_captain else "Blue"
 
+        # Create text channel for this match: "Team {captain1} vs Team {captain2}"
+        text_channel_name = f"Team {red_captain_name} vs Team {blue_captain_name}"
+        match_text_channel = await guild.create_text_channel(
+            name=text_channel_name,
+            category=text_category,
+            topic=f"{self.match_label} - Auto-deleted when match ends"
+        )
+        match.text_channel_id = match_text_channel.id
+        log_action(f"Created tournament text channel: {text_channel_name} (ID: {match_text_channel.id})")
+
         # Create team voice channels with captain names
         red_vc = await guild.create_voice_channel(
             name=f"🔴 - Team {red_captain_name}",
@@ -2172,8 +2186,8 @@ class PlaylistPlayersPickView(View):
             user_limit=self.team_size + 2
         )
 
-        match.red_vc_id = red_vc.id
-        match.blue_vc_id = blue_vc.id
+        match.team1_vc_id = red_vc.id
+        match.team2_vc_id = blue_vc.id
 
         # Delete pregame VC
         if self.pregame_vc_id:
@@ -2199,10 +2213,95 @@ class PlaylistPlayersPickView(View):
                 except:
                     pass
 
-        # Show match embed
-        await show_playlist_match_embed(interaction.channel, match)
+        # Show match embed in the new text channel
+        await show_playlist_match_embed(match_text_channel, match)
+
+        # Post to general chat
+        await post_tournament_to_general(guild, match, red_captain_name, blue_captain_name)
 
         # Save to history
         save_match_to_history(match, "IN_PROGRESS")
 
         log_action(f"{self.match_label}: Teams finalized - Red: {self.red_team}, Blue: {self.blue_team}")
+
+
+async def post_tournament_to_general(guild: discord.Guild, match, red_captain_name: str, blue_captain_name: str):
+    """Post tournament match to general chat with Twitch links"""
+    from playlists import GENERAL_CHANNEL_ID
+
+    channel = guild.get_channel(GENERAL_CHANNEL_ID)
+    if not channel:
+        return
+
+    # Try to use twitch module for links
+    view = None
+    try:
+        import twitch
+        twitch.RED_TEAM_EMOJI_ID = RED_TEAM_EMOJI_ID
+        twitch.BLUE_TEAM_EMOJI_ID = BLUE_TEAM_EMOJI_ID
+
+        # Build embed with Twitch links
+        embed = discord.Embed(
+            title=f"Tournament Match In Progress - {match.get_match_label()}",
+            description=f"**Team {red_captain_name}** vs **Team {blue_captain_name}**",
+            color=discord.Color.gold()
+        )
+
+        # Format teams with clickable Twitch links
+        red_text = twitch.format_team_with_links(match.team1, guild)
+        blue_text = twitch.format_team_with_links(match.team2, guild)
+
+        embed.add_field(
+            name=f"<:redteam:{RED_TEAM_EMOJI_ID}> Team {red_captain_name}",
+            value=red_text,
+            inline=True
+        )
+        embed.add_field(
+            name=f"<:blueteam:{BLUE_TEAM_EMOJI_ID}> Team {blue_captain_name}",
+            value=blue_text,
+            inline=True
+        )
+
+        embed.set_footer(text="Tournament match in progress - Click player names to view streams")
+
+        # Get Twitch names for multistream buttons
+        red_twitch = twitch.get_team_twitch_names(match.team1)
+        blue_twitch = twitch.get_team_twitch_names(match.team2)
+
+        if red_twitch or blue_twitch:
+            view = twitch.MultiStreamView(
+                red_twitch, blue_twitch,
+                red_label=f"Team {red_captain_name}",
+                blue_label=f"Team {blue_captain_name}"
+            )
+
+    except Exception as e:
+        log_action(f"Twitch module error in tournament, falling back: {e}")
+        # Fallback to basic embed
+        embed = discord.Embed(
+            title=f"Tournament Match In Progress - {match.get_match_label()}",
+            description=f"**Team {red_captain_name}** vs **Team {blue_captain_name}**",
+            color=discord.Color.gold()
+        )
+
+        red_mentions = "\n".join([f"<@{uid}>" for uid in match.team1])
+        blue_mentions = "\n".join([f"<@{uid}>" for uid in match.team2])
+
+        embed.add_field(
+            name=f"<:redteam:{RED_TEAM_EMOJI_ID}> Team {red_captain_name}",
+            value=red_mentions,
+            inline=True
+        )
+        embed.add_field(
+            name=f"<:blueteam:{BLUE_TEAM_EMOJI_ID}> Team {blue_captain_name}",
+            value=blue_mentions,
+            inline=True
+        )
+
+        embed.set_footer(text="Tournament match in progress")
+
+    # Send embed and store reference (no @here ping)
+    if view:
+        match.general_message = await channel.send(embed=embed, view=view)
+    else:
+        match.general_message = await channel.send(embed=embed)
