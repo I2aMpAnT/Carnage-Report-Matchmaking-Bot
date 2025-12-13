@@ -1,6 +1,6 @@
 # postgame.py - Postgame Processing, Stats Recording, and Cleanup
 
-MODULE_VERSION = "1.3.0"
+MODULE_VERSION = "1.4.0"
 
 import discord
 from discord.ui import View, Button
@@ -92,6 +92,7 @@ def add_to_active_matches(series):
                 "voice_channel_id": getattr(series, 'blue_vc_id', None)
             }
         },
+        "text_channel_id": getattr(series, 'text_channel_id', None),
         "games": []
     }
 
@@ -506,9 +507,9 @@ async def end_series(series_view_or_channel, channel: discord.TextChannel = None
         print(f"✅ Refreshed ranks for {len(all_players)} players")
 
     # Delete the series embed
-    if series_view.series.series_message:
+    if series.series_message:
         try:
-            await series_view.series.series_message.delete()
+            await series.series_message.delete()
             log_action("Deleted series embed")
         except:
             pass
@@ -626,7 +627,17 @@ async def cleanup_after_series(series, guild: discord.Guild):
                 log_action(f"Deleted Blue Team voice channel")
             except Exception as e:
                 log_action(f"Failed to delete blue VC: {e}")
-    
+
+    # Delete the series text channel (results already posted to queue channel)
+    if hasattr(series, 'text_channel_id') and series.text_channel_id:
+        text_channel = guild.get_channel(series.text_channel_id)
+        if text_channel:
+            try:
+                await text_channel.delete(reason="Series ended - results saved to queue channel")
+                log_action(f"Deleted series text channel: {text_channel.name}")
+            except Exception as e:
+                log_action(f"Failed to delete series text channel: {e}")
+
     # Clear saved state since series ended
     try:
         import state_manager
