@@ -618,21 +618,17 @@ class QueueView(View):
             except:
                 pass
 
-        # Create two embeds with same URL (Discord renders them closer together)
+        # Create two embeds stacked vertically
         current_count = len(queue_state.queue)
         needed = MAX_QUEUE_SIZE - current_count
 
-        # Shared URL makes Discord render embeds with minimal gap
-        shared_url = "https://carnagereport.com"
-
-        # First embed: header image
-        header_embed = discord.Embed(url=shared_url, color=discord.Color.green())
+        # First embed: header banner image
+        header_embed = discord.Embed(color=discord.Color.green())
         header_embed.set_image(url=HEADER_IMAGE_URL)
 
         # Second embed: content with progress image
         content_embed = discord.Embed(
             title="MLG 4v4 - Players Needed!",
-            url=shared_url,  # Same URL = minimal gap
             description=f"We have **{current_count}/{MAX_QUEUE_SIZE}** players searching.\nNeed **{needed}** more to start!",
             color=discord.Color.green()
         )
@@ -651,7 +647,7 @@ class QueueView(View):
         except:
             pass
 
-        # Send both embeds with shared URL (minimal gap)
+        # Send both embeds stacked vertically
         queue_state.ping_message = await general_channel.send(embeds=[header_embed, content_embed], view=view)
 
         log_action(f"{interaction.user.display_name} pinged general chat for queue ({current_count}/{MAX_QUEUE_SIZE})")
@@ -817,18 +813,16 @@ async def update_ping_message(guild: discord.Guild):
             pass
         return
     
-    # Update with both embeds - shared URL for minimal gap
+    # Update with two embeds stacked vertically
     needed = MAX_QUEUE_SIZE - current_count
-    shared_url = "https://carnagereport.com"
 
-    # First embed: header image
-    header_embed = discord.Embed(url=shared_url, color=discord.Color.green())
+    # First embed: header banner image
+    header_embed = discord.Embed(color=discord.Color.green())
     header_embed.set_image(url=HEADER_IMAGE_URL)
 
     # Second embed: content with progress image
     content_embed = discord.Embed(
         title="MLG 4v4 - Players Needed!",
-        url=shared_url,  # Same URL = minimal gap
         description=f"We have **{current_count}/{MAX_QUEUE_SIZE}** players searching.\nNeed **{needed}** more to start!",
         color=discord.Color.green()
     )
