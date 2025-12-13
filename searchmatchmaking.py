@@ -490,9 +490,14 @@ class QueueView(View):
         
         # Update ping message if exists
         await update_ping_message(interaction.guild)
-        
+
         # Start pregame if queue is full
         if len(queue_state.queue) == MAX_QUEUE_SIZE:
+            # Lock players immediately - they cannot leave once queue is full
+            queue_state.locked = True
+            queue_state.locked_players = queue_state.queue[:]
+            log_action(f"Queue full - locked {len(queue_state.locked_players)} players")
+
             from pregame import start_pregame
             await start_pregame(interaction.channel)
     
@@ -766,9 +771,14 @@ class PingJoinView(View):
         
         # Update or delete ping message
         await update_ping_message(interaction.guild)
-        
+
         # Start pregame if queue is full
         if len(queue_state.queue) >= MAX_QUEUE_SIZE:
+            # Lock players immediately - they cannot leave once queue is full
+            queue_state.locked = True
+            queue_state.locked_players = queue_state.queue[:]
+            log_action(f"Queue full - locked {len(queue_state.locked_players)} players")
+
             if queue_state.queue_channel:
                 from pregame import start_pregame
                 await start_pregame(queue_state.queue_channel)
