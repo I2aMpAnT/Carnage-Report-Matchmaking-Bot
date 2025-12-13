@@ -451,20 +451,21 @@ class QueueView(View):
         if len(queue_state.queue) >= MAX_QUEUE_SIZE:
             await interaction.response.send_message("Matchmaking is full!", ephemeral=True)
             return
-        
-        # Check if match in progress
+
+        # Check if player is in the current match (can't queue while playing)
         if queue_state.current_series:
-            await interaction.response.send_message("Match in progress! Wait for it to end.", ephemeral=True)
-            return
-        
+            if user_id in queue_state.current_series.red_team or user_id in queue_state.current_series.blue_team:
+                await interaction.response.send_message("You're in the current match! Finish it first.", ephemeral=True)
+                return
+
         # Add to queue with join time
         queue_state.queue.append(user_id)
         queue_state.queue_join_times[user_id] = datetime.now()
-        
+
         # Clear recent action if this user was the one who left (they're rejoining)
         if queue_state.recent_action and queue_state.recent_action.get('user_id') == user_id:
             queue_state.recent_action = None
-        
+
         log_action(f"{interaction.user.display_name} joined matchmaking ({len(queue_state.queue)}/{MAX_QUEUE_SIZE}) - MMR: {player_stats['mmr']}")
         
         # Add SearchingMatchmaking role
@@ -724,20 +725,21 @@ class PingJoinView(View):
         if len(queue_state.queue) >= MAX_QUEUE_SIZE:
             await interaction.response.send_message("Matchmaking is full!", ephemeral=True)
             return
-        
-        # Check if match in progress
+
+        # Check if player is in the current match (can't queue while playing)
         if queue_state.current_series:
-            await interaction.response.send_message("Match in progress! Wait for it to end.", ephemeral=True)
-            return
-        
+            if user_id in queue_state.current_series.red_team or user_id in queue_state.current_series.blue_team:
+                await interaction.response.send_message("You're in the current match! Finish it first.", ephemeral=True)
+                return
+
         # Add to queue
         queue_state.queue.append(user_id)
         queue_state.queue_join_times[user_id] = datetime.now()
-        
+
         # Clear recent action if this user was the one who left (they're rejoining)
         if queue_state.recent_action and queue_state.recent_action.get('user_id') == user_id:
             queue_state.recent_action = None
-        
+
         log_action(f"{interaction.user.display_name} joined from ping ({len(queue_state.queue)}/{MAX_QUEUE_SIZE}) - MMR: {player_stats['mmr']}")
         
         # Add SearchingMatchmaking role

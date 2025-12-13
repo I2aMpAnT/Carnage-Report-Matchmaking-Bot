@@ -610,9 +610,11 @@ class PlaylistQueueView(View):
             await interaction.response.send_message("Queue is full!", ephemeral=True)
             return
 
+        # Check if player is in the current match (can't queue while playing)
         if ps.current_match:
-            await interaction.response.send_message("Match in progress!", ephemeral=True)
-            return
+            if user_id in ps.current_match.team1 or user_id in ps.current_match.team2:
+                await interaction.response.send_message("You're in the current match! Finish it first.", ephemeral=True)
+                return
 
         # Add to queue
         ps.queue.append(user_id)
@@ -749,9 +751,11 @@ class PlaylistPingJoinView(View):
             await interaction.response.send_message("Queue is full!", ephemeral=True)
             return
 
+        # Check if player is in the current match (can't queue while playing)
         if ps.current_match:
-            await interaction.response.send_message("Match in progress!", ephemeral=True)
-            return
+            if user_id in ps.current_match.team1 or user_id in ps.current_match.team2:
+                await interaction.response.send_message("You're in the current match! Finish it first.", ephemeral=True)
+                return
 
         # Add to queue
         ps.queue.append(user_id)
