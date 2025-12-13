@@ -3256,6 +3256,10 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         target_user = user or interaction.user
         guild = interaction.guild
 
+        # Get the member object to access server nickname (display_name)
+        member = guild.get_member(target_user.id) if guild else None
+        display_name = member.display_name if member else target_user.display_name
+
         # Helper function to get rank emoji
         def get_rank_emoji(level: int) -> str:
             """Get the custom rank emoji for a level (e.g., :15: or :6_:)"""
@@ -3292,14 +3296,14 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
 
         # Create embed
         embed = discord.Embed(
-            title=f"{target_user.name}'s Matchmaking Stats",
+            title=f"{display_name}'s Matchmaking Stats",
             color=discord.Color.from_rgb(0, 112, 192)
         )
 
         # Header with player name and MMR
         embed.add_field(
             name="PLAYER",
-            value=f"**{target_user.name}**",
+            value=f"**{display_name}**",
             inline=True
         )
 
