@@ -2216,7 +2216,52 @@ class PlaylistPlayersPickView(View):
         # Show match embed in the new text channel
         await show_playlist_match_embed(match_text_channel, match)
 
+        # Post to general chat
+        await post_tournament_to_general(guild, match, red_captain_name, blue_captain_name)
+
         # Save to history
         save_match_to_history(match, "IN_PROGRESS")
 
         log_action(f"{self.match_label}: Teams finalized - Red: {self.red_team}, Blue: {self.blue_team}")
+
+
+async def post_tournament_to_general(guild: discord.Guild, match, red_captain_name: str, blue_captain_name: str):
+    """Post tournament match to general chat"""
+    from playlists import GENERAL_CHANNEL_ID
+
+    channel = guild.get_channel(GENERAL_CHANNEL_ID)
+    if not channel:
+        return
+
+    # Build embed
+    embed = discord.Embed(
+        title=f"Tournament Match In Progress - {match.get_match_label()}",
+        description=f"**Team {red_captain_name}** vs **Team {blue_captain_name}**",
+        color=discord.Color.gold()
+    )
+
+    red_mentions = "\n".join([f"<@{uid}>" for uid in match.team1])
+    blue_mentions = "\n".join([f"<@{uid}>" for uid in match.team2])
+
+    embed.add_field(
+        name=f"<:redteam:{RED_TEAM_EMOJI_ID}> Team {red_captain_name}",
+        value=red_mentions,
+        inline=True
+    )
+    embed.add_field(
+        name=f"<:blueteam:{BLUE_TEAM_EMOJI_ID}> Team {blue_captain_name}",
+        value=blue_mentions,
+        inline=True
+    )
+
+    embed.set_footer(text="Tournament match in progress")
+
+    # Send @here ping then delete
+    here_msg = await channel.send("@here")
+    try:
+        await here_msg.delete()
+    except:
+        pass
+
+    # Send embed and store reference
+    match.general_message = await channel.send(embed=embed)
