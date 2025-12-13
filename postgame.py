@@ -5,7 +5,7 @@ MODULE_VERSION = "1.3.0"
 import discord
 from discord.ui import View, Button
 from typing import List
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import json
 import os
 
@@ -18,14 +18,19 @@ BLUE_TEAM_EMOJI_ID = None
 # Active match file
 ACTIVE_MATCH_FILE = 'activematch.json'
 
-# Timezone for consistent logging (UTC)
-TIMEZONE = timezone.utc
-TIMEZONE_NAME = "UTC"
+# Timezone for consistent logging (EST = UTC-5)
+EST = timezone(timedelta(hours=-5))
+TIMEZONE = EST
+TIMEZONE_NAME = "EST"
 
 
-def get_utc_now():
-    """Get current time in UTC"""
+def get_est_now():
+    """Get current time in EST"""
     return datetime.now(TIMEZONE)
+
+
+# Alias for backwards compatibility
+get_utc_now = get_est_now
 
 
 def format_timestamp(dt: datetime) -> dict:
@@ -465,8 +470,10 @@ async def end_series(series_view_or_channel, channel: discord.TextChannel = None
     else:
         embed.add_field(name="Game Results", value="*No games recorded yet - will update from parsed stats*", inline=False)
 
-    # Add stats matching info
-    embed.set_footer(text=f"Stats window: {series.start_time.strftime('%H:%M')} - {series.end_time.strftime('%H:%M')}")
+    # Add stats matching info (convert to EST if needed)
+    start_est = series.start_time.astimezone(EST) if series.start_time.tzinfo else series.start_time
+    end_est = series.end_time.astimezone(EST) if series.end_time.tzinfo else series.end_time
+    embed.set_footer(text=f"Stats window: {start_est.strftime('%H:%M')} - {end_est.strftime('%H:%M')} EST")
 
     # Post to queue channel and store reference for later updates
     queue_channel = channel.guild.get_channel(QUEUE_CHANNEL_ID)
