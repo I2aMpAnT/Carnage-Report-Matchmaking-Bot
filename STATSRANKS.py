@@ -913,75 +913,75 @@ class LeaderboardView(discord.ui.View):
                 elif item.custom_id == "lb_next":
                     item.disabled = self.current_page >= self.total_pages
 
+    async def _send_personal_view(self, interaction: discord.Interaction):
+        """Send a personal ephemeral leaderboard view to the user who clicked"""
+        # Create a new view for this user's personal interaction
+        new_view = LeaderboardView(self.bot, guild=self.guild)
+        new_view.current_view = self.current_view
+        new_view.current_sort = self.current_sort
+        new_view.current_page = self.current_page
+        embed = await new_view.build_embed()
+        await interaction.response.send_message(embed=embed, view=new_view, ephemeral=True)
+
     # Row 0: Playlist tabs
     @discord.ui.button(label="Overall", style=discord.ButtonStyle.primary, custom_id="lb_overall", row=0)
     async def view_overall(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.current_view = "Overall"
         self.current_page = 1
-        embed = await self.build_embed()
-        await interaction.response.edit_message(embed=embed, view=self)
+        await self._send_personal_view(interaction)
 
     @discord.ui.button(label="MLG 4v4", style=discord.ButtonStyle.secondary, custom_id="lb_mlg", row=0)
     async def view_mlg(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.current_view = "MLG 4v4"
         self.current_page = 1
-        embed = await self.build_embed()
-        await interaction.response.edit_message(embed=embed, view=self)
+        await self._send_personal_view(interaction)
 
     @discord.ui.button(label="Team Hardcore", style=discord.ButtonStyle.secondary, custom_id="lb_hardcore", row=0)
     async def view_hardcore(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.current_view = "Team Hardcore"
         self.current_page = 1
-        embed = await self.build_embed()
-        await interaction.response.edit_message(embed=embed, view=self)
+        await self._send_personal_view(interaction)
 
     @discord.ui.button(label="Double Team", style=discord.ButtonStyle.secondary, custom_id="lb_doubles", row=0)
     async def view_doubles(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.current_view = "Double Team"
         self.current_page = 1
-        embed = await self.build_embed()
-        await interaction.response.edit_message(embed=embed, view=self)
+        await self._send_personal_view(interaction)
 
     @discord.ui.button(label="Head to Head", style=discord.ButtonStyle.secondary, custom_id="lb_1v1", row=0)
     async def view_1v1(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.current_view = "Head to Head"
         self.current_page = 1
-        embed = await self.build_embed()
-        await interaction.response.edit_message(embed=embed, view=self)
+        await self._send_personal_view(interaction)
 
     # Row 1: Sort options
     @discord.ui.button(label="Level", style=discord.ButtonStyle.primary, custom_id="lb_sort_level", row=1)
     async def sort_level(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.current_sort = "Level"
         self.current_page = 1
-        embed = await self.build_embed()
-        await interaction.response.edit_message(embed=embed, view=self)
+        await self._send_personal_view(interaction)
 
     @discord.ui.button(label="Wins", style=discord.ButtonStyle.secondary, custom_id="lb_sort_wins", row=1)
     async def sort_wins(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.current_sort = "Wins"
         self.current_page = 1
-        embed = await self.build_embed()
-        await interaction.response.edit_message(embed=embed, view=self)
+        await self._send_personal_view(interaction)
 
     @discord.ui.button(label="K/D", style=discord.ButtonStyle.secondary, custom_id="lb_sort_kd", row=1)
     async def sort_kd(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.current_sort = "K/D"
         self.current_page = 1
-        embed = await self.build_embed()
-        await interaction.response.edit_message(embed=embed, view=self)
+        await self._send_personal_view(interaction)
 
     @discord.ui.button(label="◀", style=discord.ButtonStyle.secondary, custom_id="lb_prev", row=1)
     async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.current_page = max(1, self.current_page - 1)
-        embed = await self.build_embed()
-        await interaction.response.edit_message(embed=embed, view=self)
+        await self._send_personal_view(interaction)
 
     @discord.ui.button(label="▶", style=discord.ButtonStyle.secondary, custom_id="lb_next", row=1)
     async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.current_page = min(self.total_pages, self.current_page + 1)
-        embed = await self.build_embed()
-        await interaction.response.edit_message(embed=embed, view=self)
+        await self._send_personal_view(interaction)
 
 # Export functions for use in main bot
 __all__ = [
