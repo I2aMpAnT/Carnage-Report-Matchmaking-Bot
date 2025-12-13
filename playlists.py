@@ -1137,8 +1137,8 @@ class PlaylistMatchView(View):
             await show_playlist_match_embed(interaction.channel, self.match)
 
 
-async def end_playlist_match(channel: discord.TextChannel, match: PlaylistMatch):
-    """End a playlist match"""
+async def end_playlist_match(channel: discord.TextChannel, match: PlaylistMatch, admin_ended: bool = False):
+    """End a playlist match (can be called from vote or admin command)"""
     ps = match.playlist_state
     guild = channel.guild
 

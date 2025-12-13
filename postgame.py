@@ -380,11 +380,23 @@ def log_individual_game(series, game_number: int, winner: str):
         except Exception as e:
             log_action(f"Failed to push game to GitHub: {e}")
 
-async def end_series(series_view, channel: discord.TextChannel):
-    """End series - closes the stats matching window and posts results embed"""
+async def end_series(series_view_or_channel, channel: discord.TextChannel = None, series=None, admin_ended=False):
+    """End series - closes the stats matching window and posts results embed
+
+    Can be called two ways:
+    1. end_series(series_view, channel) - from vote button
+    2. end_series(channel, series=series, admin_ended=True) - from admin command
+    """
     from datetime import datetime
 
-    series = series_view.series
+    # Handle both call signatures
+    if series is not None:
+        # Called with series directly (admin command)
+        if channel is None:
+            channel = series_view_or_channel
+    else:
+        # Called with series_view (vote button)
+        series = series_view_or_channel.series
 
     # Record end time for stats matching window
     series.end_time = datetime.now()
