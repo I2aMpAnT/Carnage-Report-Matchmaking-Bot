@@ -7,14 +7,17 @@ MODULE_VERSION = "1.1.0"
 
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 STATE_FILE = 'matchmakingstate.json'
 
+# EST timezone
+EST = timezone(timedelta(hours=-5))
+
 def log_state(message: str):
-    """Log state manager actions"""
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    """Log state manager actions (EST timezone)"""
+    timestamp = datetime.now(EST).strftime('%Y-%m-%d %H:%M:%S EST')
     print(f"[STATE] [{timestamp}] {message}")
 
 def save_state():

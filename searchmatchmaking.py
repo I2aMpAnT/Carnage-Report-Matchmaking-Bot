@@ -65,8 +65,10 @@ INACTIVITY_CHECK_MINUTES = 60  # Time before prompting user (1 hour)
 INACTIVITY_RESPONSE_MINUTES = 5  # Time user has to respond
 
 def log_action(message: str):
-    """Log actions to log.txt"""
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    """Log actions to log.txt (EST timezone)"""
+    from datetime import timezone, timedelta
+    EST = timezone(timedelta(hours=-5))
+    timestamp = datetime.now(EST).strftime('%Y-%m-%d %H:%M:%S EST')
     with open('log.txt', 'a') as f:
         f.write(f"[{timestamp}] {message}\n")
     print(f"[LOG] {message}")
