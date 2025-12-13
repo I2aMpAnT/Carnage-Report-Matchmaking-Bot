@@ -616,20 +616,27 @@ class QueueView(View):
             except:
                 pass
 
-        # Create single embed with header as author icon
+        # Create two embeds with same URL (Discord renders them closer together)
         current_count = len(queue_state.queue)
         needed = MAX_QUEUE_SIZE - current_count
 
-        embed = discord.Embed(
+        # Shared URL makes Discord render embeds with minimal gap
+        shared_url = "https://carnagereport.com"
+
+        # First embed: header image
+        header_embed = discord.Embed(url=shared_url, color=discord.Color.green())
+        header_embed.set_image(url=HEADER_IMAGE_URL)
+
+        # Second embed: content with progress image
+        content_embed = discord.Embed(
             title="MLG 4v4 - Players Needed!",
+            url=shared_url,  # Same URL = minimal gap
             description=f"We have **{current_count}/{MAX_QUEUE_SIZE}** players searching.\nNeed **{needed}** more to start!",
             color=discord.Color.green()
         )
-        # Use header as thumbnail to avoid gap from multiple embeds
-        embed.set_thumbnail(url=HEADER_IMAGE_URL)
         progress_image = get_queue_progress_image(current_count)
         if progress_image:
-            embed.set_image(url=progress_image)
+            content_embed.set_image(url=progress_image)
 
         # Create view with join button
         view = PingJoinView()
@@ -642,8 +649,8 @@ class QueueView(View):
         except:
             pass
 
-        # Send single embed (no gap)
-        queue_state.ping_message = await general_channel.send(embed=embed, view=view)
+        # Send both embeds with shared URL (minimal gap)
+        queue_state.ping_message = await general_channel.send(embeds=[header_embed, content_embed], view=view)
 
         log_action(f"{interaction.user.display_name} pinged general chat for queue ({current_count}/{MAX_QUEUE_SIZE})")
 
@@ -808,16 +815,18 @@ async def update_ping_message(guild: discord.Guild):
             pass
         return
     
-    # Update with both embeds - header and progress
+    # Update with both embeds - shared URL for minimal gap
     needed = MAX_QUEUE_SIZE - current_count
+    shared_url = "https://carnagereport.com"
 
-    # First embed: header image (full width)
-    header_embed = discord.Embed(color=discord.Color.green())
+    # First embed: header image
+    header_embed = discord.Embed(url=shared_url, color=discord.Color.green())
     header_embed.set_image(url=HEADER_IMAGE_URL)
 
-    # Second embed: content with progress image (full width)
+    # Second embed: content with progress image
     content_embed = discord.Embed(
         title="MLG 4v4 - Players Needed!",
+        url=shared_url,  # Same URL = minimal gap
         description=f"We have **{current_count}/{MAX_QUEUE_SIZE}** players searching.\nNeed **{needed}** more to start!",
         color=discord.Color.green()
     )
