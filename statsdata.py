@@ -1,7 +1,7 @@
 # statsdata.py - Game Data Management and Historical Series Processing
 # Handles reading game data, grouping into series, and generating embeds
 
-MODULE_VERSION = "1.0.0"
+MODULE_VERSION = "1.1.0"
 
 import discord
 import json
@@ -12,6 +12,7 @@ from typing import List, Dict, Optional, Tuple
 # File paths for different playlists
 WEBSITE_DATA_PATH = "/home/carnagereport/CarnageReport.com"
 MLG_4V4_HISTORY = "matchhistory.json"  # Local bot file for MLG 4v4
+POSTED_SERIES_FILE = "posted_series.json"  # Track which series have been posted
 
 def log_action(message: str):
     """Log actions"""
@@ -42,6 +43,49 @@ def load_historical_data(playlist: str) -> dict:
     except Exception as e:
         log_action(f"[STATSDATA] Failed to load {data_file}: {e}")
         return {}
+
+
+def load_posted_series() -> dict:
+    """Load the set of series that have already been posted to Discord"""
+    if not os.path.exists(POSTED_SERIES_FILE):
+        return {}
+    try:
+        with open(POSTED_SERIES_FILE, 'r') as f:
+            return json.load(f)
+    except:
+        return {}
+
+
+def save_posted_series(posted: dict):
+    """Save the set of posted series"""
+    try:
+        with open(POSTED_SERIES_FILE, 'w') as f:
+            json.dump(posted, f, indent=2)
+    except Exception as e:
+        log_action(f"[STATSDATA] Failed to save posted series: {e}")
+
+
+def mark_series_posted(playlist: str, series_label: str):
+    """Mark a series as posted to avoid duplicates"""
+    posted = load_posted_series()
+    if playlist not in posted:
+        posted[playlist] = []
+    if series_label not in posted[playlist]:
+        posted[playlist].append(series_label)
+        save_posted_series(posted)
+
+
+def is_series_posted(playlist: str, series_label: str) -> bool:
+    """Check if a series has already been posted"""
+    posted = load_posted_series()
+    return series_label in posted.get(playlist, [])
+
+
+def get_unposted_series(playlist: str, all_series: List[dict]) -> List[dict]:
+    """Filter to only series that haven't been posted yet"""
+    posted = load_posted_series()
+    posted_labels = posted.get(playlist, [])
+    return [s for s in all_series if s.get("series_label") not in posted_labels]
 
 
 def group_games_into_series(games: List[dict]) -> List[dict]:

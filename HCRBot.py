@@ -391,6 +391,60 @@ async def on_message(message: discord.Message):
                 except Exception as embed_error:
                     print(f"[RANKS] Could not update series embeds: {embed_error}")
 
+                # Post NEW game data to playlist channels (only unposted series)
+                try:
+                    import statsdata
+                    from playlists import PLAYLIST_CONFIG, PlaylistType
+
+                    playlists = [
+                        ("mlg_4v4", PlaylistType.MLG_4V4),
+                        ("team_hardcore", PlaylistType.TEAM_HARDCORE),
+                        ("double_team", PlaylistType.DOUBLE_TEAM),
+                        ("head_to_head", PlaylistType.HEAD_TO_HEAD),
+                    ]
+
+                    total_posted = 0
+                    for playlist_key, playlist_type in playlists:
+                        if playlist_type not in PLAYLIST_CONFIG:
+                            continue
+
+                        target_channel_id = PLAYLIST_CONFIG[playlist_type]["channel_id"]
+                        target_channel = message.guild.get_channel(target_channel_id)
+
+                        if not target_channel:
+                            continue
+
+                        # Get all series and filter to only unposted ones
+                        all_series = statsdata.get_all_series(playlist_key)
+                        unposted = statsdata.get_unposted_series(playlist_key, all_series)
+
+                        if not unposted:
+                            continue
+
+                        print(f"[RANKS] Found {len(unposted)} new series for {playlist_key}")
+
+                        # Generate embeds only for unposted series
+                        for series in unposted:
+                            embed = await statsdata.build_series_embed(
+                                series=series,
+                                guild=message.guild,
+                                playlist=playlist_key,
+                                red_emoji_id=RED_TEAM_EMOJI_ID,
+                                blue_emoji_id=BLUE_TEAM_EMOJI_ID
+                            )
+                            if embed:
+                                try:
+                                    await target_channel.send(embed=embed)
+                                    statsdata.mark_series_posted(playlist_key, series.get("series_label"))
+                                    total_posted += 1
+                                except Exception as e:
+                                    print(f"[RANKS] Failed to post series: {e}")
+
+                    if total_posted > 0:
+                        print(f"[RANKS] Posted {total_posted} new series embeds")
+                except Exception as backfill_error:
+                    print(f"[RANKS] Backfill error: {backfill_error}")
+
                 # Delete the trigger message
                 await message.delete()
             except Exception as e:
