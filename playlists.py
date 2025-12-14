@@ -1204,7 +1204,7 @@ class PlaylistQueueView(View):
         self.ping_btn.custom_id = f"ping_{playlist_state.playlist_type}"
 
         # Remove ping button for tournament playlist
-        if playlist_state.playlist_type == PlaylistType.TOURNAMENT:
+        if playlist_state.playlist_type == PlaylistType.TOURNAMENT_1:
             self.remove_item(self.ping_btn)
 
     @discord.ui.button(label="Join Queue", style=discord.ButtonStyle.success)
