@@ -182,12 +182,20 @@ async def on_ready():
     except Exception as e:
         print(f'⚠️ Stats Dedi module not loaded: {e}')
 
-    # Sync slash commands
+    # Sync slash commands - guild-specific for instant updates
     try:
-        synced = await bot.tree.sync()
-        print(f'✅ Synced {len(synced)} slash commands')
+        # Get the main guild for instant sync
+        guild = bot.guilds[0] if bot.guilds else None
+        if guild:
+            synced = await bot.tree.sync(guild=guild)
+            print(f'✅ Synced {len(synced)} slash commands to guild {guild.name}')
+        else:
+            synced = await bot.tree.sync()
+            print(f'✅ Synced {len(synced)} slash commands globally')
     except Exception as e:
         print(f'❌ Failed to sync commands: {e}')
+        import traceback
+        traceback.print_exc()
     
     # Initialize queue embed (MLG 4v4)
     channel = bot.get_channel(QUEUE_CHANNEL_ID)
