@@ -360,13 +360,6 @@ async def on_message(message: discord.Message):
             return
         if message.content == "!refresh_ranks_trigger":
             print("[RANKS] Received rank refresh trigger from webhook")
-            # Delete trigger message immediately
-            try:
-                await message.delete()
-                print("[RANKS] Trigger message deleted")
-            except Exception as del_err:
-                print(f"[RANKS] Could not delete trigger message: {del_err}")
-
             try:
                 import STATSRANKS
                 # Get all players from ranks.json (website source of truth)
@@ -452,6 +445,9 @@ async def on_message(message: discord.Message):
                 except Exception as backfill_error:
                     print(f"[RANKS] Backfill error: {backfill_error}")
 
+                # Delete trigger message only on success
+                await message.delete()
+                print("[RANKS] Webhook completed successfully")
             except Exception as e:
                 print(f"[RANKS] Error during rank refresh: {e}")
                 import traceback
