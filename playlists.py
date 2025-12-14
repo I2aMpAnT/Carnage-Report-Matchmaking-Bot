@@ -106,22 +106,25 @@ PLAYLIST_CONFIG = {
     },
 }
 
+# Base path for website data files
+WEBSITE_DATA_PATH = "/home/carnagereport/CarnageReport.com"
+
 # Match history files - each playlist gets {playlist}_matches.json
 PLAYLIST_MATCHES_FILES = {
-    "mlg_4v4": "mlg_4v4_matches.json",
-    "team_hardcore": "team_hardcore_matches.json",
-    "double_team": "double_team_matches.json",
-    "head_to_head": "head_to_head_matches.json",
-    "tournament": "tournament_matches.json",
+    "mlg_4v4": f"{WEBSITE_DATA_PATH}/mlg_4v4_matches.json",
+    "team_hardcore": f"{WEBSITE_DATA_PATH}/team_hardcore_matches.json",
+    "double_team": f"{WEBSITE_DATA_PATH}/double_team_matches.json",
+    "head_to_head": f"{WEBSITE_DATA_PATH}/head_to_head_matches.json",
+    "tournament": f"{WEBSITE_DATA_PATH}/tournament_matches.json",
 }
 
 # Stats files - each playlist gets {playlist}_stats.json (written by popstats.py or manual matches)
 PLAYLIST_STATS_FILES = {
-    "mlg_4v4": "mlg_4v4_stats.json",
-    "team_hardcore": "team_hardcore_stats.json",
-    "double_team": "double_team_stats.json",
-    "head_to_head": "head_to_head_stats.json",
-    "tournament": "tournament_stats.json",
+    "mlg_4v4": f"{WEBSITE_DATA_PATH}/mlg_4v4_stats.json",
+    "team_hardcore": f"{WEBSITE_DATA_PATH}/team_hardcore_stats.json",
+    "double_team": f"{WEBSITE_DATA_PATH}/double_team_stats.json",
+    "head_to_head": f"{WEBSITE_DATA_PATH}/head_to_head_stats.json",
+    "tournament": f"{WEBSITE_DATA_PATH}/tournament_stats.json",
 }
 
 # Gametype simplification mapping (MLG variant -> simple name)

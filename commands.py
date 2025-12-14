@@ -2928,32 +2928,38 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
 
         try:
             import playlists
-            from playlists import PLAYLIST_HISTORY_FILES, get_playlist_state, show_playlist_match_embed
+            import json
+            from playlists import PLAYLIST_MATCHES_FILES, get_playlist_state, show_playlist_match_embed
         except ImportError as e:
             await interaction.followup.send(f"❌ Import error: {e}", ephemeral=True)
             return
 
         results = []
-        playlists_to_sync = PLAYLIST_HISTORY_FILES.keys() if playlist == "all" else [playlist]
+        playlists_to_sync = PLAYLIST_MATCHES_FILES.keys() if playlist == "all" else [playlist]
 
         for ptype in playlists_to_sync:
-            history_file = PLAYLIST_HISTORY_FILES.get(ptype)
+            history_file = PLAYLIST_MATCHES_FILES.get(ptype)
             if not history_file:
                 continue
 
-            # Pull from GitHub
+            # Read from local file
             try:
-                github_data = await github_webhook.async_pull_file_from_github(history_file)
+                import os
+                if not os.path.exists(history_file):
+                    results.append(f"⚠️ {ptype}: Local file not found")
+                    continue
+                with open(history_file, 'r') as f:
+                    local_data = json.load(f)
             except Exception as e:
-                results.append(f"❌ {ptype}: Failed to pull from GitHub - {e}")
+                results.append(f"❌ {ptype}: Failed to read local file - {e}")
                 continue
 
-            if not github_data:
-                results.append(f"⚠️ {ptype}: No data on GitHub")
+            if not local_data:
+                results.append(f"⚠️ {ptype}: No data in local file")
                 continue
 
-            # Get active matches from website data
-            website_active = github_data.get("active_matches", [])
+            # Get active matches from local data
+            website_active = local_data.get("active_matches", [])
 
             if not website_active:
                 results.append(f"✓ {ptype}: No active matches on website")
