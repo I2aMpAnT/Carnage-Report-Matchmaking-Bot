@@ -2,7 +2,7 @@
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 # Supports ALL playlists: MLG 4v4 (voting), Team Hardcore/Double Team (auto-balance), Head to Head (1v1)
 
-MODULE_VERSION = "1.6.2"
+MODULE_VERSION = "1.6.3"
 
 import discord
 from discord.ui import View, Button, Select
@@ -503,7 +503,9 @@ async def handle_pregame_timeout(
     except:
         pass
 
-    await channel.send(embed=embed)
+    # Ping all players so they get notified
+    all_player_pings = " ".join([f"<@{uid}>" for uid in players])
+    await channel.send(content=all_player_pings, embed=embed)
     log_action(f"{match_label} cancelled due to no-shows: {[guild.get_member(uid).display_name if guild.get_member(uid) else str(uid) for uid in no_show_players]}")
 
     # Reset queue state
