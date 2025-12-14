@@ -918,7 +918,6 @@ def create_series_embed(series_data: dict, red_emoji_id: int = None, blue_emoji_
     if games:
         games_text = ""
         for game in games:
-            game_num = game.get("game_number", "?")
             winner = game.get("winner", "")
             map_name = game.get("map", "Unknown")
             gametype = game.get("gametype", "")
@@ -926,20 +925,22 @@ def create_series_embed(series_data: dict, red_emoji_id: int = None, blue_emoji_
 
             if winner == "TEAM1":
                 team_emoji = red_emoji
-                team_text = "Red"
+                team_color = "Red"
             else:
                 team_emoji = blue_emoji
-                team_text = "Blue"
+                team_color = "Blue"
 
-            game_line = f"{team_emoji} **{team_text}** - {map_name}"
-            if gametype:
-                game_line += f" ({gametype})"
-            if score:
-                game_line += f" [{score}]"
+            # Format: {emoji} **{Color} Team** won {gametype} on {map} - {score}
+            if gametype and score:
+                game_line = f"{team_emoji} **{team_color} Team** won {gametype} on {map_name} - {score}"
+            elif gametype:
+                game_line = f"{team_emoji} **{team_color} Team** won {gametype} on {map_name}"
+            else:
+                game_line = f"{team_emoji} **{team_color} Team** won on {map_name}"
             games_text += game_line + "\n"
 
         embed.add_field(
-            name="Games",
+            name="Game Results",
             value=games_text.strip(),
             inline=False
         )
