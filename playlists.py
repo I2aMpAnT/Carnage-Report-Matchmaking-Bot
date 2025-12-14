@@ -702,6 +702,34 @@ def is_file_newer_than_last(playlist_type: str, filename: str) -> bool:
     return filename > last
 
 
+def determine_winner_from_players(winning_player_ids: List[int], team1_ids: List[int], team2_ids: List[int]) -> str:
+    """
+    Determine which team won based on winning player IDs.
+
+    Args:
+        winning_player_ids: List of player IDs who won the game
+        team1_ids: Player IDs for team 1
+        team2_ids: Player IDs for team 2
+
+    Returns:
+        "TEAM1", "TEAM2", or "UNKNOWN" if can't determine
+    """
+    winning_set = set(winning_player_ids)
+    team1_set = set(team1_ids)
+    team2_set = set(team2_ids)
+
+    # Check overlap with each team
+    team1_winners = winning_set & team1_set
+    team2_winners = winning_set & team2_set
+
+    if len(team1_winners) > len(team2_winners):
+        return "TEAM1"
+    elif len(team2_winners) > len(team1_winners):
+        return "TEAM2"
+    else:
+        return "UNKNOWN"
+
+
 def group_historical_games_into_series(games: List[dict]) -> List[List[dict]]:
     """
     Group historical games into series based on player sets.
@@ -2234,6 +2262,7 @@ __all__ = [
     'get_last_processed',
     'set_last_processed',
     'is_file_newer_than_last',
+    'determine_winner_from_players',
     'group_historical_games_into_series',
     'backfill_historical_series',
     'update_active_match_in_history',
