@@ -516,22 +516,19 @@ def save_match_to_history(match: PlaylistMatch, result: str, guild=None):
     }
 
     if result == "STARTED":
-        # Add to active_matches (temporary number for display)
+        # Add to active_matches (bot tracking only)
         history["active_matches"].append(match_data)
         log_action(f"Added {match.get_match_label()} to active_matches in {matches_file}")
     else:
-        # Remove from active_matches if present
+        # Remove from active_matches when match ends (complete or cancel)
+        # NOTE: We don't write to 'matches' array - that's populated by the stat parser
+        original_count = len(history["active_matches"])
         history["active_matches"] = [
             m for m in history["active_matches"]
             if m.get("match_number") != match.match_number
         ]
-        # Assign permanent number based on completed count (no gaps)
-        permanent_number = len(history["matches"]) + 1
-        match_data["match_number"] = permanent_number
-        # Add to completed matches
-        history["matches"].append(match_data)
-        history["total_matches"] = len(history["matches"])
-        log_action(f"Completed {match.playlist_state.name} #{permanent_number} in {matches_file}")
+        if len(history["active_matches"]) < original_count:
+            log_action(f"Removed {match.get_match_label()} from active_matches ({result})")
 
     with open(matches_file, 'w') as f:
         json.dump(history, f, indent=2)
