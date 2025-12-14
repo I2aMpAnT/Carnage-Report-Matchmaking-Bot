@@ -58,9 +58,10 @@ def get_default_playlists() -> dict:
         for ptype in PLAYLIST_TYPES
     }
 
-# File paths
+# File paths - LOCAL files are source of truth
 GAMESTATS_FILE = "gamestats.json"
 RANKS_FILE = "/home/carnagereport/CarnageReport.com/ranks.json"  # Website source of truth (discord_id -> rank data)
+EMBLEMS_FILE = "/home/carnagereport/CarnageReport.com/emblems.json"  # Player emblem data
 XP_CONFIG_FILE = "xp_config.json"
 MMR_FILE = "MMR.json"  # Contains MMR values for team balancing (simple format for easy editing)
 
@@ -147,21 +148,51 @@ def get_all_players_from_ranks_file() -> dict:
 
 
 async def async_load_ranks_from_github() -> dict:
-    """Load ranks.json from GitHub (website source of truth)
+    """Load ranks.json from local file (website source of truth)
 
-    Falls back to local file if GitHub pull fails.
+    Uses local file directly instead of GitHub for up-to-date data.
     """
+    # Always use local file - it's the source of truth
+    local_ranks = load_json_file(RANKS_FILE)
+    if local_ranks:
+        print(f"[RANKS] Loaded {len(local_ranks)} players from local ranks.json")
+        return local_ranks
+
+    # Fallback to GitHub if local file doesn't exist
     if GITHUB_AVAILABLE and async_pull_ranks_from_github:
         try:
             ranks = await async_pull_ranks_from_github()
             if ranks:
-                print(f"[RANKS] Loaded {len(ranks)} players from GitHub ranks.json")
+                print(f"[RANKS] Local file not found, loaded {len(ranks)} players from GitHub")
                 return ranks
         except Exception as e:
-            print(f"[RANKS] GitHub pull failed, using local: {e}")
+            print(f"[RANKS] GitHub pull also failed: {e}")
 
-    # Fallback to local file
-    return load_json_file(RANKS_FILE)
+    return {}
+
+
+async def async_load_emblems() -> dict:
+    """Load emblems.json from local file (website source of truth)
+
+    Uses local file directly instead of GitHub for up-to-date data.
+    """
+    # Always use local file - it's the source of truth
+    local_emblems = load_json_file(EMBLEMS_FILE)
+    if local_emblems:
+        print(f"[EMBLEMS] Loaded {len(local_emblems)} player emblems from local emblems.json")
+        return local_emblems
+
+    # Fallback to GitHub if local file doesn't exist
+    if GITHUB_AVAILABLE and async_pull_emblems_from_github:
+        try:
+            emblems = await async_pull_emblems_from_github()
+            if emblems:
+                print(f"[EMBLEMS] Local file not found, loaded {len(emblems)} emblems from GitHub")
+                return emblems
+        except Exception as e:
+            print(f"[EMBLEMS] GitHub pull also failed: {e}")
+
+    return {}
 
 
 def save_json_file(filepath: str, data: dict, skip_github: bool = False):
@@ -641,10 +672,10 @@ async def record_manual_match(red_team: List[int], blue_team: List[int], games: 
     print(f"✅ Manual match {match_label} logged: {series_winner} wins ({red_game_wins}-{blue_game_wins}) - stats via populate_stats.py")
 
 async def refresh_all_ranks(guild: discord.Guild, player_ids: List[int], send_dm: bool = True):
-    """Refresh rank roles for all players - reads from ranks.json (website source of truth)"""
+    """Refresh rank roles for all players - reads from local ranks.json"""
     from searchmatchmaking import queue_state
 
-    # Load ranks.json from GitHub (website source of truth)
+    # Load ranks.json from local file (source of truth)
     ranks = await async_load_ranks_from_github()
 
     for user_id in player_ids:
@@ -653,18 +684,18 @@ async def refresh_all_ranks(guild: discord.Guild, player_ids: List[int], send_dm
 
         user_key = str(user_id)
 
-        # Get highest_rank from ranks.json, default to 1
+        # Get current rank from ranks.json, default to 1
         if user_key in ranks:
-            highest = ranks[user_key].get("highest_rank", 1)
+            current_rank = ranks[user_key].get("rank", 1)
         else:
-            highest = 1
+            current_rank = 1
 
-        await update_player_rank_role(guild, user_id, highest, send_dm=send_dm)
+        await update_player_rank_role(guild, user_id, current_rank, send_dm=send_dm)
 
 
 async def refresh_playlist_ranks(guild: discord.Guild, player_ids: List[int], playlist_type: str, send_dm: bool = True):
-    """Refresh rank roles for players after a playlist match - reads from ranks.json"""
-    # Load ranks.json from GitHub (website source of truth)
+    """Refresh rank roles for players after a playlist match - reads from local ranks.json"""
+    # Load ranks.json from local file (source of truth)
     ranks = await async_load_ranks_from_github()
 
     # Get playlist name for DM
@@ -679,13 +710,13 @@ async def refresh_playlist_ranks(guild: discord.Guild, player_ids: List[int], pl
     for user_id in player_ids:
         user_key = str(user_id)
 
-        # Get highest_rank from ranks.json, default to 1
+        # Get current rank from ranks.json, default to 1
         if user_key in ranks:
-            highest = ranks[user_key].get("highest_rank", 1)
+            current_rank = ranks[user_key].get("rank", 1)
         else:
-            highest = 1
+            current_rank = 1
 
-        await update_player_rank_role(guild, user_id, highest, send_dm=send_dm, playlist_name=playlist_name)
+        await update_player_rank_role(guild, user_id, current_rank, send_dm=send_dm, playlist_name=playlist_name)
 
 def get_all_players_sorted(sort_by: str = "rank") -> List[Tuple[str, dict]]:
     """Get all players sorted by specified criteria - reads from local ranks.json"""
@@ -1072,9 +1103,11 @@ __all__ = [
     'load_json_file',
     'save_json_file',
     'async_load_ranks_from_github',
+    'async_load_emblems',
     'get_rank_icon_url',
     'get_emblem_png_url',
     'RANKS_FILE',
+    'EMBLEMS_FILE',
     'MMR_FILE',
     'PLAYLIST_TYPES',
     'MAP_GAMETYPES',

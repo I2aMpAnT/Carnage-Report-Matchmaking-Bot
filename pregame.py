@@ -8,6 +8,7 @@ import discord
 from discord.ui import View, Button, Select
 from typing import List, Optional, TYPE_CHECKING
 import random
+import json
 
 if TYPE_CHECKING:
     from playlists import PlaylistQueueState, PlaylistMatch
@@ -73,9 +74,19 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
         max_players = ps.max_players
         playlist_name = ps.name
 
-        # Get match label
-        ps.match_counter += 1
-        match_number = ps.match_counter
+        # Get projected match number based on completed matches in completed file
+        from playlists import get_playlist_completed_file
+        import os
+        completed_file = get_playlist_completed_file(ps.playlist_type)
+        completed_count = 0
+        if os.path.exists(completed_file):
+            try:
+                with open(completed_file, 'r') as f:
+                    completed_data = json.load(f)
+                completed_count = len(completed_data.get("matches", []))
+            except:
+                pass
+        match_number = completed_count + 1
         match_label = f"{playlist_name} #{match_number}"
 
         log_action(f"Starting {playlist_name} pregame phase with {len(players)} players")
@@ -1837,10 +1848,9 @@ async def proceed_with_playlist_teams(
         team1, team2 = await balance_teams_by_mmr(players, ps.team_size)
         log_action(f"{match_label}: Fallback to auto-balanced teams")
 
-    # Create match object (decrement counter since we already incremented it)
-    ps.match_counter -= 1  # Will be incremented back in __init__
+    # Create match object
     match = PlaylistMatch(ps, players, team1, team2)
-    match.match_number = match_number  # Ensure match number is correct
+    match.match_number = match_number  # Use projected number from pregame start
     match.map_name = map_name
     match.gametype = gametype
     ps.current_match = match
@@ -1933,10 +1943,15 @@ async def cancel_playlist_match(
     match_label: str
 ):
     """Cancel a playlist match due to timeout or other reasons"""
-    from playlists import update_playlist_embed
+    from playlists import update_playlist_embed, remove_match_from_active
 
     guild = channel.guild
     ps = playlist_state
+
+    # Remove from active_matches BEFORE clearing current_match
+    # The match number is temporary until completion - just remove the entry
+    if ps.current_match:
+        remove_match_from_active(ps.current_match)
 
     # Delete pregame VC
     if pregame_vc_id:
@@ -2191,9 +2206,8 @@ class PlaylistPlayersPickView(View):
         text_category = guild.get_channel(text_category_id)
 
         # Create match object
-        ps.match_counter -= 1  # Will be incremented back in __init__
         match = PlaylistMatch(ps, self.players, self.red_team, self.blue_team)
-        match.match_number = self.match_number
+        match.match_number = self.match_number  # Use projected number from pregame start
         ps.current_match = match
 
         # Find highest MMR player on each team (captain)

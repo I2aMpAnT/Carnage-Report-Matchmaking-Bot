@@ -48,7 +48,7 @@ class PlaylistType:
     TEAM_HARDCORE = "team_hardcore"  # 4v4 auto-balanced, hidden queue
     DOUBLE_TEAM = "double_team"      # 2v2 auto-balanced, hidden queue
     HEAD_TO_HEAD = "head_to_head"    # 1v1 hidden queue
-    TOURNAMENT = "tournament"        # 4v4 players pick only (pre-set teams)
+    TOURNAMENT_1 = "tournament_1"    # 4v4 players pick only (pre-set teams)
 
 
 # Playlist configuration
@@ -93,8 +93,8 @@ PLAYLIST_CONFIG = {
         "show_map_gametype": True,  # Random 1v1 map
         "description": "1v1 matchmaking",
     },
-    PlaylistType.TOURNAMENT: {
-        "name": "Tournament Matches",
+    PlaylistType.TOURNAMENT_1: {
+        "name": "Tournament 1",
         "channel_id": 1449414157605671124,
         "max_players": 8,
         "team_size": 4,
@@ -106,22 +106,34 @@ PLAYLIST_CONFIG = {
     },
 }
 
+# Base path for website data files
+WEBSITE_DATA_PATH = "/home/carnagereport/CarnageReport.com"
+
 # Match history files - each playlist gets {playlist}_matches.json
 PLAYLIST_MATCHES_FILES = {
-    "mlg_4v4": "mlg_4v4_matches.json",
-    "team_hardcore": "team_hardcore_matches.json",
-    "double_team": "double_team_matches.json",
-    "head_to_head": "head_to_head_matches.json",
-    "tournament": "tournament_matches.json",
+    "mlg_4v4": f"{WEBSITE_DATA_PATH}/mlg_4v4_matches.json",
+    "team_hardcore": f"{WEBSITE_DATA_PATH}/team_hardcore_matches.json",
+    "double_team": f"{WEBSITE_DATA_PATH}/double_team_matches.json",
+    "head_to_head": f"{WEBSITE_DATA_PATH}/head_to_head_matches.json",
+    "tournament_1": f"{WEBSITE_DATA_PATH}/tournament_1_matches.json",
 }
 
 # Stats files - each playlist gets {playlist}_stats.json (written by popstats.py or manual matches)
 PLAYLIST_STATS_FILES = {
-    "mlg_4v4": "mlg_4v4_stats.json",
-    "team_hardcore": "team_hardcore_stats.json",
-    "double_team": "double_team_stats.json",
-    "head_to_head": "head_to_head_stats.json",
-    "tournament": "tournament_stats.json",
+    "mlg_4v4": f"{WEBSITE_DATA_PATH}/mlg_4v4_stats.json",
+    "team_hardcore": f"{WEBSITE_DATA_PATH}/team_hardcore_stats.json",
+    "double_team": f"{WEBSITE_DATA_PATH}/double_team_stats.json",
+    "head_to_head": f"{WEBSITE_DATA_PATH}/head_to_head_stats.json",
+    "tournament_1": f"{WEBSITE_DATA_PATH}/tournament_1_stats.json",
+}
+
+# Completed matches files - bot writes completed matches here (for /backfill command)
+PLAYLIST_COMPLETED_FILES = {
+    "mlg_4v4": f"{WEBSITE_DATA_PATH}/mlg_4v4_completed.json",
+    "team_hardcore": f"{WEBSITE_DATA_PATH}/team_hardcore_completed.json",
+    "double_team": f"{WEBSITE_DATA_PATH}/double_team_completed.json",
+    "head_to_head": f"{WEBSITE_DATA_PATH}/head_to_head_completed.json",
+    "tournament_1": f"{WEBSITE_DATA_PATH}/tournament_1_completed.json",
 }
 
 # Gametype simplification mapping (MLG variant -> simple name)
@@ -145,6 +157,10 @@ def get_playlist_matches_file(playlist_type: str) -> str:
 def get_playlist_stats_file(playlist_type: str) -> str:
     """Get the stats file path for a playlist (e.g., mlg_4v4_stats.json)"""
     return PLAYLIST_STATS_FILES.get(playlist_type, f"{playlist_type}_stats.json")
+
+def get_playlist_completed_file(playlist_type: str) -> str:
+    """Get the completed matches file path for a playlist (e.g., mlg_4v4_completed.json)"""
+    return PLAYLIST_COMPLETED_FILES.get(playlist_type, f"{playlist_type}_completed.json")
 
 
 def log_action(message: str):
@@ -205,8 +221,18 @@ class PlaylistMatch:
         self.team1 = team1 or []  # "Red" team or Player 1
         self.team2 = team2 or []  # "Blue" team or Player 2
 
-        playlist_state.match_counter += 1
-        self.match_number = playlist_state.match_counter
+        # Get projected match number based on completed matches in completed file
+        # This is what the match WILL be if backfill processes it
+        completed_file = get_playlist_completed_file(playlist_state.playlist_type)
+        completed_count = 0
+        if os.path.exists(completed_file):
+            try:
+                with open(completed_file, 'r') as f:
+                    completed_data = json.load(f)
+                completed_count = len(completed_data.get("matches", []))
+            except:
+                pass
+        self.match_number = completed_count + 1
 
         self.games: List[str] = []  # 'TEAM1' or 'TEAM2' - populated from parsed stats
         self.game_stats: Dict[int, dict] = {}  # game_number -> {"map": str, "gametype": str, "parsed_stats": dict}
@@ -251,16 +277,11 @@ class PlaylistMatch:
         team2 = match_data.get("team2", {}).get("player_ids", [])
         players = team1 + team2
 
-        # Create match but don't increment counter (we'll set it manually)
-        playlist_state.match_counter -= 1  # Will be incremented back in __init__
+        # Create match (will get projected number from completed count)
         match = cls(playlist_state, players, team1, team2)
 
-        # Override the match number from JSON
+        # Override the match number from JSON (keep the original display number)
         match.match_number = match_data.get("match_number", match.match_number)
-
-        # Ensure match_counter is at least as high as this match
-        if playlist_state.match_counter < match.match_number:
-            playlist_state.match_counter = match.match_number
 
         # Restore timestamps
         start_time_str = match_data.get("start_time")
@@ -422,29 +443,19 @@ async def get_player_names(guild, player_ids: List[int]) -> Dict[int, str]:
 
 
 def save_match_to_history(match: PlaylistMatch, result: str, guild=None):
-    """Save match to playlist-specific history file
+    """Save match to playlist-specific files
 
-    Structure:
-    - active_matches: Currently in-progress matches
-    - matches: Completed match history with player names, maps, gametypes
-    - total_matches: Count of completed matches
+    Active matches file ({playlist}_matches.json):
+    - active_matches: Array of {match_number, team1_ids, team2_ids, start_time}
 
-    Match entry structure:
-    - match_number: int
-    - playlist: str (e.g., "mlg_4v4")
-    - start_time: ISO format (when series opened)
-    - start_time_display: Human readable start time
-    - end_time: ISO format (when series closed) - null for active matches
-    - end_time_display: Human readable end time - null for active matches
-    - result: "TEAM1_WIN" | "TEAM2_WIN" | "TIE" | "STARTED"
-    - team1/team2: {player_ids: [], player_names: [], color: "Red"/"Blue" or null for 1v1}
-    - games: [{winner: "TEAM1"|"TEAM2", map: str, gametype: str (simplified)}]
+    Completed matches file ({playlist}_completed.json):
+    - matches: Array of completed match data for /backfill command
     """
-    # Get the matches file for this playlist
+    # Get the matches file for this playlist (active matches)
     matches_file = get_playlist_matches_file(match.playlist_type)
 
-    # Load existing history or create new
-    history = {"total_matches": 0, "matches": [], "active_matches": []}
+    # Load existing or create new
+    history = {"active_matches": []}
     if os.path.exists(matches_file):
         try:
             with open(matches_file, 'r') as f:
@@ -452,74 +463,31 @@ def save_match_to_history(match: PlaylistMatch, result: str, guild=None):
                 if "active_matches" not in history:
                     history["active_matches"] = []
         except:
-            history = {"total_matches": 0, "matches": [], "active_matches": []}
-
-    # Get player names from guild if available
-    team1_names = []
-    team2_names = []
-    if guild:
-        for uid in match.team1:
-            member = guild.get_member(uid)
-            team1_names.append(member.display_name if member else f"Unknown")
-        for uid in match.team2:
-            member = guild.get_member(uid)
-            team2_names.append(member.display_name if member else f"Unknown")
-    else:
-        team1_names = [str(uid) for uid in match.team1]
-        team2_names = [str(uid) for uid in match.team2]
-
-    # Build games array with simplified gametypes
-    games_data = []
-    for i, winner in enumerate(match.games, 1):
-        stats = match.game_stats.get(i, {})
-        games_data.append({
-            "game_number": i,
-            "winner": winner,
-            "map": stats.get("map", match.map_name or ""),
-            "gametype": simplify_gametype(stats.get("gametype", match.gametype or ""))
-        })
-
-    # Determine team structure based on playlist type
-    is_1v1 = match.playlist_state.playlist_type == PlaylistType.HEAD_TO_HEAD
-
-    match_data = {
-        "match_number": match.match_number,
-        "playlist": match.playlist_type,
-        "playlist_name": match.playlist_state.name,
-        "start_time": match.start_time.isoformat(),
-        "start_time_display": match.start_time.strftime('%Y-%m-%d %H:%M:%S'),
-        "end_time": match.end_time.isoformat() if match.end_time else None,
-        "end_time_display": match.end_time.strftime('%Y-%m-%d %H:%M:%S') if match.end_time else None,
-        "result": result,
-        "team1": {
-            "player_ids": match.team1,
-            "player_names": team1_names,
-            "color": None if is_1v1 else "Red",
-            "games_won": match.games.count('TEAM1')
-        },
-        "team2": {
-            "player_ids": match.team2,
-            "player_names": team2_names,
-            "color": None if is_1v1 else "Blue",
-            "games_won": match.games.count('TEAM2')
-        },
-        "games": games_data,
-    }
+            history = {"active_matches": []}
 
     if result == "STARTED":
-        # Add to active_matches
-        history["active_matches"].append(match_data)
+        # Add entry to active_matches for stat parser matching
+        active_entry = {
+            "match_number": match.match_number,
+            "team1_ids": match.team1,
+            "team2_ids": match.team2,
+            "start_time": match.start_time.isoformat(),
+            "games": []  # Games added by backfill as they're parsed
+        }
+        history["active_matches"].append(active_entry)
         log_action(f"Added {match.get_match_label()} to active_matches in {matches_file}")
     else:
-        # Remove from active_matches if present
+        # Remove from active_matches when match ends
+        original_count = len(history["active_matches"])
         history["active_matches"] = [
             m for m in history["active_matches"]
             if m.get("match_number") != match.match_number
         ]
-        # Add to completed matches
-        history["matches"].append(match_data)
-        history["total_matches"] = len(history["matches"])
-        log_action(f"Completed {match.get_match_label()} in {matches_file}")
+        if len(history["active_matches"]) < original_count:
+            log_action(f"Removed {match.get_match_label()} from active_matches ({result})")
+
+        # NOTE: Completed match data is written by /backfill from parsed stats
+        # Bot only manages active_matches tracking
 
     with open(matches_file, 'w') as f:
         json.dump(history, f, indent=2)
@@ -530,6 +498,619 @@ def save_match_to_history(match: PlaylistMatch, result: str, guild=None):
         github_webhook.push_file_to_github(matches_file, matches_file)
     except Exception as e:
         log_action(f"Failed to sync {matches_file} to GitHub: {e}")
+
+
+def find_active_match_by_players(playlist_type: str, player_ids: List[int]) -> Optional[dict]:
+    """Find an active match entry by player IDs. Returns the match dict or None."""
+    matches_file = get_playlist_matches_file(playlist_type)
+    if not os.path.exists(matches_file):
+        return None
+
+    try:
+        with open(matches_file, 'r') as f:
+            data = json.load(f)
+    except:
+        return None
+
+    game_players = set(player_ids)
+    for active in data.get("active_matches", []):
+        active_players = set(active.get("team1_ids", []) + active.get("team2_ids", []))
+        if game_players == active_players:
+            return active
+
+    return None
+
+
+def add_game_to_active_match(playlist_type: str, player_ids: List[int], game_data: dict) -> bool:
+    """Add a game to an active match. Returns True if successful."""
+    matches_file = get_playlist_matches_file(playlist_type)
+    if not os.path.exists(matches_file):
+        return False
+
+    try:
+        with open(matches_file, 'r') as f:
+            data = json.load(f)
+    except:
+        return False
+
+    game_players = set(player_ids)
+    for active in data.get("active_matches", []):
+        active_players = set(active.get("team1_ids", []) + active.get("team2_ids", []))
+        if game_players == active_players:
+            if "games" not in active:
+                active["games"] = []
+            active["games"].append(game_data)
+
+            with open(matches_file, 'w') as f:
+                json.dump(data, f, indent=2)
+            log_action(f"Added game {len(active['games'])} to active match #{active['match_number']}")
+            return True
+
+    return False
+
+
+def move_active_to_completed(playlist_type: str, player_ids: List[int], result: str,
+                              team1_names: List[str] = None, team2_names: List[str] = None,
+                              playlist_name: str = None) -> Optional[dict]:
+    """
+    Move an active match to completed.json.
+
+    Returns:
+        The completed series dict (for creating embed), or None if failed.
+    """
+    matches_file = get_playlist_matches_file(playlist_type)
+    completed_file = get_playlist_completed_file(playlist_type)
+
+    if not os.path.exists(matches_file):
+        return None
+
+    try:
+        with open(matches_file, 'r') as f:
+            data = json.load(f)
+    except:
+        return None
+
+    # Find and remove the active match
+    game_players = set(player_ids)
+    active_match = None
+    new_active = []
+    for active in data.get("active_matches", []):
+        active_players = set(active.get("team1_ids", []) + active.get("team2_ids", []))
+        if game_players == active_players:
+            active_match = active
+        else:
+            new_active.append(active)
+
+    if not active_match:
+        return None
+
+    data["active_matches"] = new_active
+
+    # Save updated matches file
+    with open(matches_file, 'w') as f:
+        json.dump(data, f, indent=2)
+
+    # Load completed file
+    completed_data = {"matches": []}
+    if os.path.exists(completed_file):
+        try:
+            with open(completed_file, 'r') as f:
+                completed_data = json.load(f)
+        except:
+            completed_data = {"matches": []}
+
+    # Assign permanent number
+    permanent_number = len(completed_data.get("matches", [])) + 1
+
+    # Count games won
+    team1_wins = sum(1 for g in active_match.get("games", []) if g.get("winner") == "TEAM1")
+    team2_wins = sum(1 for g in active_match.get("games", []) if g.get("winner") == "TEAM2")
+
+    # Build completed entry
+    completed_entry = {
+        "match_number": permanent_number,
+        "playlist": playlist_type,
+        "start_time": active_match.get("start_time"),
+        "end_time": datetime.now().isoformat(),
+        "result": result,
+        "team1": {
+            "player_ids": active_match.get("team1_ids", []),
+            "player_names": team1_names or [str(uid) for uid in active_match.get("team1_ids", [])],
+            "games_won": team1_wins
+        },
+        "team2": {
+            "player_ids": active_match.get("team2_ids", []),
+            "player_names": team2_names or [str(uid) for uid in active_match.get("team2_ids", [])],
+            "games_won": team2_wins
+        },
+        "games": active_match.get("games", [])
+    }
+
+    completed_data["matches"].append(completed_entry)
+
+    with open(completed_file, 'w') as f:
+        json.dump(completed_data, f, indent=2)
+
+    log_action(f"Moved active match to completed #{permanent_number} in {completed_file}")
+    return completed_entry
+
+
+def is_game_already_assigned(playlist_type: str, filename: str) -> bool:
+    """
+    Check if a game has already been assigned to a series (active or completed).
+    Uses the full filename as unique identifier (includes date/time to milliseconds).
+    """
+    # Check active matches
+    matches_file = get_playlist_matches_file(playlist_type)
+    if os.path.exists(matches_file):
+        try:
+            with open(matches_file, 'r') as f:
+                data = json.load(f)
+            for active in data.get("active_matches", []):
+                for game in active.get("games", []):
+                    if game.get("filename") == filename:
+                        return True
+        except:
+            pass
+
+    # Check completed matches
+    completed_file = get_playlist_completed_file(playlist_type)
+    if os.path.exists(completed_file):
+        try:
+            with open(completed_file, 'r') as f:
+                data = json.load(f)
+            for match in data.get("matches", []):
+                for game in match.get("games", []):
+                    if game.get("filename") == filename:
+                        return True
+        except:
+            pass
+
+    return False
+
+
+LAST_PROCESSED_FILE = "last_processed.json"
+
+
+def get_last_processed(playlist_type: str) -> Optional[str]:
+    """Get the last processed filename for a playlist."""
+    if not os.path.exists(LAST_PROCESSED_FILE):
+        return None
+    try:
+        with open(LAST_PROCESSED_FILE, 'r') as f:
+            data = json.load(f)
+        return data.get(playlist_type)
+    except:
+        return None
+
+
+def set_last_processed(playlist_type: str, filename: str):
+    """Set the last processed filename for a playlist."""
+    data = {}
+    if os.path.exists(LAST_PROCESSED_FILE):
+        try:
+            with open(LAST_PROCESSED_FILE, 'r') as f:
+                data = json.load(f)
+        except:
+            data = {}
+
+    data[playlist_type] = filename
+
+    with open(LAST_PROCESSED_FILE, 'w') as f:
+        json.dump(data, f, indent=2)
+
+
+def is_file_newer_than_last(playlist_type: str, filename: str) -> bool:
+    """Check if a filename is newer than the last processed one (alphabetical/chronological comparison)."""
+    last = get_last_processed(playlist_type)
+    if last is None:
+        return True  # No last processed, so this is new
+    return filename > last
+
+
+def determine_winner_from_players(winning_player_ids: List[int], team1_ids: List[int], team2_ids: List[int]) -> str:
+    """
+    Determine which team won based on winning player IDs.
+
+    Args:
+        winning_player_ids: List of player IDs who won the game
+        team1_ids: Player IDs for team 1
+        team2_ids: Player IDs for team 2
+
+    Returns:
+        "TEAM1", "TEAM2", or "UNKNOWN" if can't determine
+    """
+    winning_set = set(winning_player_ids)
+    team1_set = set(team1_ids)
+    team2_set = set(team2_ids)
+
+    # Check overlap with each team
+    team1_winners = winning_set & team1_set
+    team2_winners = winning_set & team2_set
+
+    if len(team1_winners) > len(team2_winners):
+        return "TEAM1"
+    elif len(team2_winners) > len(team1_winners):
+        return "TEAM2"
+    else:
+        return "UNKNOWN"
+
+
+def group_historical_games_into_series(games: List[dict]) -> List[List[dict]]:
+    """
+    Group historical games into series based on player sets.
+
+    Args:
+        games: List of game dicts, each with 'player_ids' (list of all 8 players),
+               'timestamp', and other game data
+
+    Returns:
+        List of series, where each series is a list of games with the same player set
+
+    Logic:
+        - Same 8 players (regardless of team) = same series
+        - New player appears = new series starts
+    """
+    if not games:
+        return []
+
+    # Sort by timestamp
+    sorted_games = sorted(games, key=lambda g: g.get("timestamp", ""))
+
+    series_list = []
+    current_series = []
+    current_players = None
+
+    for game in sorted_games:
+        game_players = set(game.get("player_ids", []))
+
+        if current_players is None:
+            # First game
+            current_players = game_players
+            current_series = [game]
+        elif game_players == current_players:
+            # Same players - same series
+            current_series.append(game)
+        else:
+            # Different players - new series
+            if current_series:
+                series_list.append(current_series)
+            current_players = game_players
+            current_series = [game]
+
+    # Don't forget the last series
+    if current_series:
+        series_list.append(current_series)
+
+    return series_list
+
+
+def backfill_historical_series(playlist_type: str, series_games: List[dict],
+                                team1_ids: List[int], team2_ids: List[int],
+                                result: str, team1_names: List[str] = None,
+                                team2_names: List[str] = None) -> bool:
+    """
+    Write a historical series directly to completed.json (no active match).
+
+    Args:
+        playlist_type: The playlist type
+        series_games: List of game dicts for this series
+        team1_ids: Player IDs for team 1
+        team2_ids: Player IDs for team 2
+        result: "TEAM1_WIN", "TEAM2_WIN", or "TIE"
+        team1_names: Optional player names for team 1
+        team2_names: Optional player names for team 2
+
+    Returns:
+        True if successful
+    """
+    completed_file = get_playlist_completed_file(playlist_type)
+
+    # Load completed file
+    completed_data = {"matches": []}
+    if os.path.exists(completed_file):
+        try:
+            with open(completed_file, 'r') as f:
+                completed_data = json.load(f)
+        except:
+            completed_data = {"matches": []}
+
+    # Assign permanent number
+    permanent_number = len(completed_data.get("matches", [])) + 1
+
+    # Count games won
+    team1_wins = sum(1 for g in series_games if g.get("winner") == "TEAM1")
+    team2_wins = sum(1 for g in series_games if g.get("winner") == "TEAM2")
+
+    # Get start/end times from games
+    start_time = series_games[0].get("timestamp") if series_games else None
+    end_time = series_games[-1].get("timestamp") if series_games else None
+
+    # Build completed entry
+    completed_entry = {
+        "match_number": permanent_number,
+        "playlist": playlist_type,
+        "start_time": start_time,
+        "end_time": end_time,
+        "result": result,
+        "team1": {
+            "player_ids": team1_ids,
+            "player_names": team1_names or [str(uid) for uid in team1_ids],
+            "games_won": team1_wins
+        },
+        "team2": {
+            "player_ids": team2_ids,
+            "player_names": team2_names or [str(uid) for uid in team2_ids],
+            "games_won": team2_wins
+        },
+        "games": series_games
+    }
+
+    completed_data["matches"].append(completed_entry)
+
+    with open(completed_file, 'w') as f:
+        json.dump(completed_data, f, indent=2)
+
+    log_action(f"Backfilled historical series #{permanent_number} to {completed_file}")
+    return True
+
+
+def create_series_embed(series_data: dict, guild: discord.Guild = None, red_emoji_id: int = None, blue_emoji_id: int = None) -> Tuple[discord.Embed, View]:
+    """
+    Create an embed and view for a completed series.
+
+    Args:
+        series_data: Dict with match_number, team1, team2, games, result, etc.
+            team1/team2 should include player_ranks list (historical ranks at match time)
+        guild: Discord guild for rank emoji lookup
+        red_emoji_id: Optional emoji ID for red team
+        blue_emoji_id: Optional emoji ID for blue team
+
+    Returns:
+        Tuple of (discord.Embed, discord.ui.View with CarnageReport button)
+    """
+    def get_rank_emoji(level: int) -> str:
+        """Get rank emoji for a level."""
+        if not guild or not level:
+            return ""
+        emoji_name = str(level)
+        emoji = discord.utils.get(guild.emojis, name=emoji_name)
+        if emoji:
+            return str(emoji)
+        # Single digits use underscore suffix (e.g., "6_")
+        if level <= 9:
+            emoji = discord.utils.get(guild.emojis, name=f"{level}_")
+            if emoji:
+                return str(emoji)
+        return ""
+
+    match_number = series_data.get("match_number", "?")
+    playlist_name = series_data.get("playlist_name", series_data.get("playlist", ""))
+    result = series_data.get("result", "")
+    team1 = series_data.get("team1", {})
+    team2 = series_data.get("team2", {})
+    games = series_data.get("games", [])
+
+    team1_wins = team1.get("games_won", 0)
+    team2_wins = team2.get("games_won", 0)
+
+    # Get player names and ranks
+    team1_names = team1.get("player_names", [str(uid) for uid in team1.get("player_ids", [])])
+    team2_names = team2.get("player_names", [str(uid) for uid in team2.get("player_ids", [])])
+    team1_ranks = team1.get("player_ranks", [])
+    team2_ranks = team2.get("player_ranks", [])
+
+    # Detect 1v1 (Head to Head) - no team colors needed
+    is_1v1 = len(team1_names) == 1 and len(team2_names) == 1
+
+    # Team emojis (only used for team playlists)
+    red_emoji = f"<:redteam:{red_emoji_id}>" if red_emoji_id else "🔴"
+    blue_emoji = f"<:blueteam:{blue_emoji_id}>" if blue_emoji_id else "🔵"
+
+    # Get player 1 and player 2 names for 1v1
+    p1_name = team1_names[0] if team1_names else "Player 1"
+    p2_name = team2_names[0] if team2_names else "Player 2"
+    p1_rank_emoji = get_rank_emoji(team1_ranks[0]) if team1_ranks else ""
+    p2_rank_emoji = get_rank_emoji(team2_ranks[0]) if team2_ranks else ""
+
+    # Determine winner text (winner score first)
+    if is_1v1:
+        # 1v1 format - show player name
+        if result == "TEAM1_WIN":
+            winner_display = f"{p1_rank_emoji} {p1_name}" if p1_rank_emoji else p1_name
+            winner_text = f"**{winner_display}** Wins!"
+            score_text = f"{team1_wins}-{team2_wins}"
+            embed_color = discord.Color.gold()
+        elif result == "TEAM2_WIN":
+            winner_display = f"{p2_rank_emoji} {p2_name}" if p2_rank_emoji else p2_name
+            winner_text = f"**{winner_display}** Wins!"
+            score_text = f"{team2_wins}-{team1_wins}"
+            embed_color = discord.Color.gold()
+        else:
+            winner_text = "Series Complete"
+            score_text = f"{team1_wins}-{team2_wins}"
+            embed_color = discord.Color.gold()
+    else:
+        # Team format - use team colors
+        if result == "TEAM1_WIN":
+            winner_text = f"{red_emoji} Red Team Wins!"
+            score_text = f"{team1_wins}-{team2_wins}"
+            embed_color = discord.Color.red()
+        elif result == "TEAM2_WIN":
+            winner_text = f"{blue_emoji} Blue Team Wins!"
+            score_text = f"{team2_wins}-{team1_wins}"
+            embed_color = discord.Color.blue()
+        else:
+            winner_text = "Series Complete"
+            score_text = f"{team1_wins}-{team2_wins}"
+            embed_color = discord.Color.gold()
+
+    # Build embed
+    embed = discord.Embed(
+        title=f"{playlist_name} Series #{match_number}",
+        description=f"**{winner_text}** ({score_text})",
+        color=embed_color
+    )
+
+    if is_1v1:
+        # 1v1 format - show both players in one field
+        p1_display = f"{p1_rank_emoji} {p1_name}" if p1_rank_emoji else p1_name
+        p2_display = f"{p2_rank_emoji} {p2_name}" if p2_rank_emoji else p2_name
+        embed.add_field(
+            name="Players",
+            value=f"{p1_display}\nvs\n{p2_display}",
+            inline=False
+        )
+    else:
+        # Team format - show rosters with rank emojis
+        team1_roster = []
+        for i, name in enumerate(team1_names):
+            rank = team1_ranks[i] if i < len(team1_ranks) else None
+            rank_emoji = get_rank_emoji(rank) if rank else ""
+            team1_roster.append(f"{rank_emoji} {name}" if rank_emoji else name)
+
+        team2_roster = []
+        for i, name in enumerate(team2_names):
+            rank = team2_ranks[i] if i < len(team2_ranks) else None
+            rank_emoji = get_rank_emoji(rank) if rank else ""
+            team2_roster.append(f"{rank_emoji} {name}" if rank_emoji else name)
+
+        embed.add_field(
+            name=f"{red_emoji} Red Team",
+            value="\n".join(team1_roster) if team1_roster else "Unknown",
+            inline=True
+        )
+        embed.add_field(
+            name=f"{blue_emoji} Blue Team",
+            value="\n".join(team2_roster) if team2_roster else "Unknown",
+            inline=True
+        )
+
+    # Game results
+    if games:
+        games_text = ""
+        for game in games:
+            winner = game.get("winner", "")
+            map_name = game.get("map", "Unknown")
+            gametype = game.get("gametype", "")
+            score = game.get("score", "")
+
+            if is_1v1:
+                # 1v1 format - show winner's name
+                if winner == "TEAM1":
+                    winner_name = p1_name
+                else:
+                    winner_name = p2_name
+
+                if gametype and score:
+                    game_line = f"**{winner_name}** won {gametype} on {map_name} - {score}"
+                elif gametype:
+                    game_line = f"**{winner_name}** won {gametype} on {map_name}"
+                else:
+                    game_line = f"**{winner_name}** won on {map_name}"
+            else:
+                # Team format - show team color
+                if winner == "TEAM1":
+                    team_emoji = red_emoji
+                    team_color = "Red"
+                else:
+                    team_emoji = blue_emoji
+                    team_color = "Blue"
+
+                # Format: {emoji} **{Color} Team** won {gametype} on {map} - {score}
+                if gametype and score:
+                    game_line = f"{team_emoji} **{team_color} Team** won {gametype} on {map_name} - {score}"
+                elif gametype:
+                    game_line = f"{team_emoji} **{team_color} Team** won {gametype} on {map_name}"
+                else:
+                    game_line = f"{team_emoji} **{team_color} Team** won on {map_name}"
+
+            games_text += game_line + "\n"
+
+        embed.add_field(
+            name="Game Results",
+            value=games_text.strip(),
+            inline=False
+        )
+
+    # Timestamps - show start and end time in EST
+    start_time = series_data.get("start_time")
+    end_time = series_data.get("end_time")
+
+    def format_time_est(iso_time: str) -> str:
+        """Convert ISO time to abbreviated EST format."""
+        try:
+            dt = datetime.fromisoformat(iso_time.replace('Z', '+00:00'))
+            # Convert to EST (UTC-5)
+            from zoneinfo import ZoneInfo
+            est = ZoneInfo("America/New_York")
+            dt_est = dt.astimezone(est) if dt.tzinfo else dt.replace(tzinfo=ZoneInfo("UTC")).astimezone(est)
+            return dt_est.strftime("%m/%d/%y %I:%M %p EST")
+        except:
+            # Fallback if parsing fails
+            return iso_time
+
+    footer_parts = []
+    if start_time:
+        footer_parts.append(f"Start: {format_time_est(start_time)}")
+    if end_time:
+        footer_parts.append(f"End: {format_time_est(end_time)}")
+
+    if footer_parts:
+        embed.set_footer(text=" | ".join(footer_parts))
+
+    # Create view with CarnageReport.com button
+    view = View()
+    view.add_item(Button(
+        label="See more at CarnageReport.com",
+        url="https://www.carnagereport.com",
+        style=discord.ButtonStyle.link
+    ))
+
+    return embed, view
+
+
+def get_unposted_series(playlist_type: str) -> List[dict]:
+    """
+    Get all unposted series from completed.json in chronological order (oldest first).
+    Series are considered unposted if they don't have 'posted': True.
+    """
+    completed_file = get_playlist_completed_file(playlist_type)
+    if not os.path.exists(completed_file):
+        return []
+
+    try:
+        with open(completed_file, 'r') as f:
+            data = json.load(f)
+    except:
+        return []
+
+    # Filter unposted and sort by match_number (ascending = oldest first)
+    unposted = [m for m in data.get("matches", []) if not m.get("posted", False)]
+    unposted.sort(key=lambda x: x.get("match_number", 0))
+
+    return unposted
+
+
+def mark_series_as_posted(playlist_type: str, match_number: int):
+    """Mark a series as posted in completed.json."""
+    completed_file = get_playlist_completed_file(playlist_type)
+    if not os.path.exists(completed_file):
+        return
+
+    try:
+        with open(completed_file, 'r') as f:
+            data = json.load(f)
+    except:
+        return
+
+    for match in data.get("matches", []):
+        if match.get("match_number") == match_number:
+            match["posted"] = True
+            break
+
+    with open(completed_file, 'w') as f:
+        json.dump(data, f, indent=2)
 
 
 def update_active_match_in_history(match: PlaylistMatch):
@@ -574,6 +1155,42 @@ def update_active_match_in_history(match: PlaylistMatch):
         github_webhook.push_file_to_github(matches_file, matches_file)
     except Exception as e:
         log_action(f"Failed to sync {matches_file} to GitHub: {e}")
+
+
+def remove_match_from_active(match: PlaylistMatch):
+    """Remove a cancelled match from active_matches in the history file"""
+    matches_file = get_playlist_matches_file(match.playlist_type)
+
+    if not os.path.exists(matches_file):
+        return
+
+    try:
+        with open(matches_file, 'r') as f:
+            history = json.load(f)
+    except:
+        return
+
+    if "active_matches" not in history:
+        return
+
+    # Remove the match from active_matches
+    original_count = len(history["active_matches"])
+    history["active_matches"] = [
+        m for m in history["active_matches"]
+        if m.get("match_number") != match.match_number
+    ]
+
+    if len(history["active_matches"]) < original_count:
+        with open(matches_file, 'w') as f:
+            json.dump(history, f, indent=2)
+        log_action(f"Removed {match.get_match_label()} from active_matches (cancelled)")
+
+        # Sync to GitHub
+        try:
+            import github_webhook
+            github_webhook.push_file_to_github(matches_file, matches_file)
+        except:
+            pass
 
 
 class PlaylistQueueView(View):
@@ -1544,6 +2161,7 @@ async def initialize_all_playlists(bot):
                 try:
                     with open(matches_file, 'r') as f:
                         file_data = json.load(f)
+
                     active_matches = file_data.get("active_matches", [])
                     if active_matches:
                         # Restore the most recent active match
@@ -1813,8 +2431,7 @@ async def post_match_results(channel: discord.TextChannel, match: PlaylistMatch,
         if winner_id:
             try:
                 import STATSRANKS
-                from github_webhook import async_pull_emblems_from_github
-                emblems = await async_pull_emblems_from_github() or {}
+                emblems = await STATSRANKS.async_load_emblems() or {}
                 user_key = str(winner_id)
                 if user_key in emblems:
                     emblem_url = emblems[user_key].get("emblem_url") if isinstance(emblems[user_key], dict) else emblems[user_key]
@@ -1885,6 +2502,7 @@ __all__ = [
     'PLAYLIST_CONFIG',
     'PLAYLIST_MATCHES_FILES',
     'PLAYLIST_STATS_FILES',
+    'PLAYLIST_COMPLETED_FILES',
     'GAMETYPE_SIMPLE',
     'PlaylistQueueView',
     'PlaylistPingJoinView',
@@ -1894,13 +2512,28 @@ __all__ = [
     'get_all_playlists',
     'get_playlist_matches_file',
     'get_playlist_stats_file',
+    'get_playlist_completed_file',
     'simplify_gametype',
     'create_playlist_embed',
     'update_playlist_embed',
     'start_playlist_match',
     'end_playlist_match',
     'save_match_to_history',
+    'find_active_match_by_players',
+    'add_game_to_active_match',
+    'move_active_to_completed',
+    'is_game_already_assigned',
+    'get_last_processed',
+    'set_last_processed',
+    'is_file_newer_than_last',
+    'determine_winner_from_players',
+    'group_historical_games_into_series',
+    'backfill_historical_series',
+    'create_series_embed',
+    'get_unposted_series',
+    'mark_series_as_posted',
     'update_active_match_in_history',
+    'remove_match_from_active',
     'save_playlist_stats',
     'pause_playlist',
     'resume_playlist',

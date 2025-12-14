@@ -366,12 +366,107 @@ async def on_message(message: discord.Message):
                 ranks = STATSRANKS.load_json_file(STATSRANKS.RANKS_FILE)
                 player_ids = [int(uid) for uid in ranks.keys() if uid.isdigit()]
 
-                # Refresh all ranks
+                # Refresh all ranks (Discord roles)
                 await STATSRANKS.refresh_all_ranks(message.guild, player_ids, send_dm=False)
-
-                # Delete the trigger message
-                await message.delete()
                 print(f"[RANKS] Rank refresh completed - {len(player_ids)} players updated")
+
+                # Update any active series embeds with new rank data
+                try:
+                    from searchmatchmaking import queue_state
+                    import ingame
+                    if queue_state.current_series:
+                        series = queue_state.current_series
+                        print(f"[RANKS] Updating active series embed with new ranks...")
+
+                        # Update series channel embed
+                        if series.text_channel_id:
+                            series_channel = message.guild.get_channel(series.text_channel_id)
+                            if series_channel and series.series_message:
+                                view = ingame.SeriesView(series)
+                                await view.update_series_embed(series_channel)
+
+                        # Update general chat embed
+                        await ingame.update_general_chat_embed(message.guild, series)
+                        print(f"[RANKS] Active series embeds updated")
+                except Exception as embed_error:
+                    print(f"[RANKS] Could not update series embeds: {embed_error}")
+
+                # Post NEW game data to playlist channels (only unposted series)
+                try:
+                    import statsdata
+                    from playlists import PLAYLIST_CONFIG, PlaylistType
+
+                    playlists = [
+                        ("mlg_4v4", PlaylistType.MLG_4V4),
+                        ("team_hardcore", PlaylistType.TEAM_HARDCORE),
+                        ("double_team", PlaylistType.DOUBLE_TEAM),
+                        ("head_to_head", PlaylistType.HEAD_TO_HEAD),
+                    ]
+
+                    total_posted = 0
+                    total_series_count = 0
+
+                    for playlist_key, playlist_type in playlists:
+                        if playlist_type not in PLAYLIST_CONFIG:
+                            continue
+
+                        target_channel_id = PLAYLIST_CONFIG[playlist_type]["channel_id"]
+                        target_channel = message.guild.get_channel(target_channel_id)
+
+                        if not target_channel:
+                            continue
+
+                        # Get all series and filter to only unposted ones
+                        all_series = statsdata.get_all_series(playlist_key)
+                        unposted = statsdata.get_unposted_series(playlist_key, all_series)
+
+                        # Count total series (each series = +1)
+                        total_series_count += len(all_series)
+
+                        if not unposted:
+                            continue
+
+                        print(f"[RANKS] Found {len(unposted)} new series for {playlist_key}")
+
+                        # Generate embeds only for unposted series
+                        for series in unposted:
+                            embed = await statsdata.build_series_embed(
+                                series=series,
+                                guild=message.guild,
+                                playlist=playlist_key,
+                                red_emoji_id=RED_TEAM_EMOJI_ID,
+                                blue_emoji_id=BLUE_TEAM_EMOJI_ID
+                            )
+                            if embed:
+                                try:
+                                    await target_channel.send(embed=embed)
+                                    statsdata.mark_series_posted(playlist_key, series.get("series_label"))
+                                    total_posted += 1
+                                except Exception as e:
+                                    print(f"[RANKS] Failed to post series: {e}")
+
+                    # Set MLG 4v4 Series counter (playlists derive number from completed matches)
+                    mlg_series = statsdata.get_all_series("mlg_4v4")
+                    if mlg_series:
+                        from ingame import Series
+                        Series.match_counter = len(mlg_series)
+                        print(f"[RANKS] Set MLG 4v4 Series counter to {Series.match_counter}")
+
+                    # Save state
+                    try:
+                        from state_manager import save_state
+                        save_state()
+                    except:
+                        pass
+
+                    if total_posted > 0:
+                        print(f"[RANKS] Posted {total_posted} new series embeds")
+                except Exception as backfill_error:
+                    print(f"[RANKS] Backfill error: {backfill_error}")
+
+                # Delete trigger message only on success
+                await message.delete()
+                print("[RANKS] Webhook completed successfully")
             except Exception as e:
                 print(f"[RANKS] Error during rank refresh: {e}")
                 import traceback

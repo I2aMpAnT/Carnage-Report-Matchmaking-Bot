@@ -662,7 +662,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         app_commands.Choice(name="Team Hardcore", value="team_hardcore"),
         app_commands.Choice(name="Double Team", value="double_team"),
         app_commands.Choice(name="Head to Head", value="head_to_head"),
-        app_commands.Choice(name="Tournament Matches", value="tournament"),
+        app_commands.Choice(name="Tournament 1", value="tournament_1"),
     ])
     async def end_match(interaction: discord.Interaction, playlist: str, match_number: int = None):
         """End an active match - properly records results and cleans up"""
@@ -718,7 +718,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                 "team_hardcore": PlaylistType.TEAM_HARDCORE,
                 "double_team": PlaylistType.DOUBLE_TEAM,
                 "head_to_head": PlaylistType.HEAD_TO_HEAD,
-                "tournament": PlaylistType.TOURNAMENT,
+                "tournament_1": PlaylistType.TOURNAMENT_1,
             }
 
             ptype = playlist_map.get(playlist)
@@ -773,7 +773,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         app_commands.Choice(name="Team Hardcore", value="team_hardcore"),
         app_commands.Choice(name="Double Team", value="double_team"),
         app_commands.Choice(name="Head to Head", value="head_to_head"),
-        app_commands.Choice(name="Tournament Matches", value="tournament"),
+        app_commands.Choice(name="Tournament 1", value="tournament_1"),
     ])
     async def delete_match(interaction: discord.Interaction, playlist: str, match_number: int):
         """Delete a match from history by playlist and match number"""
@@ -793,7 +793,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                 "team_hardcore": "Team Hardcore",
                 "double_team": "Double Team",
                 "head_to_head": "Head to Head",
-                "tournament": "Tournament Matches"
+                "tournament_1": "Tournament 1"
             }
             playlist_name = playlist_names.get(playlist, playlist)
 
@@ -2142,11 +2142,9 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                 ps = PlaylistQueueState(playlist)
                 playlist_states[playlist] = ps
 
-            # Create match object
+            # Create match object (match number is derived from completed matches)
             all_player_list = red_team + blue_team
-            ps.match_counter += 1
             match = PlaylistMatch(ps, all_player_list, red_team, blue_team)
-            match.match_number = ps.match_counter
             ps.current_match = match
 
             # Create voice channels
@@ -2928,32 +2926,38 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
 
         try:
             import playlists
-            from playlists import PLAYLIST_HISTORY_FILES, get_playlist_state, show_playlist_match_embed
+            import json
+            from playlists import PLAYLIST_MATCHES_FILES, get_playlist_state, show_playlist_match_embed
         except ImportError as e:
             await interaction.followup.send(f"❌ Import error: {e}", ephemeral=True)
             return
 
         results = []
-        playlists_to_sync = PLAYLIST_HISTORY_FILES.keys() if playlist == "all" else [playlist]
+        playlists_to_sync = PLAYLIST_MATCHES_FILES.keys() if playlist == "all" else [playlist]
 
         for ptype in playlists_to_sync:
-            history_file = PLAYLIST_HISTORY_FILES.get(ptype)
+            history_file = PLAYLIST_MATCHES_FILES.get(ptype)
             if not history_file:
                 continue
 
-            # Pull from GitHub
+            # Read from local file
             try:
-                github_data = await github_webhook.async_pull_file_from_github(history_file)
+                import os
+                if not os.path.exists(history_file):
+                    results.append(f"⚠️ {ptype}: Local file not found")
+                    continue
+                with open(history_file, 'r') as f:
+                    local_data = json.load(f)
             except Exception as e:
-                results.append(f"❌ {ptype}: Failed to pull from GitHub - {e}")
+                results.append(f"❌ {ptype}: Failed to read local file - {e}")
                 continue
 
-            if not github_data:
-                results.append(f"⚠️ {ptype}: No data on GitHub")
+            if not local_data:
+                results.append(f"⚠️ {ptype}: No data in local file")
                 continue
 
-            # Get active matches from website data
-            website_active = github_data.get("active_matches", [])
+            # Get active matches from local data
+            website_active = local_data.get("active_matches", [])
 
             if not website_active:
                 results.append(f"✓ {ptype}: No active matches on website")
@@ -3281,9 +3285,8 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
     @bot.tree.command(name="playerstats", description="View player matchmaking statistics")
     @app_commands.describe(user="User to view stats for (optional)")
     async def playerstats(interaction: discord.Interaction, user: discord.User = None):
-        """Show player stats with per-playlist ranks - reads from ranks.json (website source of truth)"""
+        """Show player stats with per-playlist ranks - reads from local files (website source of truth)"""
         import STATSRANKS
-        from github_webhook import async_pull_emblems_from_github
 
         target_user = user or interaction.user
         guild = interaction.guild
@@ -3395,10 +3398,10 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             inline=True
         )
 
-        # Get player's emblem from emblems.json and use as thumbnail
+        # Get player's emblem from local emblems.json and use as thumbnail
         emblem_set = False
         try:
-            emblems = await async_pull_emblems_from_github() or {}
+            emblems = await STATSRANKS.async_load_emblems() or {}
             user_key = str(target_user.id)
             if user_key in emblems:
                 emblem_data = emblems[user_key]
@@ -3782,6 +3785,72 @@ python3 populate_stats.py'''
 
         log_action(f"Admin {interaction.user.name} ran /dotcomrefresh - {'success' if success else 'failed'}")
         await interaction.followup.send(response, ephemeral=True)
+
+    @bot.tree.command(name="backfillgamedata", description="[ADMIN] Backfill historical series data into embeds for all playlists")
+    @has_admin_role()
+    async def backfill_game_data(interaction: discord.Interaction):
+        """Backfill historical series data - reads from local JSON files and posts series embeds to all playlist channels"""
+        await interaction.response.defer(ephemeral=True)
+
+        import statsdata
+        from playlists import PLAYLIST_CONFIG, PlaylistType
+
+        guild = interaction.guild
+
+        # All playlists to process
+        playlists = [
+            ("mlg_4v4", PlaylistType.MLG_4V4),
+            ("team_hardcore", PlaylistType.TEAM_HARDCORE),
+            ("double_team", PlaylistType.DOUBLE_TEAM),
+            ("head_to_head", PlaylistType.HEAD_TO_HEAD),
+        ]
+
+        total_posted = 0
+        results = []
+
+        for playlist_key, playlist_type in playlists:
+            if playlist_type not in PLAYLIST_CONFIG:
+                continue
+
+            target_channel_id = PLAYLIST_CONFIG[playlist_type]["channel_id"]
+            target_channel = guild.get_channel(target_channel_id)
+
+            if not target_channel:
+                results.append(f"❌ {playlist_key}: Channel not found")
+                continue
+
+            # Generate embeds using statsdata module
+            embeds_generated = await statsdata.generate_all_series_embeds(
+                playlist=playlist_key,
+                guild=guild,
+                red_emoji_id=RED_TEAM_EMOJI_ID,
+                blue_emoji_id=BLUE_TEAM_EMOJI_ID
+            )
+
+            if not embeds_generated:
+                results.append(f"⚪ {playlist_key}: No series data")
+                continue
+
+            # Post to playlist channel
+            posted = 0
+            for embed in embeds_generated:
+                try:
+                    await target_channel.send(embed=embed)
+                    posted += 1
+                except Exception as e:
+                    log_action(f"Failed to post embed: {e}")
+
+            total_posted += posted
+            results.append(f"✅ {playlist_key}: Posted {posted} series to {target_channel.mention}")
+
+        # Send summary
+        summary = "\n".join(results)
+        await interaction.followup.send(
+            f"**Backfill Complete**\n{summary}\n\n**Total: {total_posted} series posted**",
+            ephemeral=True
+        )
+
+        log_action(f"Admin {interaction.user.name} ran /backfillgamedata - {total_posted} total series posted")
 
     @bot.tree.command(name="voicervb", description="[STAFF] Create Red vs Blue voice channels")
     @has_staff_role()

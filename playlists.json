@@ -31,6 +31,14 @@
       "max_players": 2,
       "ranked": true,
       "description": "1v1 matchmaking"
+    },
+    {
+      "id": "tournament_1",
+      "name": "Tournament 1",
+      "team_size": 4,
+      "max_players": 8,
+      "ranked": true,
+      "description": "Tournament 4v4 with pre-set teams (players pick only)"
     }
   ]
 }
