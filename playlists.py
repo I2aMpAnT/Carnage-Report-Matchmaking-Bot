@@ -127,6 +127,15 @@ PLAYLIST_STATS_FILES = {
     "tournament": f"{WEBSITE_DATA_PATH}/tournament_stats.json",
 }
 
+# Completed matches files - bot writes completed matches here (for /backfill command)
+PLAYLIST_COMPLETED_FILES = {
+    "mlg_4v4": f"{WEBSITE_DATA_PATH}/mlg_4v4_completed.json",
+    "team_hardcore": f"{WEBSITE_DATA_PATH}/team_hardcore_completed.json",
+    "double_team": f"{WEBSITE_DATA_PATH}/double_team_completed.json",
+    "head_to_head": f"{WEBSITE_DATA_PATH}/head_to_head_completed.json",
+    "tournament": f"{WEBSITE_DATA_PATH}/tournament_completed.json",
+}
+
 # Gametype simplification mapping (MLG variant -> simple name)
 GAMETYPE_SIMPLE = {
     "MLG CTF5": "CTF",
@@ -148,6 +157,10 @@ def get_playlist_matches_file(playlist_type: str) -> str:
 def get_playlist_stats_file(playlist_type: str) -> str:
     """Get the stats file path for a playlist (e.g., mlg_4v4_stats.json)"""
     return PLAYLIST_STATS_FILES.get(playlist_type, f"{playlist_type}_stats.json")
+
+def get_playlist_completed_file(playlist_type: str) -> str:
+    """Get the completed matches file path for a playlist (e.g., mlg_4v4_completed.json)"""
+    return PLAYLIST_COMPLETED_FILES.get(playlist_type, f"{playlist_type}_completed.json")
 
 
 def log_action(message: str):
@@ -208,16 +221,15 @@ class PlaylistMatch:
         self.team1 = team1 or []  # "Red" team or Player 1
         self.team2 = team2 or []  # "Blue" team or Player 2
 
-        # Get projected match number based on completed matches
-        # This is what the match WILL be if it completes
-        # (actual permanent number assigned at completion time)
-        matches_file = get_playlist_matches_file(playlist_state.playlist_type)
+        # Get projected match number based on completed matches in completed file
+        # This is what the match WILL be if backfill processes it
+        completed_file = get_playlist_completed_file(playlist_state.playlist_type)
         completed_count = 0
-        if os.path.exists(matches_file):
+        if os.path.exists(completed_file):
             try:
-                with open(matches_file, 'r') as f:
-                    history = json.load(f)
-                completed_count = len(history.get("matches", []))
+                with open(completed_file, 'r') as f:
+                    completed_data = json.load(f)
+                completed_count = len(completed_data.get("matches", []))
             except:
                 pass
         self.match_number = completed_count + 1
@@ -431,29 +443,19 @@ async def get_player_names(guild, player_ids: List[int]) -> Dict[int, str]:
 
 
 def save_match_to_history(match: PlaylistMatch, result: str, guild=None):
-    """Save match to playlist-specific history file
+    """Save match to playlist-specific files
 
-    Structure:
-    - active_matches: Currently in-progress matches
-    - matches: Completed match history with player names, maps, gametypes
-    - total_matches: Count of completed matches
+    Active matches file ({playlist}_matches.json):
+    - active_matches: Array of {match_number, team1_ids, team2_ids, start_time}
 
-    Match entry structure:
-    - match_number: int
-    - playlist: str (e.g., "mlg_4v4")
-    - start_time: ISO format (when series opened)
-    - start_time_display: Human readable start time
-    - end_time: ISO format (when series closed) - null for active matches
-    - end_time_display: Human readable end time - null for active matches
-    - result: "TEAM1_WIN" | "TEAM2_WIN" | "TIE" | "STARTED"
-    - team1/team2: {player_ids: [], player_names: [], color: "Red"/"Blue" or null for 1v1}
-    - games: [{winner: "TEAM1"|"TEAM2", map: str, gametype: str (simplified)}]
+    Completed matches file ({playlist}_completed.json):
+    - matches: Array of completed match data for /backfill command
     """
-    # Get the matches file for this playlist
+    # Get the matches file for this playlist (active matches)
     matches_file = get_playlist_matches_file(match.playlist_type)
 
-    # Load existing history or create new
-    history = {"total_matches": 0, "matches": [], "active_matches": []}
+    # Load existing or create new
+    history = {"active_matches": []}
     if os.path.exists(matches_file):
         try:
             with open(matches_file, 'r') as f:
@@ -461,67 +463,20 @@ def save_match_to_history(match: PlaylistMatch, result: str, guild=None):
                 if "active_matches" not in history:
                     history["active_matches"] = []
         except:
-            history = {"total_matches": 0, "matches": [], "active_matches": []}
-
-    # Get player names from guild if available
-    team1_names = []
-    team2_names = []
-    if guild:
-        for uid in match.team1:
-            member = guild.get_member(uid)
-            team1_names.append(member.display_name if member else f"Unknown")
-        for uid in match.team2:
-            member = guild.get_member(uid)
-            team2_names.append(member.display_name if member else f"Unknown")
-    else:
-        team1_names = [str(uid) for uid in match.team1]
-        team2_names = [str(uid) for uid in match.team2]
-
-    # Build games array with simplified gametypes
-    games_data = []
-    for i, winner in enumerate(match.games, 1):
-        stats = match.game_stats.get(i, {})
-        games_data.append({
-            "game_number": i,
-            "winner": winner,
-            "map": stats.get("map", match.map_name or ""),
-            "gametype": simplify_gametype(stats.get("gametype", match.gametype or ""))
-        })
-
-    # Determine team structure based on playlist type
-    is_1v1 = match.playlist_state.playlist_type == PlaylistType.HEAD_TO_HEAD
-
-    match_data = {
-        "match_number": match.match_number,
-        "playlist": match.playlist_type,
-        "playlist_name": match.playlist_state.name,
-        "start_time": match.start_time.isoformat(),
-        "start_time_display": match.start_time.strftime('%Y-%m-%d %H:%M:%S'),
-        "end_time": match.end_time.isoformat() if match.end_time else None,
-        "end_time_display": match.end_time.strftime('%Y-%m-%d %H:%M:%S') if match.end_time else None,
-        "result": result,
-        "team1": {
-            "player_ids": match.team1,
-            "player_names": team1_names,
-            "color": None if is_1v1 else "Red",
-            "games_won": match.games.count('TEAM1')
-        },
-        "team2": {
-            "player_ids": match.team2,
-            "player_names": team2_names,
-            "color": None if is_1v1 else "Blue",
-            "games_won": match.games.count('TEAM2')
-        },
-        "games": games_data,
-    }
+            history = {"active_matches": []}
 
     if result == "STARTED":
-        # Add to active_matches (bot tracking only)
-        history["active_matches"].append(match_data)
+        # Add minimal entry to active_matches for stat parser matching
+        active_entry = {
+            "match_number": match.match_number,
+            "team1_ids": match.team1,
+            "team2_ids": match.team2,
+            "start_time": match.start_time.isoformat()
+        }
+        history["active_matches"].append(active_entry)
         log_action(f"Added {match.get_match_label()} to active_matches in {matches_file}")
     else:
-        # Remove from active_matches when match ends (complete or cancel)
-        # NOTE: We don't write to 'matches' array - that's populated by the stat parser
+        # Remove from active_matches when match ends
         original_count = len(history["active_matches"])
         history["active_matches"] = [
             m for m in history["active_matches"]
@@ -529,6 +484,9 @@ def save_match_to_history(match: PlaylistMatch, result: str, guild=None):
         ]
         if len(history["active_matches"]) < original_count:
             log_action(f"Removed {match.get_match_label()} from active_matches ({result})")
+
+        # NOTE: Completed match data is written by /backfill from parsed stats
+        # Bot only manages active_matches tracking
 
     with open(matches_file, 'w') as f:
         json.dump(history, f, indent=2)
@@ -1930,6 +1888,7 @@ __all__ = [
     'PLAYLIST_CONFIG',
     'PLAYLIST_MATCHES_FILES',
     'PLAYLIST_STATS_FILES',
+    'PLAYLIST_COMPLETED_FILES',
     'GAMETYPE_SIMPLE',
     'PlaylistQueueView',
     'PlaylistPingJoinView',
@@ -1939,6 +1898,7 @@ __all__ = [
     'get_all_playlists',
     'get_playlist_matches_file',
     'get_playlist_stats_file',
+    'get_playlist_completed_file',
     'simplify_gametype',
     'create_playlist_embed',
     'update_playlist_embed',

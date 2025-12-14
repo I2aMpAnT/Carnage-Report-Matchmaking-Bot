@@ -74,16 +74,16 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
         max_players = ps.max_players
         playlist_name = ps.name
 
-        # Get projected match number based on completed matches
-        from playlists import get_playlist_matches_file
+        # Get projected match number based on completed matches in completed file
+        from playlists import get_playlist_completed_file
         import os
-        matches_file = get_playlist_matches_file(ps.playlist_type)
+        completed_file = get_playlist_completed_file(ps.playlist_type)
         completed_count = 0
-        if os.path.exists(matches_file):
+        if os.path.exists(completed_file):
             try:
-                with open(matches_file, 'r') as f:
-                    history = json.load(f)
-                completed_count = len(history.get("matches", []))
+                with open(completed_file, 'r') as f:
+                    completed_data = json.load(f)
+                completed_count = len(completed_data.get("matches", []))
             except:
                 pass
         match_number = completed_count + 1
