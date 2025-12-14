@@ -445,18 +445,17 @@ async def on_message(message: discord.Message):
                                 except Exception as e:
                                     print(f"[RANKS] Failed to post series: {e}")
 
-                    # Update match counter to total series count
+                    # Always set match counter to total series count (resets to match actual data)
                     if total_series_count > 0:
                         from ingame import Series
-                        if Series.match_counter < total_series_count:
-                            Series.match_counter = total_series_count
-                            print(f"[RANKS] Updated match counter to {total_series_count}")
-                            # Save state
-                            try:
-                                from state_manager import save_state
-                                save_state()
-                            except:
-                                pass
+                        Series.match_counter = total_series_count
+                        print(f"[RANKS] Set match counter to {total_series_count}")
+                        # Save state
+                        try:
+                            from state_manager import save_state
+                            save_state()
+                        except:
+                            pass
 
                     if total_posted > 0:
                         print(f"[RANKS] Posted {total_posted} new series embeds")
