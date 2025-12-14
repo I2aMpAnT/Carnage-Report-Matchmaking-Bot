@@ -48,7 +48,7 @@ class PlaylistType:
     TEAM_HARDCORE = "team_hardcore"  # 4v4 auto-balanced, hidden queue
     DOUBLE_TEAM = "double_team"      # 2v2 auto-balanced, hidden queue
     HEAD_TO_HEAD = "head_to_head"    # 1v1 hidden queue
-    TOURNAMENT = "tournament"        # 4v4 players pick only (pre-set teams)
+    TOURNAMENT_1 = "tournament_1"    # 4v4 players pick only (pre-set teams)
 
 
 # Playlist configuration
@@ -93,8 +93,8 @@ PLAYLIST_CONFIG = {
         "show_map_gametype": True,  # Random 1v1 map
         "description": "1v1 matchmaking",
     },
-    PlaylistType.TOURNAMENT: {
-        "name": "Tournament Matches",
+    PlaylistType.TOURNAMENT_1: {
+        "name": "Tournament 1",
         "channel_id": 1449414157605671124,
         "max_players": 8,
         "team_size": 4,
@@ -115,7 +115,7 @@ PLAYLIST_MATCHES_FILES = {
     "team_hardcore": f"{WEBSITE_DATA_PATH}/team_hardcore_matches.json",
     "double_team": f"{WEBSITE_DATA_PATH}/double_team_matches.json",
     "head_to_head": f"{WEBSITE_DATA_PATH}/head_to_head_matches.json",
-    "tournament": f"{WEBSITE_DATA_PATH}/tournament_matches.json",
+    "tournament_1": f"{WEBSITE_DATA_PATH}/tournament_1_matches.json",
 }
 
 # Stats files - each playlist gets {playlist}_stats.json (written by popstats.py or manual matches)
@@ -124,7 +124,7 @@ PLAYLIST_STATS_FILES = {
     "team_hardcore": f"{WEBSITE_DATA_PATH}/team_hardcore_stats.json",
     "double_team": f"{WEBSITE_DATA_PATH}/double_team_stats.json",
     "head_to_head": f"{WEBSITE_DATA_PATH}/head_to_head_stats.json",
-    "tournament": f"{WEBSITE_DATA_PATH}/tournament_stats.json",
+    "tournament_1": f"{WEBSITE_DATA_PATH}/tournament_1_stats.json",
 }
 
 # Completed matches files - bot writes completed matches here (for /backfill command)
@@ -133,7 +133,7 @@ PLAYLIST_COMPLETED_FILES = {
     "team_hardcore": f"{WEBSITE_DATA_PATH}/team_hardcore_completed.json",
     "double_team": f"{WEBSITE_DATA_PATH}/double_team_completed.json",
     "head_to_head": f"{WEBSITE_DATA_PATH}/head_to_head_completed.json",
-    "tournament": f"{WEBSITE_DATA_PATH}/tournament_completed.json",
+    "tournament_1": f"{WEBSITE_DATA_PATH}/tournament_1_completed.json",
 }
 
 # Gametype simplification mapping (MLG variant -> simple name)
