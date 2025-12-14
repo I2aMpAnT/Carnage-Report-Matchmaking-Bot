@@ -2,7 +2,7 @@
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 # Supports ALL playlists: MLG 4v4 (voting), Team Hardcore/Double Team (auto-balance), Head to Head (1v1)
 
-MODULE_VERSION = "1.6.3"
+MODULE_VERSION = "1.6.4"
 
 import discord
 from discord.ui import View, Button, Select
@@ -16,6 +16,9 @@ if TYPE_CHECKING:
 PREGAME_LOBBY_ID = None
 RED_TEAM_EMOJI_ID = None
 BLUE_TEAM_EMOJI_ID = None
+
+# Header image for DMs
+HEADER_IMAGE_URL = "https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/MessagefromCarnageReportHEADERSMALL.png"
 
 def log_action(message: str):
     """Log actions"""
@@ -147,6 +150,7 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
                         description=f"Your **{playlist_name}** match is starting! Please join the **Pregame Lobby** voice channel within 10 minutes or the match may be cancelled.",
                         color=discord.Color.gold()
                     )
+                    dm_embed.set_image(url=HEADER_IMAGE_URL)
                     await member.send(embed=dm_embed)
                     log_action(f"Sent pregame DM to {member.name}")
                 except discord.Forbidden:
@@ -303,9 +307,10 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
             try:
                 dm_embed = discord.Embed(
                     title=f"{match_label} - Join Pregame Lobby!",
-                    description=f"Your match is starting! Please join the **Pregame Lobby** voice channel within 10 minutes or you may be replaced.",
+                    description=f"Your match is starting! Please join the **Pregame Lobby** voice channel within 10 minutes or the match will be cancelled.",
                     color=discord.Color.gold()
                 )
+                dm_embed.set_image(url=HEADER_IMAGE_URL)
                 await member.send(embed=dm_embed)
                 log_action(f"Sent pregame DM to {member.name}")
             except discord.Forbidden:
@@ -336,6 +341,7 @@ async def wait_for_players_and_show_selection(
     guild = channel.guild
     testers = testers or []
     timeout_seconds = 600  # 10 minutes
+    warning_sent = False  # Track if 5-minute warning has been sent
 
     # In test mode, only wait for testers (not filler players)
     players_to_wait_for = [uid for uid in players if uid in testers] if test_mode else players[:]
@@ -398,10 +404,34 @@ async def wait_for_players_and_show_selection(
             await show_team_selection(channel, pregame_message, players, pregame_vc_id, test_mode, testers, match_label)
             return
 
+        # Send 5-minute warning DM and channel ping at halfway point
+        if elapsed >= 300 and not warning_sent and players_not_in_voice:
+            warning_sent = True
+            # Ping in channel
+            missing_pings = " ".join([f"<@{uid}>" for uid in players_not_in_voice])
+            await channel.send(f"⚠️ **5 MINUTES REMAINING!** {missing_pings} - Join the Pregame Lobby NOW or the match will be cancelled!")
+            # DM each missing player
+            for uid in players_not_in_voice:
+                member = guild.get_member(uid)
+                if member:
+                    try:
+                        warning_embed = discord.Embed(
+                            title=f"⚠️ {match_label} - 5 Minutes Remaining!",
+                            description=f"You have **5 minutes** to join the **Pregame Lobby** voice channel or the match will be **cancelled**!",
+                            color=discord.Color.red()
+                        )
+                        warning_embed.set_image(url=HEADER_IMAGE_URL)
+                        await member.send(embed=warning_embed)
+                        log_action(f"Sent 5-minute warning DM to {member.name}")
+                    except discord.Forbidden:
+                        log_action(f"Could not DM {member.name} - DMs disabled")
+                    except Exception as e:
+                        log_action(f"Error sending warning DM to {member.name}: {e}")
+
         # Check timeout
         if elapsed >= timeout_seconds:
             log_action(f"Pregame timeout - {len(players_not_in_voice)} players missing")
-            # Handle no-shows: replace with people from pregame VC or proceed anyway
+            # Handle no-shows: cancel match and return players to postgame
             await handle_pregame_timeout(channel, pregame_message, players, players_not_in_voice, pregame_vc_id, test_mode, testers, match_label)
             return
 
@@ -1667,6 +1697,7 @@ async def wait_for_playlist_players(
     guild = channel.guild
     ps = playlist_state
     timeout_seconds = 600  # 10 minutes
+    warning_sent = False  # Track if 5-minute warning has been sent
     start_time = asyncio.get_event_loop().time()
 
     while True:
@@ -1721,6 +1752,30 @@ async def wait_for_playlist_players(
         if len(players_in_voice) == len(players):
             log_action(f"All players in {match_label} pregame - proceeding to team assignment")
             break
+
+        # Send 5-minute warning DM and channel ping at halfway point
+        if elapsed >= 300 and not warning_sent and players_not_in_voice:
+            warning_sent = True
+            # Ping in channel
+            missing_pings = " ".join([f"<@{uid}>" for uid in players_not_in_voice])
+            await channel.send(f"⚠️ **5 MINUTES REMAINING!** {missing_pings} - Join the Pregame Lobby NOW or the match will be cancelled!")
+            # DM each missing player
+            for uid in players_not_in_voice:
+                member = guild.get_member(uid)
+                if member:
+                    try:
+                        warning_embed = discord.Embed(
+                            title=f"⚠️ {match_label} - 5 Minutes Remaining!",
+                            description=f"You have **5 minutes** to join the **Pregame Lobby** voice channel or the match will be **cancelled**!",
+                            color=discord.Color.red()
+                        )
+                        warning_embed.set_image(url=HEADER_IMAGE_URL)
+                        await member.send(embed=warning_embed)
+                        log_action(f"Sent 5-minute warning DM to {member.name}")
+                    except discord.Forbidden:
+                        log_action(f"Could not DM {member.name} - DMs disabled")
+                    except Exception as e:
+                        log_action(f"Error sending warning DM to {member.name}: {e}")
 
         await asyncio.sleep(5)
 
