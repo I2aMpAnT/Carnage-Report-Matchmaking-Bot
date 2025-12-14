@@ -3792,8 +3792,8 @@ python3 populate_stats.py'''
     @has_admin_role()
     @app_commands.describe(
         playlist="Which playlist to backfill (default: mlg_4v4)",
-        preview_only="Preview embeds without posting (default: True)",
-        series_number="Specific series number to preview (optional)"
+        preview_only="Preview embeds without posting (default: False)",
+        series_number="Specific series number to post (optional)"
     )
     @app_commands.choices(playlist=[
         app_commands.Choice(name="MLG 4v4", value="mlg_4v4"),
@@ -3804,15 +3804,36 @@ python3 populate_stats.py'''
     async def backfill_game_data(
         interaction: discord.Interaction,
         playlist: str = "mlg_4v4",
-        preview_only: bool = True,
+        preview_only: bool = False,
         series_number: int = None
     ):
-        """Backfill historical series data - reads from local JSON files and generates series embeds"""
+        """Backfill historical series data - reads from local JSON files and posts series embeds to playlist channel"""
         await interaction.response.defer(ephemeral=True)
 
         import statsdata
+        from playlists import PLAYLIST_CONFIG, PlaylistType
 
         guild = interaction.guild
+
+        # Map playlist string to PlaylistType and get channel
+        playlist_map = {
+            "mlg_4v4": PlaylistType.MLG_4V4,
+            "team_hardcore": PlaylistType.TEAM_HARDCORE,
+            "double_team": PlaylistType.DOUBLE_TEAM,
+            "head_to_head": PlaylistType.HEAD_TO_HEAD,
+        }
+
+        playlist_type = playlist_map.get(playlist)
+        if not playlist_type or playlist_type not in PLAYLIST_CONFIG:
+            await interaction.followup.send(f"❌ Unknown playlist: {playlist}", ephemeral=True)
+            return
+
+        target_channel_id = PLAYLIST_CONFIG[playlist_type]["channel_id"]
+        target_channel = guild.get_channel(target_channel_id)
+
+        if not target_channel:
+            await interaction.followup.send(f"❌ Could not find playlist channel", ephemeral=True)
+            return
 
         # Get data file path for logging
         data_file = statsdata.get_playlist_data_file(playlist)
@@ -3830,24 +3851,40 @@ python3 populate_stats.py'''
             await interaction.followup.send(f"❌ No series data found in `{data_file}`", ephemeral=True)
             return
 
-        # Send previews
-        await interaction.followup.send(
-            f"**Found {len(embeds_generated)} series in `{data_file}`**\n"
-            f"{'Preview mode - not posting to channels' if preview_only else 'Will post to playlist channel'}",
-            ephemeral=True
-        )
-
-        # Send each embed as preview
-        for i, embed in enumerate(embeds_generated[:10]):  # Limit to 10 previews
-            await interaction.followup.send(embed=embed, ephemeral=True)
-
-        if len(embeds_generated) > 10:
+        if preview_only:
+            # Preview mode - send to admin only
             await interaction.followup.send(
-                f"... and {len(embeds_generated) - 10} more series. Use `series_number` to view specific ones.",
+                f"**Found {len(embeds_generated)} series in `{data_file}`** (Preview mode)",
+                ephemeral=True
+            )
+            for i, embed in enumerate(embeds_generated[:10]):
+                await interaction.followup.send(embed=embed, ephemeral=True)
+            if len(embeds_generated) > 10:
+                await interaction.followup.send(
+                    f"... and {len(embeds_generated) - 10} more series.",
+                    ephemeral=True
+                )
+        else:
+            # Post mode - send to playlist channel
+            await interaction.followup.send(
+                f"📤 Posting {len(embeds_generated)} series embeds to {target_channel.mention}...",
                 ephemeral=True
             )
 
-        log_action(f"Admin {interaction.user.name} ran /backfillgamedata for {playlist} - {len(embeds_generated)} series found")
+            posted = 0
+            for embed in embeds_generated:
+                try:
+                    await target_channel.send(embed=embed)
+                    posted += 1
+                except Exception as e:
+                    log_action(f"Failed to post embed: {e}")
+
+            await interaction.followup.send(
+                f"✅ Posted {posted}/{len(embeds_generated)} series embeds to {target_channel.mention}",
+                ephemeral=True
+            )
+
+        log_action(f"Admin {interaction.user.name} ran /backfillgamedata for {playlist} - {len(embeds_generated)} series {'previewed' if preview_only else 'posted'}")
 
     @bot.tree.command(name="voicervb", description="[STAFF] Create Red vs Blue voice channels")
     @has_staff_role()
