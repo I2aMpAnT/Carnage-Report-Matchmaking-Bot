@@ -550,19 +550,25 @@ def add_game_to_active_match(playlist_type: str, player_ids: List[int], game_dat
 
 
 def move_active_to_completed(playlist_type: str, player_ids: List[int], result: str,
-                              team1_names: List[str] = None, team2_names: List[str] = None) -> bool:
-    """Move an active match to completed.json. Returns True if successful."""
+                              team1_names: List[str] = None, team2_names: List[str] = None,
+                              playlist_name: str = None) -> Optional[dict]:
+    """
+    Move an active match to completed.json.
+
+    Returns:
+        The completed series dict (for creating embed), or None if failed.
+    """
     matches_file = get_playlist_matches_file(playlist_type)
     completed_file = get_playlist_completed_file(playlist_type)
 
     if not os.path.exists(matches_file):
-        return False
+        return None
 
     try:
         with open(matches_file, 'r') as f:
             data = json.load(f)
     except:
-        return False
+        return None
 
     # Find and remove the active match
     game_players = set(player_ids)
@@ -576,7 +582,7 @@ def move_active_to_completed(playlist_type: str, player_ids: List[int], result: 
             new_active.append(active)
 
     if not active_match:
-        return False
+        return None
 
     data["active_matches"] = new_active
 
@@ -626,7 +632,7 @@ def move_active_to_completed(playlist_type: str, player_ids: List[int], result: 
         json.dump(completed_data, f, indent=2)
 
     log_action(f"Moved active match to completed #{permanent_number} in {completed_file}")
-    return True
+    return completed_entry
 
 
 def is_game_already_assigned(playlist_type: str, filename: str) -> bool:
@@ -847,6 +853,145 @@ def backfill_historical_series(playlist_type: str, series_games: List[dict],
 
     log_action(f"Backfilled historical series #{permanent_number} to {completed_file}")
     return True
+
+
+def create_series_embed(series_data: dict, red_emoji_id: int = None, blue_emoji_id: int = None) -> discord.Embed:
+    """
+    Create an embed for a completed series.
+
+    Args:
+        series_data: Dict with match_number, team1, team2, games, result, etc.
+        red_emoji_id: Optional emoji ID for red team
+        blue_emoji_id: Optional emoji ID for blue team
+
+    Returns:
+        discord.Embed ready to post
+    """
+    match_number = series_data.get("match_number", "?")
+    playlist_name = series_data.get("playlist_name", series_data.get("playlist", ""))
+    result = series_data.get("result", "")
+    team1 = series_data.get("team1", {})
+    team2 = series_data.get("team2", {})
+    games = series_data.get("games", [])
+
+    team1_wins = team1.get("games_won", 0)
+    team2_wins = team2.get("games_won", 0)
+
+    # Determine winner text
+    if result == "TEAM1_WIN":
+        winner_text = "Red Team Wins!"
+        embed_color = discord.Color.red()
+    elif result == "TEAM2_WIN":
+        winner_text = "Blue Team Wins!"
+        embed_color = discord.Color.blue()
+    else:
+        winner_text = "Series Complete"
+        embed_color = discord.Color.gold()
+
+    # Build embed
+    embed = discord.Embed(
+        title=f"{playlist_name} Series #{match_number}",
+        description=f"**{winner_text}** ({team1_wins}-{team2_wins})",
+        color=embed_color
+    )
+
+    # Team rosters
+    team1_names = team1.get("player_names", [str(uid) for uid in team1.get("player_ids", [])])
+    team2_names = team2.get("player_names", [str(uid) for uid in team2.get("player_ids", [])])
+
+    red_emoji = f"<:red:{red_emoji_id}>" if red_emoji_id else "🔴"
+    blue_emoji = f"<:blue:{blue_emoji_id}>" if blue_emoji_id else "🔵"
+
+    embed.add_field(
+        name=f"{red_emoji} Red Team",
+        value="\n".join(team1_names) if team1_names else "Unknown",
+        inline=True
+    )
+    embed.add_field(
+        name=f"{blue_emoji} Blue Team",
+        value="\n".join(team2_names) if team2_names else "Unknown",
+        inline=True
+    )
+
+    # Game results
+    if games:
+        games_text = ""
+        for game in games:
+            game_num = game.get("game_number", "?")
+            winner = game.get("winner", "")
+            map_name = game.get("map", "Unknown")
+            gametype = game.get("gametype", "")
+            score = game.get("score", "")
+
+            if winner == "TEAM1":
+                team_emoji = red_emoji
+                team_text = "Red"
+            else:
+                team_emoji = blue_emoji
+                team_text = "Blue"
+
+            game_line = f"{team_emoji} **{team_text}** - {map_name}"
+            if gametype:
+                game_line += f" ({gametype})"
+            if score:
+                game_line += f" [{score}]"
+            games_text += game_line + "\n"
+
+        embed.add_field(
+            name="Games",
+            value=games_text.strip(),
+            inline=False
+        )
+
+    # Timestamp
+    start_time = series_data.get("start_time")
+    if start_time:
+        embed.set_footer(text=f"Started: {start_time}")
+
+    return embed
+
+
+def get_unposted_series(playlist_type: str) -> List[dict]:
+    """
+    Get all unposted series from completed.json in chronological order (oldest first).
+    Series are considered unposted if they don't have 'posted': True.
+    """
+    completed_file = get_playlist_completed_file(playlist_type)
+    if not os.path.exists(completed_file):
+        return []
+
+    try:
+        with open(completed_file, 'r') as f:
+            data = json.load(f)
+    except:
+        return []
+
+    # Filter unposted and sort by match_number (ascending = oldest first)
+    unposted = [m for m in data.get("matches", []) if not m.get("posted", False)]
+    unposted.sort(key=lambda x: x.get("match_number", 0))
+
+    return unposted
+
+
+def mark_series_as_posted(playlist_type: str, match_number: int):
+    """Mark a series as posted in completed.json."""
+    completed_file = get_playlist_completed_file(playlist_type)
+    if not os.path.exists(completed_file):
+        return
+
+    try:
+        with open(completed_file, 'r') as f:
+            data = json.load(f)
+    except:
+        return
+
+    for match in data.get("matches", []):
+        if match.get("match_number") == match_number:
+            match["posted"] = True
+            break
+
+    with open(completed_file, 'w') as f:
+        json.dump(data, f, indent=2)
 
 
 def update_active_match_in_history(match: PlaylistMatch):
@@ -2265,6 +2410,9 @@ __all__ = [
     'determine_winner_from_players',
     'group_historical_games_into_series',
     'backfill_historical_series',
+    'create_series_embed',
+    'get_unposted_series',
+    'mark_series_as_posted',
     'update_active_match_in_history',
     'remove_match_from_active',
     'save_playlist_stats',
