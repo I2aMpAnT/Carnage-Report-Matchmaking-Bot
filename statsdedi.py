@@ -1,7 +1,7 @@
 # statsdedi.py - Vultr VPS Management for Stats Dedi
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.0.7"
+MODULE_VERSION = "1.0.8"
 
 import discord
 from discord import app_commands
@@ -321,23 +321,45 @@ class StatsDediView(View):
         try:
             # Check if user already has a dedi
             instances = await list_instances()
-            user_label = f"{interaction.user.display_name}'s StatsDedi"
+            user_base_label = f"{interaction.user.display_name}'s StatsDedi"
 
-            existing = [i for i in instances if i.get("label") == user_label]
+            # Find all existing dedis for this user
+            existing = [i for i in instances if i.get("label", "").startswith(user_base_label)]
+
             if existing:
+                # User already has at least one dedi - ask for confirmation
+                existing_count = len(existing)
+                existing_info = "\n".join([
+                    f"• **{e.get('label')}** - IP: `{e.get('main_ip', 'N/A')}` ({e.get('status', 'Unknown')})"
+                    for e in existing
+                ])
+
+                # Create confirmation view
+                confirm_view = SecondDediConfirmView(interaction.user, existing_count, self)
+
                 await interaction.followup.send(
                     embed=discord.Embed(
-                        title="Already Have a Dedi",
-                        description=f"You already have a Stats Dedi running!\n\n"
-                                    f"**IP:** `{existing[0].get('main_ip', 'N/A')}`\n"
-                                    f"**Status:** {existing[0].get('status', 'Unknown')}\n\n"
-                                    f"Destroy it first if you want to create a new one.",
+                        title="⚠️ You Already Have a Dedi Running",
+                        description=f"You currently have **{existing_count}** Stats Dedi(s) running:\n\n"
+                                    f"{existing_info}\n\n"
+                                    f"**Are you sure you want to create another one?**\n"
+                                    f"This will incur additional hourly charges.",
                         color=discord.Color.orange()
                     ),
+                    view=confirm_view,
                     ephemeral=True
                 )
                 return
 
+            # No existing dedi - create normally
+            await self._create_dedi(interaction, user_base_label)
+
+        except Exception as e:
+            await interaction.followup.send(f"Error creating dedi: {e}", ephemeral=True)
+
+    async def _create_dedi(self, interaction: discord.Interaction, user_label: str):
+        """Internal method to actually create the dedi"""
+        try:
             # Record start time for spin-up tracking
             start_time = time.time()
 
@@ -436,6 +458,49 @@ class StatsDediView(View):
 
         except Exception as e:
             await interaction.followup.send(f"Error destroying dedi: {e}", ephemeral=True)
+
+
+class SecondDediConfirmView(View):
+    """View to confirm creating a second (or additional) dedi"""
+
+    def __init__(self, user: discord.User, existing_count: int, parent_view: StatsDediView):
+        super().__init__(timeout=60)
+        self.user = user
+        self.existing_count = existing_count
+        self.parent_view = parent_view
+
+    @discord.ui.button(label="Yes, Create Another", style=discord.ButtonStyle.success, custom_id="confirm_second_dedi")
+    async def confirm_btn(self, interaction: discord.Interaction, button: Button):
+        # Only the original user can confirm
+        if interaction.user.id != self.user.id:
+            await interaction.response.send_message("Only the original requester can confirm this.", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        # Create the dedi with a numbered label
+        new_number = self.existing_count + 1
+        user_label = f"{interaction.user.display_name}'s StatsDedi {new_number}"
+
+        await self.parent_view._create_dedi(interaction, user_label)
+
+        # Disable the buttons
+        self.confirm_btn.disabled = True
+        self.cancel_btn.disabled = True
+        await interaction.message.edit(view=self)
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary, custom_id="cancel_second_dedi")
+    async def cancel_btn(self, interaction: discord.Interaction, button: Button):
+        if interaction.user.id != self.user.id:
+            await interaction.response.send_message("Only the original requester can cancel this.", ephemeral=True)
+            return
+
+        await interaction.response.send_message("Dedi creation cancelled.", ephemeral=True)
+
+        # Disable the buttons
+        self.confirm_btn.disabled = True
+        self.cancel_btn.disabled = True
+        await interaction.message.edit(view=self)
 
 
 class DediDestroySelectView(View):
