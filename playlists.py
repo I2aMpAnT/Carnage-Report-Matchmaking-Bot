@@ -881,21 +881,24 @@ def create_series_embed(series_data: dict, red_emoji_id: int = None, blue_emoji_
     red_emoji = f"<:redteam:{red_emoji_id}>" if red_emoji_id else "🔴"
     blue_emoji = f"<:blueteam:{blue_emoji_id}>" if blue_emoji_id else "🔵"
 
-    # Determine winner text with team emoji
+    # Determine winner text with team emoji (winner score first)
     if result == "TEAM1_WIN":
         winner_text = f"{red_emoji} Red Team Wins!"
+        score_text = f"{team1_wins}-{team2_wins}"
         embed_color = discord.Color.red()
     elif result == "TEAM2_WIN":
         winner_text = f"{blue_emoji} Blue Team Wins!"
+        score_text = f"{team2_wins}-{team1_wins}"
         embed_color = discord.Color.blue()
     else:
         winner_text = "Series Complete"
+        score_text = f"{team1_wins}-{team2_wins}"
         embed_color = discord.Color.gold()
 
     # Build embed
     embed = discord.Embed(
         title=f"{playlist_name} Series #{match_number}",
-        description=f"**{winner_text}** ({team1_wins}-{team2_wins})",
+        description=f"**{winner_text}** ({score_text})",
         color=embed_color
     )
 
