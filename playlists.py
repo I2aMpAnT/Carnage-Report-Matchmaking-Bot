@@ -629,6 +629,159 @@ def move_active_to_completed(playlist_type: str, player_ids: List[int], result: 
     return True
 
 
+def is_game_already_assigned(playlist_type: str, game_timestamp: str) -> bool:
+    """
+    Check if a game has already been assigned to a series (active or completed).
+    Uses timestamp (down to milliseconds) as unique identifier.
+    """
+    # Check active matches
+    matches_file = get_playlist_matches_file(playlist_type)
+    if os.path.exists(matches_file):
+        try:
+            with open(matches_file, 'r') as f:
+                data = json.load(f)
+            for active in data.get("active_matches", []):
+                for game in active.get("games", []):
+                    if game.get("timestamp") == game_timestamp:
+                        return True
+        except:
+            pass
+
+    # Check completed matches
+    completed_file = get_playlist_completed_file(playlist_type)
+    if os.path.exists(completed_file):
+        try:
+            with open(completed_file, 'r') as f:
+                data = json.load(f)
+            for match in data.get("matches", []):
+                for game in match.get("games", []):
+                    if game.get("timestamp") == game_timestamp:
+                        return True
+        except:
+            pass
+
+    return False
+
+
+def group_historical_games_into_series(games: List[dict]) -> List[List[dict]]:
+    """
+    Group historical games into series based on player sets.
+
+    Args:
+        games: List of game dicts, each with 'player_ids' (list of all 8 players),
+               'timestamp', and other game data
+
+    Returns:
+        List of series, where each series is a list of games with the same player set
+
+    Logic:
+        - Same 8 players (regardless of team) = same series
+        - New player appears = new series starts
+    """
+    if not games:
+        return []
+
+    # Sort by timestamp
+    sorted_games = sorted(games, key=lambda g: g.get("timestamp", ""))
+
+    series_list = []
+    current_series = []
+    current_players = None
+
+    for game in sorted_games:
+        game_players = set(game.get("player_ids", []))
+
+        if current_players is None:
+            # First game
+            current_players = game_players
+            current_series = [game]
+        elif game_players == current_players:
+            # Same players - same series
+            current_series.append(game)
+        else:
+            # Different players - new series
+            if current_series:
+                series_list.append(current_series)
+            current_players = game_players
+            current_series = [game]
+
+    # Don't forget the last series
+    if current_series:
+        series_list.append(current_series)
+
+    return series_list
+
+
+def backfill_historical_series(playlist_type: str, series_games: List[dict],
+                                team1_ids: List[int], team2_ids: List[int],
+                                result: str, team1_names: List[str] = None,
+                                team2_names: List[str] = None) -> bool:
+    """
+    Write a historical series directly to completed.json (no active match).
+
+    Args:
+        playlist_type: The playlist type
+        series_games: List of game dicts for this series
+        team1_ids: Player IDs for team 1
+        team2_ids: Player IDs for team 2
+        result: "TEAM1_WIN", "TEAM2_WIN", or "TIE"
+        team1_names: Optional player names for team 1
+        team2_names: Optional player names for team 2
+
+    Returns:
+        True if successful
+    """
+    completed_file = get_playlist_completed_file(playlist_type)
+
+    # Load completed file
+    completed_data = {"matches": []}
+    if os.path.exists(completed_file):
+        try:
+            with open(completed_file, 'r') as f:
+                completed_data = json.load(f)
+        except:
+            completed_data = {"matches": []}
+
+    # Assign permanent number
+    permanent_number = len(completed_data.get("matches", [])) + 1
+
+    # Count games won
+    team1_wins = sum(1 for g in series_games if g.get("winner") == "TEAM1")
+    team2_wins = sum(1 for g in series_games if g.get("winner") == "TEAM2")
+
+    # Get start/end times from games
+    start_time = series_games[0].get("timestamp") if series_games else None
+    end_time = series_games[-1].get("timestamp") if series_games else None
+
+    # Build completed entry
+    completed_entry = {
+        "match_number": permanent_number,
+        "playlist": playlist_type,
+        "start_time": start_time,
+        "end_time": end_time,
+        "result": result,
+        "team1": {
+            "player_ids": team1_ids,
+            "player_names": team1_names or [str(uid) for uid in team1_ids],
+            "games_won": team1_wins
+        },
+        "team2": {
+            "player_ids": team2_ids,
+            "player_names": team2_names or [str(uid) for uid in team2_ids],
+            "games_won": team2_wins
+        },
+        "games": series_games
+    }
+
+    completed_data["matches"].append(completed_entry)
+
+    with open(completed_file, 'w') as f:
+        json.dump(completed_data, f, indent=2)
+
+    log_action(f"Backfilled historical series #{permanent_number} to {completed_file}")
+    return True
+
+
 def update_active_match_in_history(match: PlaylistMatch):
     """Update an active match's data in the history file (e.g., game results)"""
     matches_file = get_playlist_matches_file(match.playlist_type)
@@ -2038,6 +2191,9 @@ __all__ = [
     'find_active_match_by_players',
     'add_game_to_active_match',
     'move_active_to_completed',
+    'is_game_already_assigned',
+    'group_historical_games_into_series',
+    'backfill_historical_series',
     'update_active_match_in_history',
     'remove_match_from_active',
     'save_playlist_stats',
