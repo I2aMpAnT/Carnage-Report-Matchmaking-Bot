@@ -2014,6 +2014,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         app_commands.Choice(name="Team Hardcore 4v4", value="team_hardcore"),
         app_commands.Choice(name="Double Team 2v2", value="double_team"),
         app_commands.Choice(name="Head to Head 1v1", value="head_to_head"),
+        app_commands.Choice(name="Tournament 1", value="tournament_1"),
     ])
     @has_staff_role()
     async def admin_set_teams(
@@ -2040,9 +2041,15 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         elif playlist == PlaylistType.DOUBLE_TEAM:
             team_size = 2
             playlist_name = "Double Team 2v2"
-        else:  # MLG_4V4 or TEAM_HARDCORE
+        elif playlist == PlaylistType.TOURNAMENT_1:
             team_size = 4
-            playlist_name = "MLG 4v4" if playlist == PlaylistType.MLG_4V4 else "Team Hardcore 4v4"
+            playlist_name = "Tournament 1"
+        elif playlist == PlaylistType.TEAM_HARDCORE:
+            team_size = 4
+            playlist_name = "Team Hardcore 4v4"
+        else:  # MLG_4V4
+            team_size = 4
+            playlist_name = "MLG 4v4"
 
         # Build teams based on team size (all red first, then all blue)
         if team_size == 1:
