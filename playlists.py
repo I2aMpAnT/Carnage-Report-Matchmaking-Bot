@@ -877,12 +877,16 @@ def create_series_embed(series_data: dict, red_emoji_id: int = None, blue_emoji_
     team1_wins = team1.get("games_won", 0)
     team2_wins = team2.get("games_won", 0)
 
-    # Determine winner text
+    # Team emojis
+    red_emoji = f"<:redteam:{red_emoji_id}>" if red_emoji_id else "🔴"
+    blue_emoji = f"<:blueteam:{blue_emoji_id}>" if blue_emoji_id else "🔵"
+
+    # Determine winner text with team emoji
     if result == "TEAM1_WIN":
-        winner_text = "Red Team Wins!"
+        winner_text = f"{red_emoji} Red Team Wins!"
         embed_color = discord.Color.red()
     elif result == "TEAM2_WIN":
-        winner_text = "Blue Team Wins!"
+        winner_text = f"{blue_emoji} Blue Team Wins!"
         embed_color = discord.Color.blue()
     else:
         winner_text = "Series Complete"
@@ -898,9 +902,6 @@ def create_series_embed(series_data: dict, red_emoji_id: int = None, blue_emoji_
     # Team rosters
     team1_names = team1.get("player_names", [str(uid) for uid in team1.get("player_ids", [])])
     team2_names = team2.get("player_names", [str(uid) for uid in team2.get("player_ids", [])])
-
-    red_emoji = f"<:red:{red_emoji_id}>" if red_emoji_id else "🔴"
-    blue_emoji = f"<:blue:{blue_emoji_id}>" if blue_emoji_id else "🔵"
 
     embed.add_field(
         name=f"{red_emoji} Red Team",
