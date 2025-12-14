@@ -136,12 +136,13 @@ async def get_player_mmr(user_id: int) -> int:
 
 def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: int, QUEUE_CHANNEL_ID: int):
     """Setup all bot commands"""
-    
+    print("[COMMANDS] Starting setup_commands...")
+
     # Make STAFF_ROLES accessible for modification
     global STAFF_ROLES
-    
+
     # ==== ADMIN COMMANDS ====
-    
+
     @bot.tree.command(name="addstaffrole", description="[ADMIN] Add a role to the staff roles list")
     @has_admin_role()
     @app_commands.describe(role="The role to add to staff roles")
@@ -3821,6 +3822,7 @@ python3 populate_stats.py'''
         log_action(f"Admin {interaction.user.name} ran /populatestatsrefresh - {'success' if success else 'failed'}")
         await interaction.followup.send(response, ephemeral=True)
 
+    print("[COMMANDS] Registering dotcomrefresh command...")
     @bot.tree.command(name="dotcomrefresh", description="[ADMIN] Pull latest CarnageReport.com data from GitHub")
     @has_admin_role()
     async def dotcom_refresh(interaction: discord.Interaction):
@@ -3858,6 +3860,7 @@ python3 populate_stats.py'''
         log_action(f"Admin {interaction.user.name} ran /dotcomrefresh - {'success' if success else 'failed'}")
         await interaction.followup.send(response, ephemeral=True)
 
+    print("[COMMANDS] Registering backfillgamedata command...")
     @bot.tree.command(name="backfillgamedata", description="[ADMIN] Backfill historical series data into embeds for all playlists")
     @has_admin_role()
     async def backfill_game_data(interaction: discord.Interaction):
@@ -4050,4 +4053,5 @@ python3 populate_stats.py'''
             log_action(f"[VOICE] Failed to create RvB channels: {e}")
             await interaction.followup.send(f"❌ Failed to create channels: {e}", ephemeral=True)
 
+    print("[COMMANDS] setup_commands completed successfully!")
     return bot
