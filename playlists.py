@@ -855,9 +855,9 @@ def backfill_historical_series(playlist_type: str, series_games: List[dict],
     return True
 
 
-def create_series_embed(series_data: dict, red_emoji_id: int = None, blue_emoji_id: int = None) -> discord.Embed:
+def create_series_embed(series_data: dict, red_emoji_id: int = None, blue_emoji_id: int = None) -> Tuple[discord.Embed, View]:
     """
-    Create an embed for a completed series.
+    Create an embed and view for a completed series.
 
     Args:
         series_data: Dict with match_number, team1, team2, games, result, etc.
@@ -865,7 +865,7 @@ def create_series_embed(series_data: dict, red_emoji_id: int = None, blue_emoji_
         blue_emoji_id: Optional emoji ID for blue team
 
     Returns:
-        discord.Embed ready to post
+        Tuple of (discord.Embed, discord.ui.View with CarnageReport button)
     """
     match_number = series_data.get("match_number", "?")
     playlist_name = series_data.get("playlist_name", series_data.get("playlist", ""))
@@ -974,7 +974,15 @@ def create_series_embed(series_data: dict, red_emoji_id: int = None, blue_emoji_
     if footer_parts:
         embed.set_footer(text=" | ".join(footer_parts))
 
-    return embed
+    # Create view with CarnageReport.com button
+    view = View()
+    view.add_item(Button(
+        label="See more at CarnageReport.com",
+        url="https://www.carnagereport.com",
+        style=discord.ButtonStyle.link
+    ))
+
+    return embed, view
 
 
 def get_unposted_series(playlist_type: str) -> List[dict]:
