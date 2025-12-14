@@ -2158,6 +2158,10 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             voice_category_id = 1403916181554860112
             category = channel.guild.get_channel(voice_category_id)
 
+            # Text channel category (Matchmaking)
+            text_category_id = 1403855141857337501
+            text_category = channel.guild.get_channel(text_category_id)
+
             if team_size == 1:
                 # 1v1: Create shared VC
                 p1 = channel.guild.get_member(red_team[0])
@@ -2169,8 +2173,69 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                     category=category
                 )
                 match.shared_vc_id = vc.id
+            elif playlist == PlaylistType.TOURNAMENT_1:
+                # Tournament: Use captain names with color emojis
+                red_mmrs = [(uid, await get_player_mmr(uid)) for uid in red_team]
+                blue_mmrs = [(uid, await get_player_mmr(uid)) for uid in blue_team]
+                red_captain_id = max(red_mmrs, key=lambda x: x[1])[0]
+                blue_captain_id = max(blue_mmrs, key=lambda x: x[1])[0]
+                red_captain = channel.guild.get_member(red_captain_id)
+                blue_captain = channel.guild.get_member(blue_captain_id)
+                red_captain_name = red_captain.display_name if red_captain else "Red"
+                blue_captain_name = blue_captain.display_name if blue_captain else "Blue"
+
+                # Create text channel for tournament match
+                match_text_channel = await channel.guild.create_text_channel(
+                    name=f"Team {red_captain_name} vs Team {blue_captain_name}",
+                    category=text_category,
+                    topic=f"{match.get_match_label()} - Auto-deleted when match ends"
+                )
+                match.text_channel_id = match_text_channel.id
+
+                # Create voice channels with captain names
+                red_vc = await channel.guild.create_voice_channel(
+                    name=f"🔴 - Team {red_captain_name}",
+                    category=category,
+                    user_limit=team_size + 2
+                )
+                blue_vc = await channel.guild.create_voice_channel(
+                    name=f"🔵 - Team {blue_captain_name}",
+                    category=category,
+                    user_limit=team_size + 2
+                )
+                match.team1_vc_id = red_vc.id
+                match.team2_vc_id = blue_vc.id
+
+                # Move players to their team VCs
+                for uid in red_team:
+                    member = channel.guild.get_member(uid)
+                    if member and member.voice:
+                        try:
+                            await member.move_to(red_vc)
+                        except:
+                            pass
+                for uid in blue_team:
+                    member = channel.guild.get_member(uid)
+                    if member and member.voice:
+                        try:
+                            await member.move_to(blue_vc)
+                        except:
+                            pass
+
+                # Post to general chat
+                from pregame import post_tournament_to_general
+                await post_tournament_to_general(channel.guild, match, red_captain_name, blue_captain_name)
+
+                # Show match embed in tournament text channel
+                await show_playlist_match_embed(match_text_channel, match)
+
+                # Save to history
+                save_match_to_history(match, "STARTED", channel.guild)
+
+                log_action(f"{playlist_name} match {match.match_number} started - Team {red_captain_name} vs Team {blue_captain_name}")
+                return
             else:
-                # Team match: Create team VCs
+                # Other team matches: Create team VCs with MMR
                 team1_mmrs = [await get_player_mmr(uid) for uid in red_team]
                 team2_mmrs = [await get_player_mmr(uid) for uid in blue_team]
                 team1_avg = int(sum(team1_mmrs) / len(team1_mmrs)) if team1_mmrs else 1500
@@ -2189,20 +2254,6 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
 
             # Show match embed
             await show_playlist_match_embed(channel, match)
-
-            # Post to general chat for tournament matches
-            if playlist == PlaylistType.TOURNAMENT_1:
-                from pregame import post_tournament_to_general
-                # Get captain names (highest MMR on each team)
-                red_mmrs = [(uid, await get_player_mmr(uid)) for uid in red_team]
-                blue_mmrs = [(uid, await get_player_mmr(uid)) for uid in blue_team]
-                red_captain_id = max(red_mmrs, key=lambda x: x[1])[0]
-                blue_captain_id = max(blue_mmrs, key=lambda x: x[1])[0]
-                red_captain = channel.guild.get_member(red_captain_id)
-                blue_captain = channel.guild.get_member(blue_captain_id)
-                red_captain_name = red_captain.display_name if red_captain else "Red"
-                blue_captain_name = blue_captain.display_name if blue_captain else "Blue"
-                await post_tournament_to_general(channel.guild, match, red_captain_name, blue_captain_name)
 
             # Save to history
             save_match_to_history(match, "STARTED", channel.guild)
