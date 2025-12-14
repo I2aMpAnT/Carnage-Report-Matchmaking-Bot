@@ -3788,6 +3788,67 @@ python3 populate_stats.py'''
         log_action(f"Admin {interaction.user.name} ran /dotcomrefresh - {'success' if success else 'failed'}")
         await interaction.followup.send(response, ephemeral=True)
 
+    @bot.tree.command(name="backfillgamedata", description="[ADMIN] Backfill historical series data into embeds")
+    @has_admin_role()
+    @app_commands.describe(
+        playlist="Which playlist to backfill (default: mlg_4v4)",
+        preview_only="Preview embeds without posting (default: True)",
+        series_number="Specific series number to preview (optional)"
+    )
+    @app_commands.choices(playlist=[
+        app_commands.Choice(name="MLG 4v4", value="mlg_4v4"),
+        app_commands.Choice(name="Team Hardcore", value="team_hardcore"),
+        app_commands.Choice(name="Double Team", value="double_team"),
+        app_commands.Choice(name="Head to Head", value="head_to_head"),
+    ])
+    async def backfill_game_data(
+        interaction: discord.Interaction,
+        playlist: str = "mlg_4v4",
+        preview_only: bool = True,
+        series_number: int = None
+    ):
+        """Backfill historical series data - reads from local JSON files and generates series embeds"""
+        await interaction.response.defer(ephemeral=True)
+
+        import statsdata
+
+        guild = interaction.guild
+
+        # Get data file path for logging
+        data_file = statsdata.get_playlist_data_file(playlist)
+
+        # Generate embeds using statsdata module
+        embeds_generated = await statsdata.generate_all_series_embeds(
+            playlist=playlist,
+            guild=guild,
+            red_emoji_id=RED_TEAM_EMOJI_ID,
+            blue_emoji_id=BLUE_TEAM_EMOJI_ID,
+            series_number=series_number
+        )
+
+        if not embeds_generated:
+            await interaction.followup.send(f"❌ No series data found in `{data_file}`", ephemeral=True)
+            return
+
+        # Send previews
+        await interaction.followup.send(
+            f"**Found {len(embeds_generated)} series in `{data_file}`**\n"
+            f"{'Preview mode - not posting to channels' if preview_only else 'Will post to playlist channel'}",
+            ephemeral=True
+        )
+
+        # Send each embed as preview
+        for i, embed in enumerate(embeds_generated[:10]):  # Limit to 10 previews
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+        if len(embeds_generated) > 10:
+            await interaction.followup.send(
+                f"... and {len(embeds_generated) - 10} more series. Use `series_number` to view specific ones.",
+                ephemeral=True
+            )
+
+        log_action(f"Admin {interaction.user.name} ran /backfillgamedata for {playlist} - {len(embeds_generated)} series found")
+
     @bot.tree.command(name="voicervb", description="[STAFF] Create Red vs Blue voice channels")
     @has_staff_role()
     async def voice_rvb(interaction: discord.Interaction):
