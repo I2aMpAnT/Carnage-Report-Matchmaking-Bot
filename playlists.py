@@ -663,6 +663,45 @@ def is_game_already_assigned(playlist_type: str, filename: str) -> bool:
     return False
 
 
+LAST_PROCESSED_FILE = "last_processed.json"
+
+
+def get_last_processed(playlist_type: str) -> Optional[str]:
+    """Get the last processed filename for a playlist."""
+    if not os.path.exists(LAST_PROCESSED_FILE):
+        return None
+    try:
+        with open(LAST_PROCESSED_FILE, 'r') as f:
+            data = json.load(f)
+        return data.get(playlist_type)
+    except:
+        return None
+
+
+def set_last_processed(playlist_type: str, filename: str):
+    """Set the last processed filename for a playlist."""
+    data = {}
+    if os.path.exists(LAST_PROCESSED_FILE):
+        try:
+            with open(LAST_PROCESSED_FILE, 'r') as f:
+                data = json.load(f)
+        except:
+            data = {}
+
+    data[playlist_type] = filename
+
+    with open(LAST_PROCESSED_FILE, 'w') as f:
+        json.dump(data, f, indent=2)
+
+
+def is_file_newer_than_last(playlist_type: str, filename: str) -> bool:
+    """Check if a filename is newer than the last processed one (alphabetical/chronological comparison)."""
+    last = get_last_processed(playlist_type)
+    if last is None:
+        return True  # No last processed, so this is new
+    return filename > last
+
+
 def group_historical_games_into_series(games: List[dict]) -> List[List[dict]]:
     """
     Group historical games into series based on player sets.
@@ -2192,6 +2231,9 @@ __all__ = [
     'add_game_to_active_match',
     'move_active_to_completed',
     'is_game_already_assigned',
+    'get_last_processed',
+    'set_last_processed',
+    'is_file_newer_than_last',
     'group_historical_games_into_series',
     'backfill_historical_series',
     'update_active_match_in_history',
