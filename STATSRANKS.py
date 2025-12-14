@@ -672,10 +672,10 @@ async def record_manual_match(red_team: List[int], blue_team: List[int], games: 
     print(f"✅ Manual match {match_label} logged: {series_winner} wins ({red_game_wins}-{blue_game_wins}) - stats via populate_stats.py")
 
 async def refresh_all_ranks(guild: discord.Guild, player_ids: List[int], send_dm: bool = True):
-    """Refresh rank roles for all players - reads from ranks.json (website source of truth)"""
+    """Refresh rank roles for all players - reads from local ranks.json"""
     from searchmatchmaking import queue_state
 
-    # Load ranks.json from GitHub (website source of truth)
+    # Load ranks.json from local file (source of truth)
     ranks = await async_load_ranks_from_github()
 
     for user_id in player_ids:
@@ -684,18 +684,18 @@ async def refresh_all_ranks(guild: discord.Guild, player_ids: List[int], send_dm
 
         user_key = str(user_id)
 
-        # Get highest_rank from ranks.json, default to 1
+        # Get current rank from ranks.json, default to 1
         if user_key in ranks:
-            highest = ranks[user_key].get("highest_rank", 1)
+            current_rank = ranks[user_key].get("rank", 1)
         else:
-            highest = 1
+            current_rank = 1
 
-        await update_player_rank_role(guild, user_id, highest, send_dm=send_dm)
+        await update_player_rank_role(guild, user_id, current_rank, send_dm=send_dm)
 
 
 async def refresh_playlist_ranks(guild: discord.Guild, player_ids: List[int], playlist_type: str, send_dm: bool = True):
-    """Refresh rank roles for players after a playlist match - reads from ranks.json"""
-    # Load ranks.json from GitHub (website source of truth)
+    """Refresh rank roles for players after a playlist match - reads from local ranks.json"""
+    # Load ranks.json from local file (source of truth)
     ranks = await async_load_ranks_from_github()
 
     # Get playlist name for DM
@@ -710,13 +710,13 @@ async def refresh_playlist_ranks(guild: discord.Guild, player_ids: List[int], pl
     for user_id in player_ids:
         user_key = str(user_id)
 
-        # Get highest_rank from ranks.json, default to 1
+        # Get current rank from ranks.json, default to 1
         if user_key in ranks:
-            highest = ranks[user_key].get("highest_rank", 1)
+            current_rank = ranks[user_key].get("rank", 1)
         else:
-            highest = 1
+            current_rank = 1
 
-        await update_player_rank_role(guild, user_id, highest, send_dm=send_dm, playlist_name=playlist_name)
+        await update_player_rank_role(guild, user_id, current_rank, send_dm=send_dm, playlist_name=playlist_name)
 
 def get_all_players_sorted(sort_by: str = "rank") -> List[Tuple[str, dict]]:
     """Get all players sorted by specified criteria - reads from local ranks.json"""
