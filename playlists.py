@@ -629,10 +629,10 @@ def move_active_to_completed(playlist_type: str, player_ids: List[int], result: 
     return True
 
 
-def is_game_already_assigned(playlist_type: str, game_timestamp: str) -> bool:
+def is_game_already_assigned(playlist_type: str, filename: str) -> bool:
     """
     Check if a game has already been assigned to a series (active or completed).
-    Uses timestamp (down to milliseconds) as unique identifier.
+    Uses the full filename as unique identifier (includes date/time to milliseconds).
     """
     # Check active matches
     matches_file = get_playlist_matches_file(playlist_type)
@@ -642,7 +642,7 @@ def is_game_already_assigned(playlist_type: str, game_timestamp: str) -> bool:
                 data = json.load(f)
             for active in data.get("active_matches", []):
                 for game in active.get("games", []):
-                    if game.get("timestamp") == game_timestamp:
+                    if game.get("filename") == filename:
                         return True
         except:
             pass
@@ -655,7 +655,7 @@ def is_game_already_assigned(playlist_type: str, game_timestamp: str) -> bool:
                 data = json.load(f)
             for match in data.get("matches", []):
                 for game in match.get("games", []):
-                    if game.get("timestamp") == game_timestamp:
+                    if game.get("filename") == filename:
                         return True
         except:
             pass
