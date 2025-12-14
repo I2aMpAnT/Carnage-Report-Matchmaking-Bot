@@ -3800,19 +3800,19 @@ python3 populate_stats.py'''
         guild = interaction.guild
         WEBSITE_DATA_PATH = "/home/carnagereport/CarnageReport.com"
 
-        # All playlists to process
+        # All playlists to process (playlist_key, PlaylistType, embeds_filename)
         playlists = [
-            ("mlg_4v4", PlaylistType.MLG_4V4),
-            ("team_hardcore", PlaylistType.TEAM_HARDCORE),
-            ("double_team", PlaylistType.DOUBLE_TEAM),
-            ("head_to_head", PlaylistType.HEAD_TO_HEAD),
-            ("tournament_1", PlaylistType.TOURNAMENT_1),
+            ("mlg_4v4", PlaylistType.MLG_4V4, "MLG 4v4_embeds.json"),
+            ("team_hardcore", PlaylistType.TEAM_HARDCORE, "Team Hardcore_embeds.json"),
+            ("double_team", PlaylistType.DOUBLE_TEAM, "Double Team_embeds.json"),
+            ("head_to_head", PlaylistType.HEAD_TO_HEAD, "Head to Head_embeds.json"),
+            ("tournament_1", PlaylistType.TOURNAMENT_1, "Tournament 1_embeds.json"),
         ]
 
         total_posted = 0
         results = []
 
-        for playlist_key, playlist_type in playlists:
+        for playlist_key, playlist_type, embeds_filename in playlists:
             if playlist_type not in PLAYLIST_CONFIG:
                 continue
 
@@ -3824,7 +3824,7 @@ python3 populate_stats.py'''
                 continue
 
             # Read games from embeds JSON (created by populate_stats.py)
-            embeds_file = f"{WEBSITE_DATA_PATH}/{playlist_key}_embeds.json"
+            embeds_file = f"{WEBSITE_DATA_PATH}/{embeds_filename}"
             if not os.path.exists(embeds_file):
                 results.append(f"⚪ {playlist_key}: No embeds file")
                 continue
