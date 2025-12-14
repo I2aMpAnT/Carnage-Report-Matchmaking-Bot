@@ -466,12 +466,13 @@ def save_match_to_history(match: PlaylistMatch, result: str, guild=None):
             history = {"active_matches": []}
 
     if result == "STARTED":
-        # Add minimal entry to active_matches for stat parser matching
+        # Add entry to active_matches for stat parser matching
         active_entry = {
             "match_number": match.match_number,
             "team1_ids": match.team1,
             "team2_ids": match.team2,
-            "start_time": match.start_time.isoformat()
+            "start_time": match.start_time.isoformat(),
+            "games": []  # Games added by backfill as they're parsed
         }
         history["active_matches"].append(active_entry)
         log_action(f"Added {match.get_match_label()} to active_matches in {matches_file}")
@@ -497,6 +498,135 @@ def save_match_to_history(match: PlaylistMatch, result: str, guild=None):
         github_webhook.push_file_to_github(matches_file, matches_file)
     except Exception as e:
         log_action(f"Failed to sync {matches_file} to GitHub: {e}")
+
+
+def find_active_match_by_players(playlist_type: str, player_ids: List[int]) -> Optional[dict]:
+    """Find an active match entry by player IDs. Returns the match dict or None."""
+    matches_file = get_playlist_matches_file(playlist_type)
+    if not os.path.exists(matches_file):
+        return None
+
+    try:
+        with open(matches_file, 'r') as f:
+            data = json.load(f)
+    except:
+        return None
+
+    game_players = set(player_ids)
+    for active in data.get("active_matches", []):
+        active_players = set(active.get("team1_ids", []) + active.get("team2_ids", []))
+        if game_players == active_players:
+            return active
+
+    return None
+
+
+def add_game_to_active_match(playlist_type: str, player_ids: List[int], game_data: dict) -> bool:
+    """Add a game to an active match. Returns True if successful."""
+    matches_file = get_playlist_matches_file(playlist_type)
+    if not os.path.exists(matches_file):
+        return False
+
+    try:
+        with open(matches_file, 'r') as f:
+            data = json.load(f)
+    except:
+        return False
+
+    game_players = set(player_ids)
+    for active in data.get("active_matches", []):
+        active_players = set(active.get("team1_ids", []) + active.get("team2_ids", []))
+        if game_players == active_players:
+            if "games" not in active:
+                active["games"] = []
+            active["games"].append(game_data)
+
+            with open(matches_file, 'w') as f:
+                json.dump(data, f, indent=2)
+            log_action(f"Added game {len(active['games'])} to active match #{active['match_number']}")
+            return True
+
+    return False
+
+
+def move_active_to_completed(playlist_type: str, player_ids: List[int], result: str,
+                              team1_names: List[str] = None, team2_names: List[str] = None) -> bool:
+    """Move an active match to completed.json. Returns True if successful."""
+    matches_file = get_playlist_matches_file(playlist_type)
+    completed_file = get_playlist_completed_file(playlist_type)
+
+    if not os.path.exists(matches_file):
+        return False
+
+    try:
+        with open(matches_file, 'r') as f:
+            data = json.load(f)
+    except:
+        return False
+
+    # Find and remove the active match
+    game_players = set(player_ids)
+    active_match = None
+    new_active = []
+    for active in data.get("active_matches", []):
+        active_players = set(active.get("team1_ids", []) + active.get("team2_ids", []))
+        if game_players == active_players:
+            active_match = active
+        else:
+            new_active.append(active)
+
+    if not active_match:
+        return False
+
+    data["active_matches"] = new_active
+
+    # Save updated matches file
+    with open(matches_file, 'w') as f:
+        json.dump(data, f, indent=2)
+
+    # Load completed file
+    completed_data = {"matches": []}
+    if os.path.exists(completed_file):
+        try:
+            with open(completed_file, 'r') as f:
+                completed_data = json.load(f)
+        except:
+            completed_data = {"matches": []}
+
+    # Assign permanent number
+    permanent_number = len(completed_data.get("matches", [])) + 1
+
+    # Count games won
+    team1_wins = sum(1 for g in active_match.get("games", []) if g.get("winner") == "TEAM1")
+    team2_wins = sum(1 for g in active_match.get("games", []) if g.get("winner") == "TEAM2")
+
+    # Build completed entry
+    completed_entry = {
+        "match_number": permanent_number,
+        "playlist": playlist_type,
+        "start_time": active_match.get("start_time"),
+        "end_time": datetime.now().isoformat(),
+        "result": result,
+        "team1": {
+            "player_ids": active_match.get("team1_ids", []),
+            "player_names": team1_names or [str(uid) for uid in active_match.get("team1_ids", [])],
+            "games_won": team1_wins
+        },
+        "team2": {
+            "player_ids": active_match.get("team2_ids", []),
+            "player_names": team2_names or [str(uid) for uid in active_match.get("team2_ids", [])],
+            "games_won": team2_wins
+        },
+        "games": active_match.get("games", [])
+    }
+
+    completed_data["matches"].append(completed_entry)
+
+    with open(completed_file, 'w') as f:
+        json.dump(completed_data, f, indent=2)
+
+    log_action(f"Moved active match to completed #{permanent_number} in {completed_file}")
+    return True
 
 
 def update_active_match_in_history(match: PlaylistMatch):
@@ -1905,6 +2035,9 @@ __all__ = [
     'start_playlist_match',
     'end_playlist_match',
     'save_match_to_history',
+    'find_active_match_by_players',
+    'add_game_to_active_match',
+    'move_active_to_completed',
     'update_active_match_in_history',
     'remove_match_from_active',
     'save_playlist_stats',
