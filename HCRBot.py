@@ -445,17 +445,7 @@ async def on_message(message: discord.Message):
                                 except Exception as e:
                                     print(f"[RANKS] Failed to post series: {e}")
 
-                    # Set per-playlist match counters from completed series counts
-                    # Each playlist has its own counter based on its own completed matches
-                    from playlists import get_playlist_state
-                    for playlist_key, playlist_type in playlists:
-                        playlist_series = statsdata.get_all_series(playlist_key)
-                        if playlist_series:
-                            ps = get_playlist_state(playlist_type)
-                            ps.match_counter = len(playlist_series)
-                            print(f"[RANKS] Set {playlist_key} match_counter to {ps.match_counter}")
-
-                    # Also set MLG 4v4 Series counter for backwards compatibility
+                    # Set MLG 4v4 Series counter (playlists derive number from completed matches)
                     mlg_series = statsdata.get_all_series("mlg_4v4")
                     if mlg_series:
                         from ingame import Series

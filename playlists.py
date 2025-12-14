@@ -208,8 +208,19 @@ class PlaylistMatch:
         self.team1 = team1 or []  # "Red" team or Player 1
         self.team2 = team2 or []  # "Blue" team or Player 2
 
-        playlist_state.match_counter += 1
-        self.match_number = playlist_state.match_counter
+        # Get projected match number based on completed matches
+        # This is what the match WILL be if it completes
+        # (actual permanent number assigned at completion time)
+        matches_file = get_playlist_matches_file(playlist_state.playlist_type)
+        completed_count = 0
+        if os.path.exists(matches_file):
+            try:
+                with open(matches_file, 'r') as f:
+                    history = json.load(f)
+                completed_count = len(history.get("matches", []))
+            except:
+                pass
+        self.match_number = completed_count + 1
 
         self.games: List[str] = []  # 'TEAM1' or 'TEAM2' - populated from parsed stats
         self.game_stats: Dict[int, dict] = {}  # game_number -> {"map": str, "gametype": str, "parsed_stats": dict}
@@ -254,16 +265,11 @@ class PlaylistMatch:
         team2 = match_data.get("team2", {}).get("player_ids", [])
         players = team1 + team2
 
-        # Create match but don't increment counter (we'll set it manually)
-        playlist_state.match_counter -= 1  # Will be incremented back in __init__
+        # Create match (will get projected number from completed count)
         match = cls(playlist_state, players, team1, team2)
 
-        # Override the match number from JSON
+        # Override the match number from JSON (keep the original display number)
         match.match_number = match_data.get("match_number", match.match_number)
-
-        # Ensure match_counter is at least as high as this match
-        if playlist_state.match_counter < match.match_number:
-            playlist_state.match_counter = match.match_number
 
         # Restore timestamps
         start_time_str = match_data.get("start_time")
@@ -1586,13 +1592,6 @@ async def initialize_all_playlists(bot):
                 try:
                     with open(matches_file, 'r') as f:
                         file_data = json.load(f)
-
-                    # Set match_counter from completed matches count
-                    # This ensures cancelled matches don't leave gaps in numbering
-                    completed_matches = file_data.get("matches", [])
-                    if completed_matches:
-                        ps.match_counter = len(completed_matches)
-                        log_action(f"Set {ps.name} match_counter to {ps.match_counter} from completed matches")
 
                     active_matches = file_data.get("active_matches", [])
                     if active_matches:

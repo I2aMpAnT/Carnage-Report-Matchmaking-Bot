@@ -2142,11 +2142,9 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                 ps = PlaylistQueueState(playlist)
                 playlist_states[playlist] = ps
 
-            # Create match object
+            # Create match object (match number is derived from completed matches)
             all_player_list = red_team + blue_team
-            ps.match_counter += 1
             match = PlaylistMatch(ps, all_player_list, red_team, blue_team)
-            match.match_number = ps.match_counter
             ps.current_match = match
 
             # Create voice channels
