@@ -1933,10 +1933,15 @@ async def cancel_playlist_match(
     match_label: str
 ):
     """Cancel a playlist match due to timeout or other reasons"""
-    from playlists import update_playlist_embed
+    from playlists import update_playlist_embed, remove_match_from_active
 
     guild = channel.guild
     ps = playlist_state
+
+    # Remove from active_matches BEFORE clearing current_match
+    # The match number is temporary until completion - just remove the entry
+    if ps.current_match:
+        remove_match_from_active(ps.current_match)
 
     # Delete pregame VC
     if pregame_vc_id:

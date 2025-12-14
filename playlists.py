@@ -579,6 +579,42 @@ def update_active_match_in_history(match: PlaylistMatch):
         log_action(f"Failed to sync {matches_file} to GitHub: {e}")
 
 
+def remove_match_from_active(match: PlaylistMatch):
+    """Remove a cancelled match from active_matches in the history file"""
+    matches_file = get_playlist_matches_file(match.playlist_type)
+
+    if not os.path.exists(matches_file):
+        return
+
+    try:
+        with open(matches_file, 'r') as f:
+            history = json.load(f)
+    except:
+        return
+
+    if "active_matches" not in history:
+        return
+
+    # Remove the match from active_matches
+    original_count = len(history["active_matches"])
+    history["active_matches"] = [
+        m for m in history["active_matches"]
+        if m.get("match_number") != match.match_number
+    ]
+
+    if len(history["active_matches"]) < original_count:
+        with open(matches_file, 'w') as f:
+            json.dump(history, f, indent=2)
+        log_action(f"Removed {match.get_match_label()} from active_matches (cancelled)")
+
+        # Sync to GitHub
+        try:
+            import github_webhook
+            github_webhook.push_file_to_github(matches_file, matches_file)
+        except:
+            pass
+
+
 class PlaylistQueueView(View):
     """View for playlist queue with join/leave/ping buttons"""
     def __init__(self, playlist_state: PlaylistQueueState):
@@ -1547,6 +1583,14 @@ async def initialize_all_playlists(bot):
                 try:
                     with open(matches_file, 'r') as f:
                         file_data = json.load(f)
+
+                    # Set match_counter from completed matches count
+                    # This ensures cancelled matches don't leave gaps in numbering
+                    completed_matches = file_data.get("matches", [])
+                    if completed_matches:
+                        ps.match_counter = len(completed_matches)
+                        log_action(f"Set {ps.name} match_counter to {ps.match_counter} from completed matches")
+
                     active_matches = file_data.get("active_matches", [])
                     if active_matches:
                         # Restore the most recent active match
@@ -1903,6 +1947,7 @@ __all__ = [
     'end_playlist_match',
     'save_match_to_history',
     'update_active_match_in_history',
+    'remove_match_from_active',
     'save_playlist_stats',
     'pause_playlist',
     'resume_playlist',

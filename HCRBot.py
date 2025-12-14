@@ -445,17 +445,29 @@ async def on_message(message: discord.Message):
                                 except Exception as e:
                                     print(f"[RANKS] Failed to post series: {e}")
 
-                    # Always set match counter to total series count (resets to match actual data)
-                    if total_series_count > 0:
+                    # Set per-playlist match counters from completed series counts
+                    # Each playlist has its own counter based on its own completed matches
+                    from playlists import get_playlist_state
+                    for playlist_key, playlist_type in playlists:
+                        playlist_series = statsdata.get_all_series(playlist_key)
+                        if playlist_series:
+                            ps = get_playlist_state(playlist_type)
+                            ps.match_counter = len(playlist_series)
+                            print(f"[RANKS] Set {playlist_key} match_counter to {ps.match_counter}")
+
+                    # Also set MLG 4v4 Series counter for backwards compatibility
+                    mlg_series = statsdata.get_all_series("mlg_4v4")
+                    if mlg_series:
                         from ingame import Series
-                        Series.match_counter = total_series_count
-                        print(f"[RANKS] Set match counter to {total_series_count}")
-                        # Save state
-                        try:
-                            from state_manager import save_state
-                            save_state()
-                        except:
-                            pass
+                        Series.match_counter = len(mlg_series)
+                        print(f"[RANKS] Set MLG 4v4 Series counter to {Series.match_counter}")
+
+                    # Save state
+                    try:
+                        from state_manager import save_state
+                        save_state()
+                    except:
+                        pass
 
                     if total_posted > 0:
                         print(f"[RANKS] Posted {total_posted} new series embeds")
