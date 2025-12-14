@@ -1,7 +1,7 @@
 # statsdedi.py - Vultr VPS Management for Stats Dedi
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.0.8"
+MODULE_VERSION = "1.0.9"
 
 import discord
 from discord import app_commands
@@ -196,6 +196,8 @@ async def wait_for_instance_ready(instance_id: str, user: discord.User, initial_
     """Background task to wait for instance to be ready and DM user"""
     max_attempts = 120  # 10 minutes max (5 second intervals)
 
+    print(f"[DEDI] 🔄 Starting wait_for_instance_ready for {instance_id[:8]}... (user: {user.name})")
+
     for attempt in range(max_attempts):
         await asyncio.sleep(5)
 
@@ -206,12 +208,13 @@ async def wait_for_instance_ready(instance_id: str, user: discord.User, initial_
             server_status = instance.get("server_status", "")
             main_ip = instance.get("main_ip", initial_ip)
 
-            # Log status for debugging
-            if attempt % 6 == 0:  # Log every 30 seconds
-                print(f"[DEDI] {instance_id[:8]}... status={status}, power={power_status}, server={server_status}, ip={main_ip}")
+            # Log status for debugging - more frequent at start, then every 30 seconds
+            if attempt < 6 or attempt % 6 == 0:
+                print(f"[DEDI] {instance_id[:8]}... attempt={attempt} status={status}, power={power_status}, server={server_status}, ip={main_ip}")
 
             # Check if ready - just need active and running
             if status == "active" and power_status == "running":
+                print(f"[DEDI] ✅ Instance {instance_id[:8]}... is now active and running!")
                 # Calculate spin-up time
                 elapsed = time.time() - start_time
                 spinup_times.append(elapsed)
@@ -246,12 +249,12 @@ async def wait_for_instance_ready(instance_id: str, user: discord.User, initial_
                 return
 
         except Exception as e:
-            print(f"[DEDI] Error checking instance status: {e}")
+            print(f"[DEDI] ❌ Error checking instance status on attempt {attempt}: {e}")
 
     # Timeout - remove from pending but don't DM
     if instance_id in pending_creates:
         del pending_creates[instance_id]
-    print(f"[DEDI] Timeout waiting for {instance_id[:8]}... to become ready")
+    print(f"[DEDI] ⏱️ TIMEOUT waiting for {instance_id[:8]}... after {max_attempts * 5} seconds")
 
 
 class StatsDediView(View):
@@ -420,9 +423,14 @@ class StatsDediView(View):
                 print(f"[DEDI] Creating {user_label} (ID: {instance_id}) - IP not yet assigned")
 
             # Start background task to wait for ready
-            asyncio.create_task(wait_for_instance_ready(instance_id, interaction.user, main_ip, start_time))
+            print(f"[DEDI] 🚀 Launching background task for {instance_id[:8]}...")
+            task = asyncio.create_task(wait_for_instance_ready(instance_id, interaction.user, main_ip, start_time))
+            # Add task name for debugging
+            task.set_name(f"dedi_wait_{instance_id[:8]}")
+            print(f"[DEDI] 🚀 Background task created: {task.get_name()}")
 
         except Exception as e:
+            print(f"[DEDI] ❌ Error in _create_dedi: {e}")
             await interaction.followup.send(f"Error creating dedi: {e}", ephemeral=True)
 
     async def handle_destroy(self, interaction: discord.Interaction):
