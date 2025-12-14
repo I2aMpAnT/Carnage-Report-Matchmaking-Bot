@@ -177,8 +177,20 @@ async def on_ready():
         # Get the main guild for instant sync
         guild = bot.guilds[0] if bot.guilds else None
         if guild:
+            # Copy global commands to guild first, then sync
+            bot.tree.copy_global_to(guild=guild)
             synced = await bot.tree.sync(guild=guild)
             print(f'✅ Synced {len(synced)} slash commands to guild {guild.name}')
+            # Check for specific commands
+            cmd_names = [cmd.name for cmd in synced]
+            if 'dotcomrefresh' in cmd_names:
+                print(f'   ✓ dotcomrefresh command found')
+            else:
+                print(f'   ✗ dotcomrefresh command MISSING')
+            if 'backfillgamedata' in cmd_names:
+                print(f'   ✓ backfillgamedata command found')
+            else:
+                print(f'   ✗ backfillgamedata command MISSING')
         else:
             synced = await bot.tree.sync()
             print(f'✅ Synced {len(synced)} slash commands globally')
