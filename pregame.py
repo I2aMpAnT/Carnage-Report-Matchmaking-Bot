@@ -2,7 +2,7 @@
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 # Supports ALL playlists: MLG 4v4 (voting), Team Hardcore/Double Team (auto-balance), Head to Head (1v1)
 
-MODULE_VERSION = "1.6.1"
+MODULE_VERSION = "1.6.2"
 
 import discord
 from discord.ui import View, Button, Select
@@ -128,7 +128,7 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
         if players_not_in_voice:
             not_in_voice_list = ", ".join([f"<@{uid}>" for uid in players_not_in_voice])
             embed.add_field(
-                name="Not in Voice - 5 minutes to join!",
+                name="Not in Voice - 10 minutes to join!",
                 value=f"{not_in_voice_list}\nJoin the Pregame Lobby or match is cancelled!",
                 inline=False
             )
@@ -144,7 +144,7 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
                 try:
                     dm_embed = discord.Embed(
                         title=f"{match_label} - Join Pregame Lobby!",
-                        description=f"Your **{playlist_name}** match is starting! Please join the **Pregame Lobby** voice channel within 5 minutes or the match may be cancelled.",
+                        description=f"Your **{playlist_name}** match is starting! Please join the **Pregame Lobby** voice channel within 10 minutes or the match may be cancelled.",
                         color=discord.Color.gold()
                     )
                     await member.send(embed=dm_embed)
@@ -276,7 +276,7 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
     if players_not_in_voice and not test_mode:
         not_in_voice_list = ", ".join([f"<@{uid}>" for uid in players_not_in_voice])
         embed.add_field(
-            name="Not in Voice - 5 minutes to join!",
+            name="Not in Voice - 10 minutes to join!",
             value=f"{not_in_voice_list}\nJoin the Pregame Lobby or be replaced!",
             inline=False
         )
@@ -303,7 +303,7 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
             try:
                 dm_embed = discord.Embed(
                     title=f"{match_label} - Join Pregame Lobby!",
-                    description=f"Your match is starting! Please join the **Pregame Lobby** voice channel within 5 minutes or you may be replaced.",
+                    description=f"Your match is starting! Please join the **Pregame Lobby** voice channel within 10 minutes or you may be replaced.",
                     color=discord.Color.gold()
                 )
                 await member.send(embed=dm_embed)
@@ -335,7 +335,7 @@ async def wait_for_players_and_show_selection(
 
     guild = channel.guild
     testers = testers or []
-    timeout_seconds = 300  # 5 minutes
+    timeout_seconds = 600  # 10 minutes
 
     # In test mode, only wait for testers (not filler players)
     players_to_wait_for = [uid for uid in players if uid in testers] if test_mode else players[:]
@@ -1664,7 +1664,7 @@ async def wait_for_playlist_players(
 
     guild = channel.guild
     ps = playlist_state
-    timeout_seconds = 300  # 5 minutes
+    timeout_seconds = 600  # 10 minutes
     start_time = asyncio.get_event_loop().time()
 
     while True:
