@@ -8,7 +8,7 @@ Import this module in bot.py with:
 Commands are defined in commands.py and call functions from this module.
 """
 
-MODULE_VERSION = "1.4.2"
+MODULE_VERSION = "1.5.0"
 
 import discord
 from discord import app_commands
@@ -720,13 +720,13 @@ def get_all_players_sorted(sort_by: str = "rank") -> List[Tuple[str, dict]]:
 class LeaderboardView(discord.ui.View):
     """Leaderboard with tabs for Overall and each playlist, plus sort options"""
 
-    # View options: Overall + each playlist
-    VIEWS = ["Overall", "MLG 4v4", "Team Hardcore", "Double Team", "Head to Head"]
+    # View options: Overall + each playlist + MMR
+    VIEWS = ["Overall", "MLG 4v4", "Team Hardcore", "Double Team", "Head to Head", "MMR"]
     # Sort options (K/D replaces MMR since ranks.json has kills/deaths)
-    SORTS = ["Level", "Wins", "K/D"]
+    SORTS = ["Level", "Wins", "K/D", "MMR"]
 
     def __init__(self, bot, guild: discord.Guild = None):
-        super().__init__(timeout=300)
+        super().__init__(timeout=None)  # No timeout - buttons work indefinitely
         self.bot = bot
         self.guild = guild
         self.current_view = "Overall"  # Default view
@@ -735,12 +735,12 @@ class LeaderboardView(discord.ui.View):
         self.total_pages = 1
         self.per_page = 10
 
-        # Add website link button (row 2)
+        # Add website link button (row 3 - below pagination)
         self.add_item(discord.ui.Button(
             label="See more at CarnageReport.com",
             url="https://www.carnagereport.com",
             style=discord.ButtonStyle.link,
-            row=2
+            row=3
         ))
 
     def get_rank_emoji(self, level: int) -> str:
@@ -774,7 +774,41 @@ class LeaderboardView(discord.ui.View):
         - ranks.json[discord_id].highest_rank - overall highest rank
         - ranks.json[discord_id].playlists["MLG 4v4"].rank - rank per playlist
         - ranks.json[discord_id].kills/deaths - for K/D ratio
+
+        For MMR view, reads from MMR.json to show all players with MMR.
         """
+        # MMR view - show all players from MMR.json
+        if self.current_view == "MMR" or self.current_sort == "MMR":
+            mmr_data = load_json_file(MMR_FILE)
+            ranks = await async_load_ranks_from_github()
+
+            players = []
+            for user_id, data in mmr_data.items():
+                mmr = data.get("mmr", 1500)
+                discord_name = data.get("discord_name", "Unknown")
+
+                # Try to get additional stats from ranks.json if available
+                rank_data = ranks.get(user_id, {})
+                level = rank_data.get("highest_rank", 1)
+                wins = rank_data.get("wins", 0)
+                losses = rank_data.get("losses", 0)
+                games = wins + losses
+
+                players.append({
+                    "user_id": user_id,
+                    "discord_name": discord_name,
+                    "level": level,
+                    "wins": wins,
+                    "losses": losses,
+                    "games": games,
+                    "mmr": mmr,
+                    "kd": 0  # Not relevant for MMR view
+                })
+
+            # Sort by MMR
+            players.sort(key=lambda x: x["mmr"], reverse=True)
+            return players
+
         ranks = await async_load_ranks_from_github()
 
         if self.current_view == "Overall":
@@ -799,7 +833,8 @@ class LeaderboardView(discord.ui.View):
                     "wl_pct": wl_pct,
                     "kills": kills,
                     "deaths": deaths,
-                    "kd": kd_ratio
+                    "kd": kd_ratio,
+                    "mmr": 0  # Not loaded for non-MMR views
                 })
         else:
             # Playlist-specific view
@@ -830,7 +865,8 @@ class LeaderboardView(discord.ui.View):
                             "wl_pct": wl_pct,
                             "kills": kills,
                             "deaths": deaths,
-                            "kd": kd_ratio
+                            "kd": kd_ratio,
+                            "mmr": 0  # Not loaded for non-MMR views
                         })
 
         # Sort based on current_sort
@@ -882,8 +918,11 @@ class LeaderboardView(discord.ui.View):
 
                 rank_emoji = self.get_rank_emoji(p["level"])
 
-                # Format: position. name + rank emoji on right
-                if self.current_sort == "Level":
+                # Format: position. name + stats
+                if self.current_view == "MMR" or self.current_sort == "MMR":
+                    # MMR view shows MMR value prominently
+                    line = f"{i}. {name} • **{p['mmr']} MMR**"
+                elif self.current_sort == "Level":
                     line = f"{i}. {name} {rank_emoji}"
                 elif self.current_sort == "Wins":
                     line = f"{i}. {name} • **{p['wins']}W** {rank_emoji}"
@@ -915,16 +954,38 @@ class LeaderboardView(discord.ui.View):
 
     async def _send_personal_view(self, interaction: discord.Interaction):
         """Send a personal ephemeral leaderboard view to the user who clicked"""
-        # Defer first to avoid 3-second timeout while building embed
-        await interaction.response.defer(ephemeral=True)
+        try:
+            # Defer first to avoid 3-second timeout while building embed
+            if not interaction.response.is_done():
+                await interaction.response.defer(ephemeral=True)
 
-        # Create a new view for this user's personal interaction
-        new_view = LeaderboardView(self.bot, guild=self.guild)
-        new_view.current_view = self.current_view
-        new_view.current_sort = self.current_sort
-        new_view.current_page = self.current_page
-        embed = await new_view.build_embed()
-        await interaction.followup.send(embed=embed, view=new_view, ephemeral=True)
+            # Create a new view for this user's personal interaction
+            new_view = LeaderboardView(self.bot, guild=self.guild)
+            new_view.current_view = self.current_view
+            new_view.current_sort = self.current_sort
+            new_view.current_page = self.current_page
+            embed = await new_view.build_embed()
+            await interaction.followup.send(embed=embed, view=new_view, ephemeral=True)
+        except discord.errors.NotFound:
+            # Interaction expired - try to send a new message
+            pass
+        except discord.errors.InteractionResponded:
+            # Already responded - try followup
+            try:
+                new_view = LeaderboardView(self.bot, guild=self.guild)
+                new_view.current_view = self.current_view
+                new_view.current_sort = self.current_sort
+                new_view.current_page = self.current_page
+                embed = await new_view.build_embed()
+                await interaction.followup.send(embed=embed, view=new_view, ephemeral=True)
+            except:
+                pass
+        except Exception as e:
+            print(f"[LEADERBOARD] Error in _send_personal_view: {e}")
+            try:
+                await interaction.followup.send("An error occurred. Please try again.", ephemeral=True)
+            except:
+                pass
 
     # Row 0: Playlist tabs
     @discord.ui.button(label="Overall", style=discord.ButtonStyle.primary, custom_id="lb_overall", row=0)
@@ -976,12 +1037,19 @@ class LeaderboardView(discord.ui.View):
         self.current_page = 1
         await self._send_personal_view(interaction)
 
-    @discord.ui.button(label="◀", style=discord.ButtonStyle.secondary, custom_id="lb_prev", row=1)
+    @discord.ui.button(label="MMR", style=discord.ButtonStyle.secondary, custom_id="lb_sort_mmr", row=1)
+    async def sort_mmr(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_view = "MMR"  # Switch to MMR view to show all MMR players
+        self.current_sort = "MMR"
+        self.current_page = 1
+        await self._send_personal_view(interaction)
+
+    @discord.ui.button(label="◀", style=discord.ButtonStyle.secondary, custom_id="lb_prev", row=2)
     async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.current_page = max(1, self.current_page - 1)
         await self._send_personal_view(interaction)
 
-    @discord.ui.button(label="▶", style=discord.ButtonStyle.secondary, custom_id="lb_next", row=1)
+    @discord.ui.button(label="▶", style=discord.ButtonStyle.secondary, custom_id="lb_next", row=2)
     async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.current_page = min(self.total_pages, self.current_page + 1)
         await self._send_personal_view(interaction)
