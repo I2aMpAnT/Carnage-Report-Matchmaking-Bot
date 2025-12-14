@@ -943,10 +943,10 @@ def create_series_embed(series_data: dict, red_emoji_id: int = None, blue_emoji_
             inline=False
         )
 
-    # Timestamp
-    start_time = series_data.get("start_time")
-    if start_time:
-        embed.set_footer(text=f"Started: {start_time}")
+    # Timestamp - show end time of series
+    end_time = series_data.get("end_time")
+    if end_time:
+        embed.set_footer(text=f"Completed: {end_time}")
 
     return embed
 
