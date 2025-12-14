@@ -366,12 +366,33 @@ async def on_message(message: discord.Message):
                 ranks = STATSRANKS.load_json_file(STATSRANKS.RANKS_FILE)
                 player_ids = [int(uid) for uid in ranks.keys() if uid.isdigit()]
 
-                # Refresh all ranks
+                # Refresh all ranks (Discord roles)
                 await STATSRANKS.refresh_all_ranks(message.guild, player_ids, send_dm=False)
+                print(f"[RANKS] Rank refresh completed - {len(player_ids)} players updated")
+
+                # Update any active series embeds with new rank data
+                try:
+                    from searchmatchmaking import queue_state
+                    import ingame
+                    if queue_state.current_series:
+                        series = queue_state.current_series
+                        print(f"[RANKS] Updating active series embed with new ranks...")
+
+                        # Update series channel embed
+                        if series.text_channel_id:
+                            series_channel = message.guild.get_channel(series.text_channel_id)
+                            if series_channel and series.series_message:
+                                view = ingame.SeriesView(series)
+                                await view.update_series_embed(series_channel)
+
+                        # Update general chat embed
+                        await ingame.update_general_chat_embed(message.guild, series)
+                        print(f"[RANKS] Active series embeds updated")
+                except Exception as embed_error:
+                    print(f"[RANKS] Could not update series embeds: {embed_error}")
 
                 # Delete the trigger message
                 await message.delete()
-                print(f"[RANKS] Rank refresh completed - {len(player_ids)} players updated")
             except Exception as e:
                 print(f"[RANKS] Error during rank refresh: {e}")
                 import traceback
