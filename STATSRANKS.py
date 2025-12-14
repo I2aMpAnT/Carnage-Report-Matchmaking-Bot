@@ -735,12 +735,12 @@ class LeaderboardView(discord.ui.View):
         self.total_pages = 1
         self.per_page = 10
 
-        # Add website link button (row 2)
+        # Add website link button (row 3 - below pagination)
         self.add_item(discord.ui.Button(
             label="See more at CarnageReport.com",
             url="https://www.carnagereport.com",
             style=discord.ButtonStyle.link,
-            row=2
+            row=3
         ))
 
     def get_rank_emoji(self, level: int) -> str:
@@ -1044,12 +1044,12 @@ class LeaderboardView(discord.ui.View):
         self.current_page = 1
         await self._send_personal_view(interaction)
 
-    @discord.ui.button(label="◀", style=discord.ButtonStyle.secondary, custom_id="lb_prev", row=3)
+    @discord.ui.button(label="◀", style=discord.ButtonStyle.secondary, custom_id="lb_prev", row=2)
     async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.current_page = max(1, self.current_page - 1)
         await self._send_personal_view(interaction)
 
-    @discord.ui.button(label="▶", style=discord.ButtonStyle.secondary, custom_id="lb_next", row=3)
+    @discord.ui.button(label="▶", style=discord.ButtonStyle.secondary, custom_id="lb_next", row=2)
     async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.current_page = min(self.total_pages, self.current_page + 1)
         await self._send_personal_view(interaction)
