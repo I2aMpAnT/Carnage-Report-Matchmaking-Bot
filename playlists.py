@@ -855,18 +855,35 @@ def backfill_historical_series(playlist_type: str, series_games: List[dict],
     return True
 
 
-def create_series_embed(series_data: dict, red_emoji_id: int = None, blue_emoji_id: int = None) -> Tuple[discord.Embed, View]:
+def create_series_embed(series_data: dict, guild: discord.Guild = None, red_emoji_id: int = None, blue_emoji_id: int = None) -> Tuple[discord.Embed, View]:
     """
     Create an embed and view for a completed series.
 
     Args:
         series_data: Dict with match_number, team1, team2, games, result, etc.
+            team1/team2 should include player_ranks list (historical ranks at match time)
+        guild: Discord guild for rank emoji lookup
         red_emoji_id: Optional emoji ID for red team
         blue_emoji_id: Optional emoji ID for blue team
 
     Returns:
         Tuple of (discord.Embed, discord.ui.View with CarnageReport button)
     """
+    def get_rank_emoji(level: int) -> str:
+        """Get rank emoji for a level."""
+        if not guild or not level:
+            return ""
+        emoji_name = str(level)
+        emoji = discord.utils.get(guild.emojis, name=emoji_name)
+        if emoji:
+            return str(emoji)
+        # Single digits use underscore suffix (e.g., "6_")
+        if level <= 9:
+            emoji = discord.utils.get(guild.emojis, name=f"{level}_")
+            if emoji:
+                return str(emoji)
+        return ""
+
     match_number = series_data.get("match_number", "?")
     playlist_name = series_data.get("playlist_name", series_data.get("playlist", ""))
     result = series_data.get("result", "")
@@ -902,18 +919,33 @@ def create_series_embed(series_data: dict, red_emoji_id: int = None, blue_emoji_
         color=embed_color
     )
 
-    # Team rosters
+    # Team rosters with rank emojis (historical ranks at match time)
     team1_names = team1.get("player_names", [str(uid) for uid in team1.get("player_ids", [])])
     team2_names = team2.get("player_names", [str(uid) for uid in team2.get("player_ids", [])])
+    team1_ranks = team1.get("player_ranks", [])
+    team2_ranks = team2.get("player_ranks", [])
+
+    # Build roster text with rank emojis
+    team1_roster = []
+    for i, name in enumerate(team1_names):
+        rank = team1_ranks[i] if i < len(team1_ranks) else None
+        rank_emoji = get_rank_emoji(rank) if rank else ""
+        team1_roster.append(f"{rank_emoji} {name}" if rank_emoji else name)
+
+    team2_roster = []
+    for i, name in enumerate(team2_names):
+        rank = team2_ranks[i] if i < len(team2_ranks) else None
+        rank_emoji = get_rank_emoji(rank) if rank else ""
+        team2_roster.append(f"{rank_emoji} {name}" if rank_emoji else name)
 
     embed.add_field(
         name=f"{red_emoji} Red Team",
-        value="\n".join(team1_names) if team1_names else "Unknown",
+        value="\n".join(team1_roster) if team1_roster else "Unknown",
         inline=True
     )
     embed.add_field(
         name=f"{blue_emoji} Blue Team",
-        value="\n".join(team2_names) if team2_names else "Unknown",
+        value="\n".join(team2_roster) if team2_roster else "Unknown",
         inline=True
     )
 
