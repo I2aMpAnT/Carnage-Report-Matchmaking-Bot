@@ -814,7 +814,7 @@ class LeaderboardView(discord.ui.View):
         if self.current_view == "Overall":
             players = []
             for user_id, data in ranks.items():
-                highest = data.get("highest_rank", 1)
+                current_rank = data.get("rank", 1)  # Use current rank
                 # Get overall wins/losses from top-level data
                 total_wins = data.get("wins", 0)
                 total_losses = data.get("losses", 0)
@@ -826,7 +826,7 @@ class LeaderboardView(discord.ui.View):
                 players.append({
                     "user_id": user_id,
                     "discord_name": data.get("discord_name", "Unknown"),
-                    "level": highest,
+                    "level": current_rank,
                     "wins": total_wins,
                     "losses": total_losses,
                     "games": games,
