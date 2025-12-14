@@ -894,23 +894,56 @@ def create_series_embed(series_data: dict, guild: discord.Guild = None, red_emoj
     team1_wins = team1.get("games_won", 0)
     team2_wins = team2.get("games_won", 0)
 
-    # Team emojis
+    # Get player names and ranks
+    team1_names = team1.get("player_names", [str(uid) for uid in team1.get("player_ids", [])])
+    team2_names = team2.get("player_names", [str(uid) for uid in team2.get("player_ids", [])])
+    team1_ranks = team1.get("player_ranks", [])
+    team2_ranks = team2.get("player_ranks", [])
+
+    # Detect 1v1 (Head to Head) - no team colors needed
+    is_1v1 = len(team1_names) == 1 and len(team2_names) == 1
+
+    # Team emojis (only used for team playlists)
     red_emoji = f"<:redteam:{red_emoji_id}>" if red_emoji_id else "🔴"
     blue_emoji = f"<:blueteam:{blue_emoji_id}>" if blue_emoji_id else "🔵"
 
-    # Determine winner text with team emoji (winner score first)
-    if result == "TEAM1_WIN":
-        winner_text = f"{red_emoji} Red Team Wins!"
-        score_text = f"{team1_wins}-{team2_wins}"
-        embed_color = discord.Color.red()
-    elif result == "TEAM2_WIN":
-        winner_text = f"{blue_emoji} Blue Team Wins!"
-        score_text = f"{team2_wins}-{team1_wins}"
-        embed_color = discord.Color.blue()
+    # Get player 1 and player 2 names for 1v1
+    p1_name = team1_names[0] if team1_names else "Player 1"
+    p2_name = team2_names[0] if team2_names else "Player 2"
+    p1_rank_emoji = get_rank_emoji(team1_ranks[0]) if team1_ranks else ""
+    p2_rank_emoji = get_rank_emoji(team2_ranks[0]) if team2_ranks else ""
+
+    # Determine winner text (winner score first)
+    if is_1v1:
+        # 1v1 format - show player name
+        if result == "TEAM1_WIN":
+            winner_display = f"{p1_rank_emoji} {p1_name}" if p1_rank_emoji else p1_name
+            winner_text = f"**{winner_display}** Wins!"
+            score_text = f"{team1_wins}-{team2_wins}"
+            embed_color = discord.Color.gold()
+        elif result == "TEAM2_WIN":
+            winner_display = f"{p2_rank_emoji} {p2_name}" if p2_rank_emoji else p2_name
+            winner_text = f"**{winner_display}** Wins!"
+            score_text = f"{team2_wins}-{team1_wins}"
+            embed_color = discord.Color.gold()
+        else:
+            winner_text = "Series Complete"
+            score_text = f"{team1_wins}-{team2_wins}"
+            embed_color = discord.Color.gold()
     else:
-        winner_text = "Series Complete"
-        score_text = f"{team1_wins}-{team2_wins}"
-        embed_color = discord.Color.gold()
+        # Team format - use team colors
+        if result == "TEAM1_WIN":
+            winner_text = f"{red_emoji} Red Team Wins!"
+            score_text = f"{team1_wins}-{team2_wins}"
+            embed_color = discord.Color.red()
+        elif result == "TEAM2_WIN":
+            winner_text = f"{blue_emoji} Blue Team Wins!"
+            score_text = f"{team2_wins}-{team1_wins}"
+            embed_color = discord.Color.blue()
+        else:
+            winner_text = "Series Complete"
+            score_text = f"{team1_wins}-{team2_wins}"
+            embed_color = discord.Color.gold()
 
     # Build embed
     embed = discord.Embed(
@@ -919,35 +952,39 @@ def create_series_embed(series_data: dict, guild: discord.Guild = None, red_emoj
         color=embed_color
     )
 
-    # Team rosters with rank emojis (historical ranks at match time)
-    team1_names = team1.get("player_names", [str(uid) for uid in team1.get("player_ids", [])])
-    team2_names = team2.get("player_names", [str(uid) for uid in team2.get("player_ids", [])])
-    team1_ranks = team1.get("player_ranks", [])
-    team2_ranks = team2.get("player_ranks", [])
+    if is_1v1:
+        # 1v1 format - show both players in one field
+        p1_display = f"{p1_rank_emoji} {p1_name}" if p1_rank_emoji else p1_name
+        p2_display = f"{p2_rank_emoji} {p2_name}" if p2_rank_emoji else p2_name
+        embed.add_field(
+            name="Players",
+            value=f"{p1_display}\nvs\n{p2_display}",
+            inline=False
+        )
+    else:
+        # Team format - show rosters with rank emojis
+        team1_roster = []
+        for i, name in enumerate(team1_names):
+            rank = team1_ranks[i] if i < len(team1_ranks) else None
+            rank_emoji = get_rank_emoji(rank) if rank else ""
+            team1_roster.append(f"{rank_emoji} {name}" if rank_emoji else name)
 
-    # Build roster text with rank emojis
-    team1_roster = []
-    for i, name in enumerate(team1_names):
-        rank = team1_ranks[i] if i < len(team1_ranks) else None
-        rank_emoji = get_rank_emoji(rank) if rank else ""
-        team1_roster.append(f"{rank_emoji} {name}" if rank_emoji else name)
+        team2_roster = []
+        for i, name in enumerate(team2_names):
+            rank = team2_ranks[i] if i < len(team2_ranks) else None
+            rank_emoji = get_rank_emoji(rank) if rank else ""
+            team2_roster.append(f"{rank_emoji} {name}" if rank_emoji else name)
 
-    team2_roster = []
-    for i, name in enumerate(team2_names):
-        rank = team2_ranks[i] if i < len(team2_ranks) else None
-        rank_emoji = get_rank_emoji(rank) if rank else ""
-        team2_roster.append(f"{rank_emoji} {name}" if rank_emoji else name)
-
-    embed.add_field(
-        name=f"{red_emoji} Red Team",
-        value="\n".join(team1_roster) if team1_roster else "Unknown",
-        inline=True
-    )
-    embed.add_field(
-        name=f"{blue_emoji} Blue Team",
-        value="\n".join(team2_roster) if team2_roster else "Unknown",
-        inline=True
-    )
+        embed.add_field(
+            name=f"{red_emoji} Red Team",
+            value="\n".join(team1_roster) if team1_roster else "Unknown",
+            inline=True
+        )
+        embed.add_field(
+            name=f"{blue_emoji} Blue Team",
+            value="\n".join(team2_roster) if team2_roster else "Unknown",
+            inline=True
+        )
 
     # Game results
     if games:
@@ -958,20 +995,36 @@ def create_series_embed(series_data: dict, guild: discord.Guild = None, red_emoj
             gametype = game.get("gametype", "")
             score = game.get("score", "")
 
-            if winner == "TEAM1":
-                team_emoji = red_emoji
-                team_color = "Red"
-            else:
-                team_emoji = blue_emoji
-                team_color = "Blue"
+            if is_1v1:
+                # 1v1 format - show winner's name
+                if winner == "TEAM1":
+                    winner_name = p1_name
+                else:
+                    winner_name = p2_name
 
-            # Format: {emoji} **{Color} Team** won {gametype} on {map} - {score}
-            if gametype and score:
-                game_line = f"{team_emoji} **{team_color} Team** won {gametype} on {map_name} - {score}"
-            elif gametype:
-                game_line = f"{team_emoji} **{team_color} Team** won {gametype} on {map_name}"
+                if gametype and score:
+                    game_line = f"**{winner_name}** won {gametype} on {map_name} - {score}"
+                elif gametype:
+                    game_line = f"**{winner_name}** won {gametype} on {map_name}"
+                else:
+                    game_line = f"**{winner_name}** won on {map_name}"
             else:
-                game_line = f"{team_emoji} **{team_color} Team** won on {map_name}"
+                # Team format - show team color
+                if winner == "TEAM1":
+                    team_emoji = red_emoji
+                    team_color = "Red"
+                else:
+                    team_emoji = blue_emoji
+                    team_color = "Blue"
+
+                # Format: {emoji} **{Color} Team** won {gametype} on {map} - {score}
+                if gametype and score:
+                    game_line = f"{team_emoji} **{team_color} Team** won {gametype} on {map_name} - {score}"
+                elif gametype:
+                    game_line = f"{team_emoji} **{team_color} Team** won {gametype} on {map_name}"
+                else:
+                    game_line = f"{team_emoji} **{team_color} Team** won on {map_name}"
+
             games_text += game_line + "\n"
 
         embed.add_field(
