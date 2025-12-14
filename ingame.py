@@ -1,6 +1,6 @@
 # ingame.py - In-Game Series Management and Voting
 
-MODULE_VERSION = "1.4.0"
+MODULE_VERSION = "1.5.0"
 
 import discord
 from discord.ui import View, Button
@@ -368,6 +368,145 @@ class SeriesView(View):
             await update_general_chat_embed(channel.guild, series)
         except Exception as e:
             log_action(f"Failed to update general chat embed: {e}")
+
+
+async def record_game_to_series(
+    guild: discord.Guild,
+    winner: str,  # 'RED' or 'BLUE'
+    map_name: str = None,
+    gametype: str = None,
+    game_number: int = None,
+    auto_end_threshold: int = None  # e.g., 3 for Bo5 (first to 3 wins)
+) -> dict:
+    """
+    Record a game result to the active series and update all embeds.
+
+    This function is called when a game is logged and linked as ranked.
+    It updates:
+    - The series games list with the winner
+    - The series game_stats with map/gametype info
+    - The series embed in the series channel
+    - The match-in-progress embed in general chat
+
+    Args:
+        guild: Discord guild
+        winner: 'RED' or 'BLUE' - which team won
+        map_name: Name of the map played (optional)
+        gametype: Name of the gametype played (optional)
+        game_number: Specific game number (optional, auto-increments if not provided)
+        auto_end_threshold: Number of wins to auto-end series (e.g., 3 for Bo5)
+
+    Returns:
+        dict with status info: {"success": bool, "message": str, "series_ended": bool}
+    """
+    from searchmatchmaking import queue_state
+
+    # Check for active series
+    if not queue_state.current_series:
+        log_action("[GAME] No active series to record game to")
+        return {"success": False, "message": "No active series", "series_ended": False}
+
+    series = queue_state.current_series
+
+    # Determine game number
+    if game_number is None:
+        game_number = len(series.games) + 1
+
+    # Validate winner
+    winner = winner.upper()
+    if winner not in ['RED', 'BLUE']:
+        log_action(f"[GAME] Invalid winner: {winner}")
+        return {"success": False, "message": f"Invalid winner: {winner}", "series_ended": False}
+
+    # Add to games list
+    series.games.append(winner)
+
+    # Add to game_stats with map/gametype info
+    series.game_stats[game_number] = {
+        "map": map_name or "",
+        "gametype": gametype or "",
+    }
+
+    log_action(f"[GAME] Recorded Game {game_number}: {winner} wins on {map_name or 'Unknown'} - {gametype or 'Unknown'}")
+
+    # Update the series embed
+    series_channel = None
+    if series.text_channel_id:
+        series_channel = guild.get_channel(series.text_channel_id)
+
+    if not series_channel:
+        series_channel = guild.get_channel(QUEUE_CHANNEL_ID)
+
+    # Find or create the view to update embed
+    if series.series_message:
+        view = SeriesView(series)
+        try:
+            await view.update_series_embed(series_channel)
+            log_action(f"[GAME] Updated series embed with Game {game_number} result")
+        except Exception as e:
+            log_action(f"[GAME] Failed to update series embed: {e}")
+
+    # Also update general chat embed
+    try:
+        await update_general_chat_embed(guild, series)
+        log_action(f"[GAME] Updated general chat embed")
+    except Exception as e:
+        log_action(f"[GAME] Failed to update general chat embed: {e}")
+
+    # Check for auto-end threshold
+    red_wins = series.games.count('RED')
+    blue_wins = series.games.count('BLUE')
+    series_ended = False
+
+    if auto_end_threshold:
+        if red_wins >= auto_end_threshold or blue_wins >= auto_end_threshold:
+            log_action(f"[GAME] Series reached auto-end threshold ({auto_end_threshold}): Red {red_wins} - Blue {blue_wins}")
+            # Import and call end_series
+            try:
+                from postgame import end_series
+                await end_series(series_channel)
+                series_ended = True
+                log_action(f"[GAME] Series auto-ended")
+            except Exception as e:
+                log_action(f"[GAME] Failed to auto-end series: {e}")
+
+    return {
+        "success": True,
+        "message": f"Game {game_number} recorded: {winner} wins",
+        "series_ended": series_ended,
+        "red_wins": red_wins,
+        "blue_wins": blue_wins
+    }
+
+
+async def get_active_series_info(guild: discord.Guild) -> dict:
+    """
+    Get information about the currently active series.
+
+    Returns:
+        dict with series info or None if no active series
+    """
+    from searchmatchmaking import queue_state
+
+    if not queue_state.current_series:
+        return None
+
+    series = queue_state.current_series
+
+    return {
+        "match_number": series.match_number,
+        "series_number": series.series_number,
+        "test_mode": series.test_mode,
+        "red_team": series.red_team,
+        "blue_team": series.blue_team,
+        "games": series.games,
+        "game_stats": series.game_stats,
+        "red_wins": series.games.count('RED'),
+        "blue_wins": series.games.count('BLUE'),
+        "start_time": series.start_time.isoformat() if series.start_time else None,
+        "text_channel_id": series.text_channel_id,
+    }
+
 
 async def show_series_embed(channel: discord.TextChannel):
     """Show initial series embed - in series text channel if available, otherwise queue channel"""
