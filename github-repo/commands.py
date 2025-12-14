@@ -2190,6 +2190,20 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             # Show match embed
             await show_playlist_match_embed(channel, match)
 
+            # Post to general chat for tournament matches
+            if playlist == PlaylistType.TOURNAMENT_1:
+                from pregame import post_tournament_to_general
+                # Get captain names (highest MMR on each team)
+                red_mmrs = [(uid, await get_player_mmr(uid)) for uid in red_team]
+                blue_mmrs = [(uid, await get_player_mmr(uid)) for uid in blue_team]
+                red_captain_id = max(red_mmrs, key=lambda x: x[1])[0]
+                blue_captain_id = max(blue_mmrs, key=lambda x: x[1])[0]
+                red_captain = channel.guild.get_member(red_captain_id)
+                blue_captain = channel.guild.get_member(blue_captain_id)
+                red_captain_name = red_captain.display_name if red_captain else "Red"
+                blue_captain_name = blue_captain.display_name if blue_captain else "Blue"
+                await post_tournament_to_general(channel.guild, match, red_captain_name, blue_captain_name)
+
             # Save to history
             save_match_to_history(match, "STARTED", channel.guild)
 
