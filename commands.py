@@ -3281,9 +3281,8 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
     @bot.tree.command(name="playerstats", description="View player matchmaking statistics")
     @app_commands.describe(user="User to view stats for (optional)")
     async def playerstats(interaction: discord.Interaction, user: discord.User = None):
-        """Show player stats with per-playlist ranks - reads from ranks.json (website source of truth)"""
+        """Show player stats with per-playlist ranks - reads from local files (website source of truth)"""
         import STATSRANKS
-        from github_webhook import async_pull_emblems_from_github
 
         target_user = user or interaction.user
         guild = interaction.guild
@@ -3395,10 +3394,10 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             inline=True
         )
 
-        # Get player's emblem from emblems.json and use as thumbnail
+        # Get player's emblem from local emblems.json and use as thumbnail
         emblem_set = False
         try:
-            emblems = await async_pull_emblems_from_github() or {}
+            emblems = await STATSRANKS.async_load_emblems() or {}
             user_key = str(target_user.id)
             if user_key in emblems:
                 emblem_data = emblems[user_key]

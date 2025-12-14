@@ -1813,8 +1813,7 @@ async def post_match_results(channel: discord.TextChannel, match: PlaylistMatch,
         if winner_id:
             try:
                 import STATSRANKS
-                from github_webhook import async_pull_emblems_from_github
-                emblems = await async_pull_emblems_from_github() or {}
+                emblems = await STATSRANKS.async_load_emblems() or {}
                 user_key = str(winner_id)
                 if user_key in emblems:
                     emblem_url = emblems[user_key].get("emblem_url") if isinstance(emblems[user_key], dict) else emblems[user_key]

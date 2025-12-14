@@ -58,9 +58,10 @@ def get_default_playlists() -> dict:
         for ptype in PLAYLIST_TYPES
     }
 
-# File paths
+# File paths - LOCAL files are source of truth
 GAMESTATS_FILE = "gamestats.json"
 RANKS_FILE = "/home/carnagereport/CarnageReport.com/ranks.json"  # Website source of truth (discord_id -> rank data)
+EMBLEMS_FILE = "/home/carnagereport/CarnageReport.com/emblems.json"  # Player emblem data
 XP_CONFIG_FILE = "xp_config.json"
 MMR_FILE = "MMR.json"  # Contains MMR values for team balancing (simple format for easy editing)
 
@@ -166,6 +167,30 @@ async def async_load_ranks_from_github() -> dict:
                 return ranks
         except Exception as e:
             print(f"[RANKS] GitHub pull also failed: {e}")
+
+    return {}
+
+
+async def async_load_emblems() -> dict:
+    """Load emblems.json from local file (website source of truth)
+
+    Uses local file directly instead of GitHub for up-to-date data.
+    """
+    # Always use local file - it's the source of truth
+    local_emblems = load_json_file(EMBLEMS_FILE)
+    if local_emblems:
+        print(f"[EMBLEMS] Loaded {len(local_emblems)} player emblems from local emblems.json")
+        return local_emblems
+
+    # Fallback to GitHub if local file doesn't exist
+    if GITHUB_AVAILABLE and async_pull_emblems_from_github:
+        try:
+            emblems = await async_pull_emblems_from_github()
+            if emblems:
+                print(f"[EMBLEMS] Local file not found, loaded {len(emblems)} emblems from GitHub")
+                return emblems
+        except Exception as e:
+            print(f"[EMBLEMS] GitHub pull also failed: {e}")
 
     return {}
 
@@ -1078,9 +1103,11 @@ __all__ = [
     'load_json_file',
     'save_json_file',
     'async_load_ranks_from_github',
+    'async_load_emblems',
     'get_rank_icon_url',
     'get_emblem_png_url',
     'RANKS_FILE',
+    'EMBLEMS_FILE',
     'MMR_FILE',
     'PLAYLIST_TYPES',
     'MAP_GAMETYPES',
