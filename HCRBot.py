@@ -404,7 +404,7 @@ async def on_message(message: discord.Message):
                     ]
 
                     total_posted = 0
-                    highest_series_num = 0
+                    total_series_count = 0
 
                     for playlist_key, playlist_type in playlists:
                         if playlist_type not in PLAYLIST_CONFIG:
@@ -420,16 +420,8 @@ async def on_message(message: discord.Message):
                         all_series = statsdata.get_all_series(playlist_key)
                         unposted = statsdata.get_unposted_series(playlist_key, all_series)
 
-                        # Track highest series number from ALL series (not just unposted)
-                        for s in all_series:
-                            label = s.get("series_label", "")
-                            # Extract number from "Series 25" or similar
-                            import re
-                            match = re.search(r'(\d+)', label)
-                            if match:
-                                num = int(match.group(1))
-                                if num > highest_series_num:
-                                    highest_series_num = num
+                        # Count total series (each series = +1)
+                        total_series_count += len(all_series)
 
                         if not unposted:
                             continue
@@ -453,12 +445,12 @@ async def on_message(message: discord.Message):
                                 except Exception as e:
                                     print(f"[RANKS] Failed to post series: {e}")
 
-                    # Update match counter to highest series number found
-                    if highest_series_num > 0:
+                    # Update match counter to total series count
+                    if total_series_count > 0:
                         from ingame import Series
-                        if Series.match_counter < highest_series_num:
-                            Series.match_counter = highest_series_num
-                            print(f"[RANKS] Updated match counter to {highest_series_num}")
+                        if Series.match_counter < total_series_count:
+                            Series.match_counter = total_series_count
+                            print(f"[RANKS] Updated match counter to {total_series_count}")
                             # Save state
                             try:
                                 from state_manager import save_state
