@@ -147,21 +147,27 @@ def get_all_players_from_ranks_file() -> dict:
 
 
 async def async_load_ranks_from_github() -> dict:
-    """Load ranks.json from GitHub (website source of truth)
+    """Load ranks.json from local file (website source of truth)
 
-    Falls back to local file if GitHub pull fails.
+    Uses local file directly instead of GitHub for up-to-date data.
     """
+    # Always use local file - it's the source of truth
+    local_ranks = load_json_file(RANKS_FILE)
+    if local_ranks:
+        print(f"[RANKS] Loaded {len(local_ranks)} players from local ranks.json")
+        return local_ranks
+
+    # Fallback to GitHub if local file doesn't exist
     if GITHUB_AVAILABLE and async_pull_ranks_from_github:
         try:
             ranks = await async_pull_ranks_from_github()
             if ranks:
-                print(f"[RANKS] Loaded {len(ranks)} players from GitHub ranks.json")
+                print(f"[RANKS] Local file not found, loaded {len(ranks)} players from GitHub")
                 return ranks
         except Exception as e:
-            print(f"[RANKS] GitHub pull failed, using local: {e}")
+            print(f"[RANKS] GitHub pull also failed: {e}")
 
-    # Fallback to local file
-    return load_json_file(RANKS_FILE)
+    return {}
 
 
 def save_json_file(filepath: str, data: dict, skip_github: bool = False):
