@@ -1,7 +1,7 @@
 # searchmatchmaking.py - MLG 4v4 Queue Management System
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.5.0"
+MODULE_VERSION = "1.5.1"
 
 import discord
 from discord.ui import View, Button
@@ -873,7 +873,7 @@ async def create_queue_embed(channel: discord.TextChannel):
 
     embed = discord.Embed(
         title="MLG 4v4 Matchmaking",
-        description="Click **Join Matchmaking** to start searching for a Match!\n*Classic 4v4 with team selection vote*",
+        description="**We are looking for MLG 4v4 players!**\nClick **Join Matchmaking** to start searching for a Match!\n*Classic 4v4 with team selection vote*",
         color=discord.Color.blue()
     )
     embed.add_field(
@@ -978,9 +978,16 @@ async def update_queue_embed(channel: discord.TextChannel):
     # Create embed
     player_count = len(queue_state.queue)
 
+    # Build description with "looking for" message
+    needed = MAX_QUEUE_SIZE - player_count
+    if player_count > 0:
+        desc = f"**We are looking for MLG 4v4 players!**\nWe have **{player_count}/{MAX_QUEUE_SIZE}** players searching. Need **{needed}** more to start!\n*Classic 4v4 with team selection vote*"
+    else:
+        desc = "**We are looking for MLG 4v4 players!**\nClick **Join Matchmaking** to start searching for a Match!\n*Classic 4v4 with team selection vote*"
+
     embed = discord.Embed(
         title="MLG 4v4 Matchmaking",
-        description="Click **Join Matchmaking** to start searching for a Match!\n*Classic 4v4 with team selection vote*",
+        description=desc,
         color=discord.Color.blue()
     )
     embed.add_field(

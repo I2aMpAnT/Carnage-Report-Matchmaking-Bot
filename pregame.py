@@ -2,7 +2,7 @@
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 # Supports ALL playlists: MLG 4v4 (voting), Team Hardcore/Double Team (auto-balance), Head to Head (1v1)
 
-MODULE_VERSION = "1.6.0"
+MODULE_VERSION = "1.6.4"
 
 import discord
 from discord.ui import View, Button, Select
@@ -16,6 +16,9 @@ if TYPE_CHECKING:
 PREGAME_LOBBY_ID = None
 RED_TEAM_EMOJI_ID = None
 BLUE_TEAM_EMOJI_ID = None
+
+# Header image for DMs
+HEADER_IMAGE_URL = "https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/MessagefromCarnageReportHEADERSMALL.png"
 
 def log_action(message: str):
     """Log actions"""
@@ -128,7 +131,7 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
         if players_not_in_voice:
             not_in_voice_list = ", ".join([f"<@{uid}>" for uid in players_not_in_voice])
             embed.add_field(
-                name="Not in Voice - 5 minutes to join!",
+                name="Not in Voice - 10 minutes to join!",
                 value=f"{not_in_voice_list}\nJoin the Pregame Lobby or match is cancelled!",
                 inline=False
             )
@@ -144,9 +147,10 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
                 try:
                     dm_embed = discord.Embed(
                         title=f"{match_label} - Join Pregame Lobby!",
-                        description=f"Your **{playlist_name}** match is starting! Please join the **Pregame Lobby** voice channel within 5 minutes or the match may be cancelled.",
+                        description=f"Your **{playlist_name}** match is starting! Please join the **Pregame Lobby** voice channel within 10 minutes or the match may be cancelled.",
                         color=discord.Color.gold()
                     )
+                    dm_embed.set_image(url=HEADER_IMAGE_URL)
                     await member.send(embed=dm_embed)
                     log_action(f"Sent pregame DM to {member.name}")
                 except discord.Forbidden:
@@ -276,7 +280,7 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
     if players_not_in_voice and not test_mode:
         not_in_voice_list = ", ".join([f"<@{uid}>" for uid in players_not_in_voice])
         embed.add_field(
-            name="Not in Voice - 5 minutes to join!",
+            name="Not in Voice - 10 minutes to join!",
             value=f"{not_in_voice_list}\nJoin the Pregame Lobby or be replaced!",
             inline=False
         )
@@ -303,9 +307,10 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
             try:
                 dm_embed = discord.Embed(
                     title=f"{match_label} - Join Pregame Lobby!",
-                    description=f"Your match is starting! Please join the **Pregame Lobby** voice channel within 5 minutes or you may be replaced.",
+                    description=f"Your match is starting! Please join the **Pregame Lobby** voice channel within 10 minutes or the match will be cancelled.",
                     color=discord.Color.gold()
                 )
+                dm_embed.set_image(url=HEADER_IMAGE_URL)
                 await member.send(embed=dm_embed)
                 log_action(f"Sent pregame DM to {member.name}")
             except discord.Forbidden:
@@ -335,7 +340,8 @@ async def wait_for_players_and_show_selection(
 
     guild = channel.guild
     testers = testers or []
-    timeout_seconds = 300  # 5 minutes
+    timeout_seconds = 600  # 10 minutes
+    warning_sent = False  # Track if 5-minute warning has been sent
 
     # In test mode, only wait for testers (not filler players)
     players_to_wait_for = [uid for uid in players if uid in testers] if test_mode else players[:]
@@ -398,10 +404,34 @@ async def wait_for_players_and_show_selection(
             await show_team_selection(channel, pregame_message, players, pregame_vc_id, test_mode, testers, match_label)
             return
 
+        # Send 5-minute warning DM and channel ping at halfway point
+        if elapsed >= 300 and not warning_sent and players_not_in_voice:
+            warning_sent = True
+            # Ping in channel
+            missing_pings = " ".join([f"<@{uid}>" for uid in players_not_in_voice])
+            await channel.send(f"⚠️ **5 MINUTES REMAINING!** {missing_pings} - Join the Pregame Lobby NOW or the match will be cancelled!")
+            # DM each missing player
+            for uid in players_not_in_voice:
+                member = guild.get_member(uid)
+                if member:
+                    try:
+                        warning_embed = discord.Embed(
+                            title=f"⚠️ {match_label} - 5 Minutes Remaining!",
+                            description=f"You have **5 minutes** to join the **Pregame Lobby** voice channel or the match will be **cancelled**!",
+                            color=discord.Color.red()
+                        )
+                        warning_embed.set_image(url=HEADER_IMAGE_URL)
+                        await member.send(embed=warning_embed)
+                        log_action(f"Sent 5-minute warning DM to {member.name}")
+                    except discord.Forbidden:
+                        log_action(f"Could not DM {member.name} - DMs disabled")
+                    except Exception as e:
+                        log_action(f"Error sending warning DM to {member.name}: {e}")
+
         # Check timeout
         if elapsed >= timeout_seconds:
             log_action(f"Pregame timeout - {len(players_not_in_voice)} players missing")
-            # Handle no-shows: replace with people from pregame VC or proceed anyway
+            # Handle no-shows: cancel match and return players to postgame
             await handle_pregame_timeout(channel, pregame_message, players, players_not_in_voice, pregame_vc_id, test_mode, testers, match_label)
             return
 
@@ -457,75 +487,66 @@ async def handle_pregame_timeout(
     testers: List[int],
     match_label: str
 ):
-    """Handle timeout - replace no-shows if possible, then proceed to team selection"""
-    from searchmatchmaking import queue_state, get_queue_progress_image
+    """Handle timeout - cancel match and return players to postgame lobby if not all players showed up"""
+    from searchmatchmaking import queue_state, create_queue_embed
 
     guild = channel.guild
     pregame_vc = guild.get_channel(pregame_vc_id)
 
-    if not pregame_vc:
-        return
+    # Get the postgame lobby VC
+    POSTGAME_CARNAGE_REPORT_ID = 1424845826362048643
+    postgame_vc = guild.get_channel(POSTGAME_CARNAGE_REPORT_ID)
 
-    # Find replacement players from the pregame VC who weren't in the original 8
-    current_vc_members = [m.id for m in pregame_vc.members if not m.bot]
-    original_players = set(players)
-    potential_replacements = [uid for uid in current_vc_members if uid not in original_players]
+    # Move all players currently in the pregame VC to postgame lobby
+    if pregame_vc and postgame_vc:
+        for member in list(pregame_vc.members):
+            try:
+                await member.move_to(postgame_vc)
+                log_action(f"Moved {member.name} to Postgame Carnage Report (no-show cancellation)")
+            except Exception as e:
+                log_action(f"Failed to move {member.name} to postgame: {e}")
 
-    replacements_made = []
-    updated_players = players[:]
+    # Delete the pregame VC
+    if pregame_vc:
+        try:
+            await pregame_vc.delete(reason="Match cancelled - not all players showed up")
+            log_action(f"Deleted pregame VC for {match_label}")
+        except Exception as e:
+            log_action(f"Failed to delete pregame VC: {e}")
 
-    for no_show_id in no_show_players:
-        if potential_replacements:
-            replacement_id = potential_replacements.pop(0)
+    # Build the cancellation embed showing who no-showed
+    no_show_mentions = ", ".join([f"<@{uid}>" for uid in no_show_players])
+    players_who_showed = [uid for uid in players if uid not in no_show_players]
+    showed_mentions = ", ".join([f"<@{uid}>" for uid in players_who_showed]) if players_who_showed else "None"
 
-            # Replace in player list
-            idx = updated_players.index(no_show_id)
-            updated_players[idx] = replacement_id
-
-            no_show_member = guild.get_member(no_show_id)
-            replacement_member = guild.get_member(replacement_id)
-
-            no_show_name = no_show_member.display_name if no_show_member else str(no_show_id)
-            replacement_name = replacement_member.display_name if replacement_member else str(replacement_id)
-
-            replacements_made.append(f"<@{no_show_id}> → <@{replacement_id}>")
-            log_action(f"Replaced no-show {no_show_name} with {replacement_name}")
-
-    # Show team selection with updated player list
     embed = discord.Embed(
-        title=f"Pregame Lobby - {match_label}",
-        description="⏰ **Time's up!** Proceeding to team selection.\n\nSelect your preferred team selection method:",
-        color=discord.Color.orange()
+        title=f"❌ {match_label} - Cancelled",
+        description="**Match cancelled - not all players joined the pregame lobby in time.**\n\nAll players have been returned to the Postgame Carnage Report lobby.",
+        color=discord.Color.red()
     )
-    embed.set_image(url=get_queue_progress_image(8))
+    embed.add_field(name="⚠️ No-Shows", value=no_show_mentions, inline=False)
+    embed.add_field(name="✅ Players Who Showed Up", value=showed_mentions, inline=False)
 
-    player_count = f"{len(updated_players)}/8 players"
-    if test_mode:
-        player_count += " (TEST MODE)"
-    player_list = "\n".join([f"<@{uid}>" for uid in updated_players])
-    embed.add_field(name=f"Players ({player_count})", value=player_list, inline=False)
-
-    if replacements_made:
-        embed.add_field(name="🔄 Replacements Made", value="\n".join(replacements_made), inline=False)
-
-    remaining_no_shows = [uid for uid in no_show_players if uid in updated_players]
-    if remaining_no_shows:
-        embed.add_field(
-            name="⚠️ Still Missing (no replacements available)",
-            value=", ".join([f"<@{uid}>" for uid in remaining_no_shows]),
-            inline=False
-        )
-
-    view = TeamSelectionView(updated_players, test_mode=test_mode, testers=testers, pregame_vc_id=pregame_vc_id, match_label=match_label)
-    view.pregame_message = pregame_message
-    queue_state.pregame_message = pregame_message
-
+    # Delete the old pregame message and post cancellation
     try:
-        await pregame_message.edit(embed=embed, view=view)
+        await pregame_message.delete()
     except:
-        new_message = await channel.send(embed=embed, view=view)
-        view.pregame_message = new_message
-        queue_state.pregame_message = new_message
+        pass
+
+    # Ping all players so they get notified
+    all_player_pings = " ".join([f"<@{uid}>" for uid in players])
+    await channel.send(content=all_player_pings, embed=embed)
+    log_action(f"{match_label} cancelled due to no-shows: {[guild.get_member(uid).display_name if guild.get_member(uid) else str(uid) for uid in no_show_players]}")
+
+    # Reset queue state
+    queue_state.locked = False
+    queue_state.locked_players.clear()
+    queue_state.pregame_vc_id = None
+    queue_state.pregame_message = None
+    queue_state.test_mode = False
+
+    # Recreate the queue embed
+    await create_queue_embed(channel)
 
 
 async def check_no_shows(channel: discord.TextChannel, view, no_show_players: List[int], pregame_vc_id: int, timeout_seconds: int):
@@ -1675,7 +1696,8 @@ async def wait_for_playlist_players(
 
     guild = channel.guild
     ps = playlist_state
-    timeout_seconds = 300  # 5 minutes
+    timeout_seconds = 600  # 10 minutes
+    warning_sent = False  # Track if 5-minute warning has been sent
     start_time = asyncio.get_event_loop().time()
 
     while True:
@@ -1730,6 +1752,30 @@ async def wait_for_playlist_players(
         if len(players_in_voice) == len(players):
             log_action(f"All players in {match_label} pregame - proceeding to team assignment")
             break
+
+        # Send 5-minute warning DM and channel ping at halfway point
+        if elapsed >= 300 and not warning_sent and players_not_in_voice:
+            warning_sent = True
+            # Ping in channel
+            missing_pings = " ".join([f"<@{uid}>" for uid in players_not_in_voice])
+            await channel.send(f"⚠️ **5 MINUTES REMAINING!** {missing_pings} - Join the Pregame Lobby NOW or the match will be cancelled!")
+            # DM each missing player
+            for uid in players_not_in_voice:
+                member = guild.get_member(uid)
+                if member:
+                    try:
+                        warning_embed = discord.Embed(
+                            title=f"⚠️ {match_label} - 5 Minutes Remaining!",
+                            description=f"You have **5 minutes** to join the **Pregame Lobby** voice channel or the match will be **cancelled**!",
+                            color=discord.Color.red()
+                        )
+                        warning_embed.set_image(url=HEADER_IMAGE_URL)
+                        await member.send(embed=warning_embed)
+                        log_action(f"Sent 5-minute warning DM to {member.name}")
+                    except discord.Forbidden:
+                        log_action(f"Could not DM {member.name} - DMs disabled")
+                    except Exception as e:
+                        log_action(f"Error sending warning DM to {member.name}: {e}")
 
         await asyncio.sleep(5)
 
