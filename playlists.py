@@ -944,10 +944,31 @@ def create_series_embed(series_data: dict, red_emoji_id: int = None, blue_emoji_
             inline=False
         )
 
-    # Timestamp - show end time of series
+    # Timestamps - show start and end time in EST
+    start_time = series_data.get("start_time")
     end_time = series_data.get("end_time")
+
+    def format_time_est(iso_time: str) -> str:
+        """Convert ISO time to abbreviated EST format."""
+        try:
+            dt = datetime.fromisoformat(iso_time.replace('Z', '+00:00'))
+            # Convert to EST (UTC-5)
+            from zoneinfo import ZoneInfo
+            est = ZoneInfo("America/New_York")
+            dt_est = dt.astimezone(est) if dt.tzinfo else dt.replace(tzinfo=ZoneInfo("UTC")).astimezone(est)
+            return dt_est.strftime("%m/%d/%y %I:%M %p EST")
+        except:
+            # Fallback if parsing fails
+            return iso_time
+
+    footer_parts = []
+    if start_time:
+        footer_parts.append(f"Start: {format_time_est(start_time)}")
     if end_time:
-        embed.set_footer(text=f"Completed: {end_time}")
+        footer_parts.append(f"End: {format_time_est(end_time)}")
+
+    if footer_parts:
+        embed.set_footer(text=" | ".join(footer_parts))
 
     return embed
 
