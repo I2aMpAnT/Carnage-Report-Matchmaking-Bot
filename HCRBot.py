@@ -404,6 +404,8 @@ async def on_message(message: discord.Message):
                     ]
 
                     total_posted = 0
+                    highest_series_num = 0
+
                     for playlist_key, playlist_type in playlists:
                         if playlist_type not in PLAYLIST_CONFIG:
                             continue
@@ -417,6 +419,17 @@ async def on_message(message: discord.Message):
                         # Get all series and filter to only unposted ones
                         all_series = statsdata.get_all_series(playlist_key)
                         unposted = statsdata.get_unposted_series(playlist_key, all_series)
+
+                        # Track highest series number from ALL series (not just unposted)
+                        for s in all_series:
+                            label = s.get("series_label", "")
+                            # Extract number from "Series 25" or similar
+                            import re
+                            match = re.search(r'(\d+)', label)
+                            if match:
+                                num = int(match.group(1))
+                                if num > highest_series_num:
+                                    highest_series_num = num
 
                         if not unposted:
                             continue
@@ -439,6 +452,19 @@ async def on_message(message: discord.Message):
                                     total_posted += 1
                                 except Exception as e:
                                     print(f"[RANKS] Failed to post series: {e}")
+
+                    # Update match counter to highest series number found
+                    if highest_series_num > 0:
+                        from ingame import Series
+                        if Series.match_counter < highest_series_num:
+                            Series.match_counter = highest_series_num
+                            print(f"[RANKS] Updated match counter to {highest_series_num}")
+                            # Save state
+                            try:
+                                from state_manager import save_state
+                                save_state()
+                            except:
+                                pass
 
                     if total_posted > 0:
                         print(f"[RANKS] Posted {total_posted} new series embeds")
