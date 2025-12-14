@@ -3789,13 +3789,16 @@ python3 populate_stats.py'''
     @bot.tree.command(name="backfillgamedata", description="[ADMIN] Backfill historical series data into embeds for all playlists")
     @has_admin_role()
     async def backfill_game_data(interaction: discord.Interaction):
-        """Backfill historical series data - reads from local JSON files and posts series embeds to all playlist channels"""
+        """Backfill historical series data - reads game data from embeds JSON and posts series embeds"""
         await interaction.response.defer(ephemeral=True)
 
-        import statsdata
-        from playlists import PLAYLIST_CONFIG, PlaylistType
+        from playlists import (
+            PLAYLIST_CONFIG, PlaylistType, create_series_embed,
+            get_unposted_series, mark_series_as_posted, get_playlist_completed_file
+        )
 
         guild = interaction.guild
+        WEBSITE_DATA_PATH = "/home/carnagereport/CarnageReport.com"
 
         # All playlists to process
         playlists = [
@@ -3803,6 +3806,7 @@ python3 populate_stats.py'''
             ("team_hardcore", PlaylistType.TEAM_HARDCORE),
             ("double_team", PlaylistType.DOUBLE_TEAM),
             ("head_to_head", PlaylistType.HEAD_TO_HEAD),
+            ("tournament_1", PlaylistType.TOURNAMENT_1),
         ]
 
         total_posted = 0
@@ -3819,23 +3823,100 @@ python3 populate_stats.py'''
                 results.append(f"❌ {playlist_key}: Channel not found")
                 continue
 
-            # Generate embeds using statsdata module
-            embeds_generated = await statsdata.generate_all_series_embeds(
-                playlist=playlist_key,
-                guild=guild,
-                red_emoji_id=RED_TEAM_EMOJI_ID,
-                blue_emoji_id=BLUE_TEAM_EMOJI_ID
-            )
-
-            if not embeds_generated:
-                results.append(f"⚪ {playlist_key}: No series data")
+            # Read games from embeds JSON (created by populate_stats.py)
+            embeds_file = f"{WEBSITE_DATA_PATH}/{playlist_key}_embeds.json"
+            if not os.path.exists(embeds_file):
+                results.append(f"⚪ {playlist_key}: No embeds file")
                 continue
 
-            # Post to playlist channel
+            try:
+                with open(embeds_file, 'r') as f:
+                    games_data = json.load(f)
+            except Exception as e:
+                results.append(f"❌ {playlist_key}: Failed to read embeds file")
+                continue
+
+            games = games_data.get("games", [])
+            if not games:
+                results.append(f"⚪ {playlist_key}: No games in embeds file")
+                continue
+
+            # Group games into series (same players = same series)
+            series_list = []
+            current_series = None
+            current_players = None
+
+            for game in sorted(games, key=lambda x: x.get("timestamp", "")):
+                # Get all player IDs from this game
+                red_ids = set(game.get("red_team", {}).get("player_ids", []))
+                blue_ids = set(game.get("blue_team", {}).get("player_ids", []))
+                game_players = red_ids | blue_ids
+
+                # Check if same players as current series
+                if current_players and game_players == current_players:
+                    # Same series - add game
+                    current_series["games"].append(game)
+                    if game.get("winner") == "RED":
+                        current_series["red_team"]["games_won"] += 1
+                    else:
+                        current_series["blue_team"]["games_won"] += 1
+                    current_series["end_time"] = game.get("timestamp")
+                else:
+                    # New series
+                    if current_series:
+                        series_list.append(current_series)
+
+                    red_team = game.get("red_team", {})
+                    blue_team = game.get("blue_team", {})
+                    current_series = {
+                        "playlist_name": PLAYLIST_CONFIG[playlist_type]["name"],
+                        "start_time": game.get("timestamp"),
+                        "end_time": game.get("timestamp"),
+                        "red_team": {
+                            "player_names": red_team.get("player_names", []),
+                            "player_ids": red_team.get("player_ids", []),
+                            "player_ranks": red_team.get("player_ranks", []),
+                            "games_won": 1 if game.get("winner") == "RED" else 0
+                        },
+                        "blue_team": {
+                            "player_names": blue_team.get("player_names", []),
+                            "player_ids": blue_team.get("player_ids", []),
+                            "player_ranks": blue_team.get("player_ranks", []),
+                            "games_won": 1 if game.get("winner") == "BLUE" else 0
+                        },
+                        "games": [game]
+                    }
+                    current_players = game_players
+
+            # Don't forget last series
+            if current_series:
+                series_list.append(current_series)
+
+            # Post each series
             posted = 0
-            for embed in embeds_generated:
+            for i, series in enumerate(series_list, 1):
+                # Determine winner
+                red_wins = series["red_team"]["games_won"]
+                blue_wins = series["blue_team"]["games_won"]
+                if red_wins > blue_wins:
+                    series["result"] = "RED_WIN"
+                elif blue_wins > red_wins:
+                    series["result"] = "BLUE_WIN"
+                else:
+                    series["result"] = "TIE"
+
+                series["match_number"] = i
+
+                # Create embed and view
+                embed, view = create_series_embed(
+                    series,
+                    guild=guild,
+                    red_emoji_id=RED_TEAM_EMOJI_ID,
+                    blue_emoji_id=BLUE_TEAM_EMOJI_ID
+                )
+
                 try:
-                    await target_channel.send(embed=embed)
+                    await target_channel.send(embed=embed, view=view)
                     posted += 1
                 except Exception as e:
                     log_action(f"Failed to post embed: {e}")
