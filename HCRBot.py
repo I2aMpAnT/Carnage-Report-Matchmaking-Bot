@@ -232,8 +232,14 @@ async def on_ready():
     # Initialize queue embed (MLG 4v4 - second channel with banned role)
     channel2 = bot.get_channel(QUEUE_CHANNEL_ID_2)
     if channel2:
-        await create_queue_embed(channel2)
+        from searchmatchmaking import queue_state_2, check_queue_inactivity
+        await create_queue_embed(channel2, queue_state_2)
         print(f'✅ MLG 4v4 queue embed (restricted) created in {channel2.name}')
+
+        # Start inactivity timer task for second queue
+        if queue_state_2.inactivity_timer_task is None or queue_state_2.inactivity_timer_task.done():
+            queue_state_2.inactivity_timer_task = asyncio.create_task(check_queue_inactivity(queue_state_2))
+            print('✅ Queue 2 inactivity timer started')
     else:
         print(f'⚠️ Could not find second queue channel {QUEUE_CHANNEL_ID_2}')
 
