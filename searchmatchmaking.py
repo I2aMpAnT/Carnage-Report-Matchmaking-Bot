@@ -55,8 +55,15 @@ class QueueState:
         self.locked: bool = False  # Queue locked when full - prevents leaving
         self.locked_players: List[int] = []  # Players locked into current match
 
-# Global queue state
-queue_state = QueueState()
+# Global queue states - separate queues for each channel
+queue_state = QueueState()  # Primary MLG 4v4 queue
+queue_state_2 = QueueState()  # Second MLG 4v4 queue (with banned role restriction)
+
+def get_queue_state(channel_id: int):
+    """Get the appropriate queue state based on channel ID"""
+    if channel_id == QUEUE_CHANNEL_ID_2:
+        return queue_state_2
+    return queue_state
 
 # Constants (will be imported from bot.py)
 MAX_QUEUE_SIZE = 8
@@ -75,15 +82,18 @@ def log_action(message: str):
         f.write(f"[{timestamp}] {message}\n")
     print(f"[LOG] {message}")
 
-async def auto_update_queue_times():
+async def auto_update_queue_times(qs=None):
     """Background task to update queue times every 10 seconds"""
+    if qs is None:
+        qs = queue_state  # Default to primary queue
+
     await asyncio.sleep(5)  # Wait 5 seconds on startup
-    
+
     while True:
         try:
             # Only update if there are players in queue
-            if queue_state.queue and queue_state.queue_channel:
-                await update_queue_embed(queue_state.queue_channel)
+            if qs.queue and qs.queue_channel:
+                await update_queue_embed(qs.queue_channel, qs)
             await asyncio.sleep(10)  # Update every 10 seconds
         except asyncio.CancelledError:
             break
@@ -94,10 +104,11 @@ async def auto_update_queue_times():
 
 class InactivityConfirmView(View):
     """View for inactivity confirmation with Yes/No buttons - uses dynamic custom_ids"""
-    def __init__(self, user_id: int):
+    def __init__(self, user_id: int, qs=None):
         super().__init__(timeout=INACTIVITY_RESPONSE_MINUTES * 60)  # 5 minute timeout
         self.user_id = user_id
         self.responded = False
+        self.qs = qs if qs else queue_state  # Store which queue this belongs to
 
         # Add buttons with dynamic custom_ids (include user_id so each user has unique buttons)
         yes_button = Button(
@@ -126,12 +137,12 @@ class InactivityConfirmView(View):
         self.responded = True
 
         # Reset their join time to give them another hour
-        if self.user_id in queue_state.queue:
-            queue_state.queue_join_times[self.user_id] = datetime.now()
+        if self.user_id in self.qs.queue:
+            self.qs.queue_join_times[self.user_id] = datetime.now()
             log_action(f"User {interaction.user.display_name} confirmed to stay in queue - timer reset")
 
             # Clean up pending confirmation
-            await cleanup_inactivity_messages(self.user_id)
+            await cleanup_inactivity_messages(self.user_id, self.qs)
 
             # Update the message to show confirmation
             try:
@@ -146,8 +157,8 @@ class InactivityConfirmView(View):
                 pass
 
             # Update queue embed
-            if queue_state.queue_channel:
-                await update_queue_embed(queue_state.queue_channel)
+            if self.qs.queue_channel:
+                await update_queue_embed(self.qs.queue_channel, self.qs)
         else:
             await interaction.response.send_message("You're no longer in the queue.", ephemeral=True)
 
@@ -159,18 +170,18 @@ class InactivityConfirmView(View):
             return
 
         # Check if user is locked into a match
-        if self.user_id in queue_state.locked_players:
+        if self.user_id in self.qs.locked_players:
             await interaction.response.send_message("❌ Queue is locked! You cannot leave once the match has started.", ephemeral=True)
             return
 
         self.responded = True
 
         # Remove from queue
-        if self.user_id in queue_state.queue:
+        if self.user_id in self.qs.queue:
             # Get guild - use interaction.guild if available, otherwise get from queue_channel (for DM buttons)
-            guild = interaction.guild or (queue_state.queue_channel.guild if queue_state.queue_channel else None)
+            guild = interaction.guild or (self.qs.queue_channel.guild if self.qs.queue_channel else None)
             if guild:
-                await remove_inactive_user(guild, self.user_id, reason="chose to leave")
+                await remove_inactive_user(guild, self.user_id, self.qs, reason="chose to leave")
 
             try:
                 await interaction.response.edit_message(
@@ -188,26 +199,29 @@ class InactivityConfirmView(View):
 
     async def on_timeout(self):
         """Called when the view times out (no response in 5 minutes)"""
-        if not self.responded and self.user_id in queue_state.queue:
+        if not self.responded and self.user_id in self.qs.queue:
             # Need to get guild from somewhere - use stored channel
-            if queue_state.queue_channel:
-                guild = queue_state.queue_channel.guild
-                await remove_inactive_user(guild, self.user_id, reason="did not respond to inactivity check")
+            if self.qs.queue_channel:
+                guild = self.qs.queue_channel.guild
+                await remove_inactive_user(guild, self.user_id, self.qs, reason="did not respond to inactivity check")
 
 
-async def remove_inactive_user(guild: discord.Guild, user_id: int, reason: str = "inactivity"):
+async def remove_inactive_user(guild: discord.Guild, user_id: int, qs=None, reason: str = "inactivity"):
     """Remove a user from queue due to inactivity"""
-    if user_id not in queue_state.queue:
+    if qs is None:
+        qs = queue_state  # Default to primary queue
+
+    if user_id not in qs.queue:
         return
 
     # Don't remove if user is locked into a match
-    if user_id in queue_state.locked_players:
+    if user_id in qs.locked_players:
         return
 
     # Calculate time in queue
     time_in_queue = ""
-    if user_id in queue_state.queue_join_times:
-        join_time = queue_state.queue_join_times[user_id]
+    if user_id in qs.queue_join_times:
+        join_time = qs.queue_join_times[user_id]
         elapsed = datetime.now() - join_time
         total_minutes = int(elapsed.total_seconds() / 60)
 
@@ -218,22 +232,23 @@ async def remove_inactive_user(guild: discord.Guild, user_id: int, reason: str =
         else:
             time_in_queue = f"{total_minutes}m"
 
-        del queue_state.queue_join_times[user_id]
+        del qs.queue_join_times[user_id]
 
     # Get member for display name and role removal
     member = guild.get_member(user_id)
     display_name = member.display_name if member else f"User {user_id}"
 
     # Remove from queue
-    queue_state.queue.remove(user_id)
-    queue_state.recent_action = {
+    qs.queue.remove(user_id)
+    qs.recent_action = {
         'type': 'leave',
         'user_id': user_id,
         'name': display_name,
         'time_in_queue': time_in_queue
     }
 
-    log_action(f"{display_name} removed from queue ({reason}) after {time_in_queue} ({len(queue_state.queue)}/{MAX_QUEUE_SIZE})")
+    queue_name = "MLG 4v4 (Restricted)" if qs == queue_state_2 else "MLG 4v4"
+    log_action(f"{display_name} removed from {queue_name} ({reason}) after {time_in_queue} ({len(qs.queue)}/{MAX_QUEUE_SIZE})")
 
     # Remove SearchingMatchmaking role
     if member:
@@ -246,7 +261,7 @@ async def remove_inactive_user(guild: discord.Guild, user_id: int, reason: str =
             log_action(f"Failed to remove SearchingMatchmaking role: {e}")
 
     # Clean up pending confirmation messages
-    await cleanup_inactivity_messages(user_id)
+    await cleanup_inactivity_messages(user_id, qs)
 
     # Save state
     try:
@@ -256,17 +271,21 @@ async def remove_inactive_user(guild: discord.Guild, user_id: int, reason: str =
         pass
 
     # Update queue embed
-    if queue_state.queue_channel:
-        await update_queue_embed(queue_state.queue_channel)
+    if qs.queue_channel:
+        await update_queue_embed(qs.queue_channel, qs)
 
-    # Update ping message if exists
-    await update_ping_message(guild)
+    # Update ping message if exists (only for primary queue)
+    if qs == queue_state:
+        await update_ping_message(guild)
 
 
-async def cleanup_inactivity_messages(user_id: int):
+async def cleanup_inactivity_messages(user_id: int, qs=None):
     """Clean up DM and general chat messages for a user's inactivity prompt"""
-    if user_id in queue_state.inactivity_pending:
-        pending = queue_state.inactivity_pending[user_id]
+    if qs is None:
+        qs = queue_state  # Default to primary queue
+
+    if user_id in qs.inactivity_pending:
+        pending = qs.inactivity_pending[user_id]
 
         # Try to delete the general chat message
         if pending.get("general_message"):
@@ -286,17 +305,20 @@ async def cleanup_inactivity_messages(user_id: int):
             except:
                 pass
 
-        del queue_state.inactivity_pending[user_id]
+        del qs.inactivity_pending[user_id]
 
 
-async def send_inactivity_prompt(guild: discord.Guild, user_id: int):
+async def send_inactivity_prompt(guild: discord.Guild, user_id: int, qs=None):
     """Send inactivity prompt to user via DM only"""
+    if qs is None:
+        qs = queue_state  # Default to primary queue
+
     member = guild.get_member(user_id)
     if not member:
         return
 
     # Create the confirmation view
-    view = InactivityConfirmView(user_id)
+    view = InactivityConfirmView(user_id, qs)
 
     # Plain text DM message (no embed)
     dm_text = (
@@ -317,7 +339,7 @@ async def send_inactivity_prompt(guild: discord.Guild, user_id: int):
     except discord.Forbidden:
         log_action(f"Could not DM {member.display_name} - DMs disabled, removing from queue")
         # If we can't DM them, remove them from queue
-        await remove_inactive_user(guild, user_id, reason="DMs disabled - could not send inactivity check")
+        await remove_inactive_user(guild, user_id, qs, reason="DMs disabled - could not send inactivity check")
         return
     except Exception as e:
         log_action(f"Error sending inactivity DM to {member.display_name}: {e}")
@@ -325,15 +347,18 @@ async def send_inactivity_prompt(guild: discord.Guild, user_id: int):
 
     # Store the pending confirmation (only if DM was sent successfully)
     if dm_sent:
-        queue_state.inactivity_pending[user_id] = {
+        qs.inactivity_pending[user_id] = {
             "prompt_time": datetime.now(),
             "dm_message": dm_message,
             "general_message": None
         }
 
 
-async def check_queue_inactivity():
+async def check_queue_inactivity(qs=None):
     """Background task to check for inactive users in queue"""
+    if qs is None:
+        qs = queue_state  # Default to primary queue
+
     await asyncio.sleep(30)  # Wait 30 seconds on startup before first check
 
     while True:
@@ -341,24 +366,24 @@ async def check_queue_inactivity():
             now = datetime.now()
 
             # Check each user in queue
-            for user_id in list(queue_state.queue):  # Use list() to avoid modification during iteration
+            for user_id in list(qs.queue):  # Use list() to avoid modification during iteration
                 # Skip if user already has a pending confirmation
-                if user_id in queue_state.inactivity_pending:
+                if user_id in qs.inactivity_pending:
                     # Check if the pending confirmation has timed out
-                    pending = queue_state.inactivity_pending[user_id]
+                    pending = qs.inactivity_pending[user_id]
                     prompt_time = pending.get("prompt_time")
                     if prompt_time:
                         elapsed = now - prompt_time
                         if elapsed.total_seconds() >= INACTIVITY_RESPONSE_MINUTES * 60:
                             # Time's up - remove the user
-                            if queue_state.queue_channel:
-                                guild = queue_state.queue_channel.guild
-                                await remove_inactive_user(guild, user_id, reason="did not respond to inactivity check")
+                            if qs.queue_channel:
+                                guild = qs.queue_channel.guild
+                                await remove_inactive_user(guild, user_id, qs, reason="did not respond to inactivity check")
                     continue
 
                 # Check if user is in a voice channel (exempt from AFK if in voice and not deafened)
-                if queue_state.queue_channel:
-                    guild = queue_state.queue_channel.guild
+                if qs.queue_channel:
+                    guild = qs.queue_channel.guild
                     member = guild.get_member(user_id)
                     if member and member.voice:
                         voice_state = member.voice
@@ -367,18 +392,18 @@ async def check_queue_inactivity():
                         # Exempt if: in voice, NOT in AFK channel, and NOT deafened
                         if not is_in_afk and not voice_state.self_deaf and not voice_state.deaf:
                             # User is active in voice - reset their timer silently
-                            queue_state.queue_join_times[user_id] = now
+                            qs.queue_join_times[user_id] = now
                             continue
 
                 # Check how long they've been in queue
-                join_time = queue_state.queue_join_times.get(user_id)
+                join_time = qs.queue_join_times.get(user_id)
                 if join_time:
                     elapsed = now - join_time
                     if elapsed.total_seconds() >= INACTIVITY_CHECK_MINUTES * 60:
                         # User has been in queue for 1 hour - send prompt
-                        if queue_state.queue_channel:
-                            guild = queue_state.queue_channel.guild
-                            await send_inactivity_prompt(guild, user_id)
+                        if qs.queue_channel:
+                            guild = qs.queue_channel.guild
+                            await send_inactivity_prompt(guild, user_id, qs)
 
             # Check every 30 seconds for more responsive timeout handling
             await asyncio.sleep(30)
@@ -399,8 +424,11 @@ class QueueView(View):
         user_id = interaction.user.id
         user_roles = [role.name for role in interaction.user.roles]
 
+        # Get the correct queue state for this channel
+        qs = get_queue_state(interaction.channel.id)
+
         # Check if matchmaking is paused
-        if queue_state.paused:
+        if qs.paused:
             await interaction.response.send_message(
                 "⏸️ **Sorry, Matchmaking is currently paused.**\n\nPlease wait for a staff member to resume it.",
                 ephemeral=True
@@ -469,9 +497,19 @@ class QueueView(View):
                 )
             return
 
-        # Check if already in queue
-        if user_id in queue_state.queue:
+        # Check if already in this queue
+        if user_id in qs.queue:
             await interaction.response.send_message("You're already in matchmaking!", ephemeral=True)
+            return
+
+        # Check if already in the OTHER MLG 4v4 queue
+        other_qs = queue_state_2 if qs == queue_state else queue_state
+        if user_id in other_qs.queue:
+            await interaction.response.send_message(
+                "You're already in the other MLG 4v4 queue!\n"
+                "Leave that queue first before joining this one.",
+                ephemeral=True
+            )
             return
 
         # Check if in another playlist queue (except Head to Head which is exempt)
@@ -491,25 +529,26 @@ class QueueView(View):
             pass
 
         # Check if queue is full
-        if len(queue_state.queue) >= MAX_QUEUE_SIZE:
+        if len(qs.queue) >= MAX_QUEUE_SIZE:
             await interaction.response.send_message("Matchmaking is full!", ephemeral=True)
             return
 
         # Check if player is in the current match (can't queue while playing)
-        if queue_state.current_series:
-            if user_id in queue_state.current_series.red_team or user_id in queue_state.current_series.blue_team:
+        if qs.current_series:
+            if user_id in qs.current_series.red_team or user_id in qs.current_series.blue_team:
                 await interaction.response.send_message("You're in the current match! Finish it first.", ephemeral=True)
                 return
 
         # Add to queue with join time
-        queue_state.queue.append(user_id)
-        queue_state.queue_join_times[user_id] = datetime.now()
+        qs.queue.append(user_id)
+        qs.queue_join_times[user_id] = datetime.now()
 
         # Clear recent action if this user was the one who left (they're rejoining)
-        if queue_state.recent_action and queue_state.recent_action.get('user_id') == user_id:
-            queue_state.recent_action = None
+        if qs.recent_action and qs.recent_action.get('user_id') == user_id:
+            qs.recent_action = None
 
-        log_action(f"{interaction.user.display_name} joined matchmaking ({len(queue_state.queue)}/{MAX_QUEUE_SIZE}) - MMR: {player_stats['mmr']}")
+        queue_name = "MLG 4v4 (Restricted)" if qs == queue_state_2 else "MLG 4v4"
+        log_action(f"{interaction.user.display_name} joined {queue_name} ({len(qs.queue)}/{MAX_QUEUE_SIZE}) - MMR: {player_stats['mmr']}")
         
         # Add SearchingMatchmaking role
         try:
@@ -529,42 +568,46 @@ class QueueView(View):
         
         # Just defer and update - no message shown
         await interaction.response.defer()
-        await update_queue_embed(interaction.channel)
-        
-        # Update ping message if exists
-        await update_ping_message(interaction.guild)
+        await update_queue_embed(interaction.channel, qs)
+
+        # Update ping message if exists (only for primary queue)
+        if qs == queue_state:
+            await update_ping_message(interaction.guild)
 
         # Start pregame if queue is full
-        if len(queue_state.queue) == MAX_QUEUE_SIZE:
+        if len(qs.queue) == MAX_QUEUE_SIZE:
             # Lock players immediately - they cannot leave once queue is full
-            queue_state.locked = True
-            queue_state.locked_players = queue_state.queue[:]
-            log_action(f"Queue full - locked {len(queue_state.locked_players)} players")
+            qs.locked = True
+            qs.locked_players = qs.queue[:]
+            log_action(f"Queue full - locked {len(qs.locked_players)} players")
 
             from pregame import start_pregame
-            await start_pregame(interaction.channel)
+            await start_pregame(interaction.channel, mlg_queue_state=qs)
     
     @discord.ui.button(label="Leave Matchmaking", style=discord.ButtonStyle.danger, custom_id="leave_queue")
     async def leave_queue(self, interaction: discord.Interaction, button: discord.ui.Button):
         user_id = interaction.user.id
 
+        # Get the correct queue state for this channel
+        qs = get_queue_state(interaction.channel.id)
+
         # Check if user is locked into a match
-        if user_id in queue_state.locked_players:
+        if user_id in qs.locked_players:
             await interaction.response.send_message("❌ Queue is locked! You cannot leave once the match has started.", ephemeral=True)
             return
 
-        if user_id not in queue_state.queue:
+        if user_id not in qs.queue:
             await interaction.response.send_message("You're not in matchmaking!", ephemeral=True)
             return
-        
+
         # Calculate time spent in queue
         time_in_queue = ""
-        if user_id in queue_state.queue_join_times:
-            join_time = queue_state.queue_join_times[user_id]
+        if user_id in qs.queue_join_times:
+            join_time = qs.queue_join_times[user_id]
             elapsed = datetime.now() - join_time
             total_minutes = int(elapsed.total_seconds() / 60)
             seconds = int(elapsed.total_seconds() % 60)
-            
+
             if total_minutes >= 60:
                 hours = total_minutes // 60
                 mins = total_minutes % 60
@@ -573,21 +616,22 @@ class QueueView(View):
                 time_in_queue = f"{total_minutes}m {seconds}s"
             else:
                 time_in_queue = f"{seconds}s"
-            
-            del queue_state.queue_join_times[user_id]
-        
-        queue_state.queue.remove(user_id)
-        queue_state.recent_action = {
+
+            del qs.queue_join_times[user_id]
+
+        qs.queue.remove(user_id)
+        qs.recent_action = {
             'type': 'leave',
             'user_id': user_id,
             'name': interaction.user.display_name,
             'time_in_queue': time_in_queue
         }
-        
-        log_action(f"{interaction.user.display_name} left matchmaking after {time_in_queue} ({len(queue_state.queue)}/{MAX_QUEUE_SIZE})")
+
+        queue_name = "MLG 4v4 (Restricted)" if qs == queue_state_2 else "MLG 4v4"
+        log_action(f"{interaction.user.display_name} left {queue_name} after {time_in_queue} ({len(qs.queue)}/{MAX_QUEUE_SIZE})")
 
         # Clean up any pending inactivity confirmation
-        await cleanup_inactivity_messages(user_id)
+        await cleanup_inactivity_messages(user_id, qs)
 
         # Remove SearchingMatchmaking role
         try:
@@ -597,39 +641,48 @@ class QueueView(View):
                 log_action(f"Removed SearchingMatchmaking role from {interaction.user.display_name}")
         except Exception as e:
             log_action(f"Failed to remove SearchingMatchmaking role: {e}")
-        
+
         # Save state
         try:
             import state_manager
             state_manager.save_state()
         except:
             pass
-        
+
         # Just defer and update - no message shown
         await interaction.response.defer()
-        await update_queue_embed(interaction.channel)
-        
-        # Update ping message if exists
-        await update_ping_message(interaction.guild)
+        await update_queue_embed(interaction.channel, qs)
+
+        # Update ping message if exists (only for primary queue)
+        if qs == queue_state:
+            await update_ping_message(interaction.guild)
     
     @discord.ui.button(label="Ping", style=discord.ButtonStyle.secondary, custom_id="ping_queue")
     async def ping_queue(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Ping general chat to recruit players"""
+        # Get the correct queue state for this channel
+        qs = get_queue_state(interaction.channel.id)
+
+        # Ping feature disabled for restricted queue
+        if qs == queue_state_2:
+            await interaction.response.send_message("❌ Ping is not available for this queue.", ephemeral=True)
+            return
+
         # Check if queue is empty
-        if len(queue_state.queue) == 0:
+        if len(qs.queue) == 0:
             await interaction.response.send_message("❌ Queue is empty! Join first before pinging.", ephemeral=True)
             return
-        
+
         # Check if queue is full
-        if len(queue_state.queue) >= MAX_QUEUE_SIZE:
+        if len(qs.queue) >= MAX_QUEUE_SIZE:
             await interaction.response.send_message("❌ Queue is already full!", ephemeral=True)
             return
-        
+
         # Check cooldown (15 minutes)
-        if queue_state.last_ping_time:
-            elapsed = datetime.now() - queue_state.last_ping_time
+        if qs.last_ping_time:
+            elapsed = datetime.now() - qs.last_ping_time
             remaining = timedelta(minutes=PING_COOLDOWN_MINUTES) - elapsed
-            
+
             if remaining.total_seconds() > 0:
                 mins = int(remaining.total_seconds() // 60)
                 secs = int(remaining.total_seconds() % 60)
@@ -638,33 +691,35 @@ class QueueView(View):
                     ephemeral=True
                 )
                 return
-        
+
         # Defer silently - no message to dismiss
         await interaction.response.defer()
-        
+
         # Send ping to general chat
         guild = interaction.guild
         general_channel = guild.get_channel(GENERAL_CHANNEL_ID)
-        
+
         if not general_channel:
             return
-        
+
         # Update cooldown
-        queue_state.last_ping_time = datetime.now()
-        
+        qs.last_ping_time = datetime.now()
+
         # Delete old ping message if exists
-        if queue_state.ping_message:
+        if qs.ping_message:
             try:
-                await queue_state.ping_message.delete()
+                await qs.ping_message.delete()
             except:
                 pass
 
         # Create embed with progress image (no banner)
-        current_count = len(queue_state.queue)
+        current_count = len(qs.queue)
         needed = MAX_QUEUE_SIZE - current_count
 
+        # Use different title for restricted queue
+        queue_title = "MLG 4v4 (Restricted)" if qs == queue_state_2 else "MLG 4v4"
         content_embed = discord.Embed(
-            title="MLG 4v4 - Players Needed!",
+            title=f"{queue_title} - Players Needed!",
             description=f"We have **{current_count}/{MAX_QUEUE_SIZE}** players searching.\nNeed **{needed}** more to start!",
             color=discord.Color.green()
         )
@@ -672,8 +727,8 @@ class QueueView(View):
         if progress_image:
             content_embed.set_image(url=progress_image)
 
-        # Create view with join button
-        view = PingJoinView()
+        # Create view with join button - pass the queue state
+        view = PingJoinView(qs)
 
         # Send @here first, then delete it (pings but disappears)
         here_msg = await general_channel.send("@here")
@@ -684,30 +739,45 @@ class QueueView(View):
             pass
 
         # Send embed
-        queue_state.ping_message = await general_channel.send(embed=content_embed, view=view)
+        qs.ping_message = await general_channel.send(embed=content_embed, view=view)
 
-        log_action(f"{interaction.user.display_name} pinged general chat for queue ({current_count}/{MAX_QUEUE_SIZE})")
+        queue_name = "MLG 4v4 (Restricted)" if qs == queue_state_2 else "MLG 4v4"
+        log_action(f"{interaction.user.display_name} pinged general chat for {queue_name} ({current_count}/{MAX_QUEUE_SIZE})")
 
 
 class PingJoinView(View):
     """View for the ping message in general chat with join button"""
-    def __init__(self):
+    def __init__(self, qs=None):
         super().__init__(timeout=None)
-    
+        # Store which queue this ping belongs to (default to primary)
+        self.is_restricted = (qs == queue_state_2) if qs else False
+
     @discord.ui.button(label="Join Matchmaking", style=discord.ButtonStyle.success, custom_id="ping_join_queue")
     async def join_from_ping(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Join queue from the ping message"""
         user_id = interaction.user.id
         user_roles = [role.name for role in interaction.user.roles]
-        
+
+        # Determine which queue to use based on the view's stored info
+        qs = queue_state_2 if self.is_restricted else queue_state
+
         # Check if matchmaking is paused
-        if queue_state.paused:
+        if qs.paused:
             await interaction.response.send_message(
                 "⏸️ **Sorry, Matchmaking is currently paused.**\n\nPlease wait for a staff member to resume it.",
                 ephemeral=True
             )
             return
-        
+
+        # Check if user has banned role for restricted queue
+        if self.is_restricted and QUEUE_2_BANNED_ROLE:
+            if QUEUE_2_BANNED_ROLE in user_roles:
+                await interaction.response.send_message(
+                    f"❌ **You cannot join this queue.**\n\nPlayers with the {QUEUE_2_BANNED_ROLE} role must use the other MLG 4v4 queue.",
+                    ephemeral=True
+                )
+                return
+
         # Check banned/required roles
         import json
         import os
@@ -715,19 +785,19 @@ class PingJoinView(View):
             try:
                 with open('queue_config.json', 'r') as f:
                     config = json.load(f)
-                
+
                 banned = config.get('banned_roles', [])
                 if any(role in banned for role in user_roles):
                     await interaction.response.send_message("❌ You have a banned role and cannot queue!", ephemeral=True)
                     return
-                
+
                 required = config.get('required_roles', [])
                 if required and not any(role in required for role in user_roles):
                     await interaction.response.send_message(f"❌ You need one of these roles to queue: {', '.join(required)}", ephemeral=True)
                     return
             except:
                 pass
-        
+
         # Check if player has MMR stats
         import STATSRANKS
         player_stats = STATSRANKS.get_existing_player_stats(user_id)
@@ -758,33 +828,44 @@ class PingJoinView(View):
                     embed=embed
                 )
             return
-        
-        # Check if already in queue
-        if user_id in queue_state.queue:
+
+        # Check if already in this queue
+        if user_id in qs.queue:
             await interaction.response.send_message("You're already in matchmaking!", ephemeral=True)
             return
-        
+
+        # Check if already in the OTHER MLG 4v4 queue
+        other_qs = queue_state_2 if qs == queue_state else queue_state
+        if user_id in other_qs.queue:
+            await interaction.response.send_message(
+                "You're already in the other MLG 4v4 queue!\n"
+                "Leave that queue first before joining this one.",
+                ephemeral=True
+            )
+            return
+
         # Check if queue is full
-        if len(queue_state.queue) >= MAX_QUEUE_SIZE:
+        if len(qs.queue) >= MAX_QUEUE_SIZE:
             await interaction.response.send_message("Matchmaking is full!", ephemeral=True)
             return
 
         # Check if player is in the current match (can't queue while playing)
-        if queue_state.current_series:
-            if user_id in queue_state.current_series.red_team or user_id in queue_state.current_series.blue_team:
+        if qs.current_series:
+            if user_id in qs.current_series.red_team or user_id in qs.current_series.blue_team:
                 await interaction.response.send_message("You're in the current match! Finish it first.", ephemeral=True)
                 return
 
         # Add to queue
-        queue_state.queue.append(user_id)
-        queue_state.queue_join_times[user_id] = datetime.now()
+        qs.queue.append(user_id)
+        qs.queue_join_times[user_id] = datetime.now()
 
         # Clear recent action if this user was the one who left (they're rejoining)
-        if queue_state.recent_action and queue_state.recent_action.get('user_id') == user_id:
-            queue_state.recent_action = None
+        if qs.recent_action and qs.recent_action.get('user_id') == user_id:
+            qs.recent_action = None
 
-        log_action(f"{interaction.user.display_name} joined from ping ({len(queue_state.queue)}/{MAX_QUEUE_SIZE}) - MMR: {player_stats['mmr']}")
-        
+        queue_name = "MLG 4v4 (Restricted)" if qs == queue_state_2 else "MLG 4v4"
+        log_action(f"{interaction.user.display_name} joined {queue_name} from ping ({len(qs.queue)}/{MAX_QUEUE_SIZE}) - MMR: {player_stats['mmr']}")
+
         # Add SearchingMatchmaking role
         try:
             searching_role = discord.utils.get(interaction.guild.roles, name="SearchingMatchmaking")
@@ -793,33 +874,34 @@ class PingJoinView(View):
                 log_action(f"Added SearchingMatchmaking role to {interaction.user.display_name}")
         except Exception as e:
             log_action(f"Failed to add SearchingMatchmaking role: {e}")
-        
+
         # Save state
         try:
             import state_manager
             state_manager.save_state()
         except:
             pass
-        
+
         await interaction.response.defer()
-        
+
         # Update queue embed in queue channel
-        if queue_state.queue_channel:
-            await update_queue_embed(queue_state.queue_channel)
-        
-        # Update or delete ping message
-        await update_ping_message(interaction.guild)
+        if qs.queue_channel:
+            await update_queue_embed(qs.queue_channel, qs)
+
+        # Update or delete ping message (only for primary queue for now)
+        if qs == queue_state:
+            await update_ping_message(interaction.guild)
 
         # Start pregame if queue is full
-        if len(queue_state.queue) >= MAX_QUEUE_SIZE:
+        if len(qs.queue) >= MAX_QUEUE_SIZE:
             # Lock players immediately - they cannot leave once queue is full
-            queue_state.locked = True
-            queue_state.locked_players = queue_state.queue[:]
-            log_action(f"Queue full - locked {len(queue_state.locked_players)} players")
+            qs.locked = True
+            qs.locked_players = qs.queue[:]
+            log_action(f"Queue full - locked {len(qs.locked_players)} players")
 
-            if queue_state.queue_channel:
+            if qs.queue_channel:
                 from pregame import start_pregame
-                await start_pregame(queue_state.queue_channel)
+                await start_pregame(qs.queue_channel, mlg_queue_state=qs)
 
 
 async def update_ping_message(guild: discord.Guild):
@@ -877,14 +959,25 @@ async def delete_ping_message():
             pass
 
 
-async def create_queue_embed(channel: discord.TextChannel):
+async def create_queue_embed(channel: discord.TextChannel, qs=None):
     """Create initial queue embed"""
+    # Determine which queue state to use
+    if qs is None:
+        qs = get_queue_state(channel.id)
+
     # Store channel for auto-updates
-    queue_state.queue_channel = channel
+    qs.queue_channel = channel
+
+    # Determine title based on queue type
+    is_restricted = (qs == queue_state_2)
+    title = "MLG 4v4 Matchmaking (Restricted)" if is_restricted else "MLG 4v4 Matchmaking"
+    description = "**We are looking for MLG 4v4 players!**\nClick **Join Matchmaking** to start searching for a Match!\n*Classic 4v4 with team selection vote*"
+    if is_restricted:
+        description += f"\n\n⚠️ *Players with the {QUEUE_2_BANNED_ROLE} role cannot join this queue.*"
 
     embed = discord.Embed(
-        title="MLG 4v4 Matchmaking",
-        description="**We are looking for MLG 4v4 players!**\nClick **Join Matchmaking** to start searching for a Match!\n*Classic 4v4 with team selection vote*",
+        title=title,
+        description=description,
         color=discord.Color.blue()
     )
     embed.add_field(
@@ -918,9 +1011,10 @@ async def create_queue_embed(channel: discord.TextChannel):
             try:
                 await queue_message.edit(embed=embed, view=view)
                 # Start auto-update task if not already running
-                if queue_state.auto_update_task is None or queue_state.auto_update_task.done():
-                    queue_state.auto_update_task = asyncio.create_task(auto_update_queue_times())
-                    log_action("Started queue auto-update task")
+                if qs.auto_update_task is None or qs.auto_update_task.done():
+                    qs.auto_update_task = asyncio.create_task(auto_update_queue_times(qs))
+                    queue_name = "MLG 4v4 (Restricted)" if is_restricted else "MLG 4v4"
+                    log_action(f"Started {queue_name} queue auto-update task")
                 return
             except:
                 pass
@@ -934,24 +1028,31 @@ async def create_queue_embed(channel: discord.TextChannel):
     await channel.send(embed=embed, view=view)
 
     # Start auto-update task if not already running
-    if queue_state.auto_update_task is None or queue_state.auto_update_task.done():
-        queue_state.auto_update_task = asyncio.create_task(auto_update_queue_times())
-        log_action("Started queue auto-update task")
+    if qs.auto_update_task is None or qs.auto_update_task.done():
+        qs.auto_update_task = asyncio.create_task(auto_update_queue_times(qs))
+        queue_name = "MLG 4v4 (Restricted)" if is_restricted else "MLG 4v4"
+        log_action(f"Started {queue_name} queue auto-update task")
 
-async def update_queue_embed(channel: discord.TextChannel):
+async def update_queue_embed(channel: discord.TextChannel, qs=None):
     """Update the queue embed"""
+    # Determine which queue state to use
+    if qs is None:
+        qs = get_queue_state(channel.id)
+
+    is_restricted = (qs == queue_state_2)
+
     # Build player list with join times
-    if queue_state.queue:
+    if qs.queue:
         player_list = []
         now = datetime.now()
         guild = channel.guild
-        for uid in queue_state.queue:
+        for uid in qs.queue:
             # Check if we should hide names
-            if queue_state.hide_player_names:
+            if qs.hide_player_names:
                 display_name = "Matched Player"
-            elif uid in queue_state.guests:
+            elif uid in qs.guests:
                 # This is a guest - use their custom name
-                display_name = queue_state.guests[uid]["name"]
+                display_name = qs.guests[uid]["name"]
             else:
                 # Get member to ensure we have their display name
                 member = guild.get_member(uid)
@@ -960,14 +1061,14 @@ async def update_queue_embed(channel: discord.TextChannel):
                 else:
                     # Fallback to mention if member not in cache
                     display_name = f"<@{uid}>"
-            
-            join_time = queue_state.queue_join_times.get(uid)
+
+            join_time = qs.queue_join_times.get(uid)
             if join_time:
                 elapsed = now - join_time
                 total_seconds = int(elapsed.total_seconds())
                 total_minutes = total_seconds // 60
                 seconds = total_seconds % 60
-                
+
                 if total_minutes >= 60:
                     # Show hours and minutes only
                     hours = total_minutes // 60
@@ -985,19 +1086,24 @@ async def update_queue_embed(channel: discord.TextChannel):
         player_mentions = "\n".join(player_list)
     else:
         player_mentions = "*No players yet*"
-    
+
     # Create embed
-    player_count = len(queue_state.queue)
+    player_count = len(qs.queue)
 
     # Build description with "looking for" message
     needed = MAX_QUEUE_SIZE - player_count
+    base_desc = "**We are looking for MLG 4v4 players!**\n"
     if player_count > 0:
-        desc = f"**We are looking for MLG 4v4 players!**\nWe have **{player_count}/{MAX_QUEUE_SIZE}** players searching. Need **{needed}** more to start!\n*Classic 4v4 with team selection vote*"
+        desc = f"{base_desc}We have **{player_count}/{MAX_QUEUE_SIZE}** players searching. Need **{needed}** more to start!\n*Classic 4v4 with team selection vote*"
     else:
-        desc = "**We are looking for MLG 4v4 players!**\nClick **Join Matchmaking** to start searching for a Match!\n*Classic 4v4 with team selection vote*"
+        desc = f"{base_desc}Click **Join Matchmaking** to start searching for a Match!\n*Classic 4v4 with team selection vote*"
 
+    if is_restricted:
+        desc += f"\n\n⚠️ *Players with the {QUEUE_2_BANNED_ROLE} role cannot join this queue.*"
+
+    title = "MLG 4v4 Matchmaking (Restricted)" if is_restricted else "MLG 4v4 Matchmaking"
     embed = discord.Embed(
-        title="MLG 4v4 Matchmaking",
+        title=title,
         description=desc,
         color=discord.Color.blue()
     )
@@ -1008,8 +1114,8 @@ async def update_queue_embed(channel: discord.TextChannel):
     )
 
     # Add recent action - only show leaves (not joins)
-    if queue_state.recent_action:
-        action = queue_state.recent_action
+    if qs.recent_action:
+        action = qs.recent_action
         if action['type'] == 'leave':
             time_str = action.get('time_in_queue', '')
             if time_str:

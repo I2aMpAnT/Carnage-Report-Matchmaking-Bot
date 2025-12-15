@@ -46,7 +46,8 @@ async def get_player_mmr(user_id: int) -> int:
     return 1500  # Default MMR
 
 async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, test_players: List[int] = None,
-                        playlist_state: 'PlaylistQueueState' = None, playlist_players: List[int] = None):
+                        playlist_state: 'PlaylistQueueState' = None, playlist_players: List[int] = None,
+                        mlg_queue_state=None):
     """Start pregame phase for any playlist
 
     Args:
@@ -55,6 +56,7 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
         test_players: List of player IDs for test mode (MLG 4v4 only)
         playlist_state: PlaylistQueueState object (for non-MLG playlists)
         playlist_players: List of player IDs (for non-MLG playlists)
+        mlg_queue_state: QueueState object for MLG 4v4 (if None, uses default queue_state)
     """
     import asyncio
 
@@ -178,31 +180,41 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
         return
 
     # Original MLG 4v4 flow
-    from searchmatchmaking import queue_state, get_queue_progress_image, QUEUE_CHANNEL_ID
+    from searchmatchmaking import queue_state as default_queue_state, get_queue_progress_image, QUEUE_CHANNEL_ID, QUEUE_CHANNEL_ID_2
+
+    # Use provided queue state or default
+    qs = mlg_queue_state if mlg_queue_state else default_queue_state
 
     log_action(f"Starting MLG 4v4 pregame phase (test_mode={test_mode})")
 
     # Reset ping cooldown so players can ping again for new matches
-    queue_state.last_ping_time = None
+    qs.last_ping_time = None
     log_action("Reset ping cooldown for new match")
 
     # Use test players if provided, otherwise use queue
-    players = test_players if test_players else queue_state.queue[:]
+    players = test_players if test_players else qs.queue[:]
 
     # Lock these players into the match - they cannot leave
     if not test_mode:
-        queue_state.locked = True
-        queue_state.locked_players = players[:]
+        qs.locked = True
+        qs.locked_players = players[:]
         # Clear the queue so new players can queue for the next match
-        queue_state.queue.clear()
-        queue_state.queue_join_times.clear()
+        qs.queue.clear()
+        qs.queue_join_times.clear()
         log_action(f"Queue locked with {len(players)} players, queue reset for next match")
 
     # Store test mode info
-    queue_state.test_mode = test_mode
+    qs.test_mode = test_mode
+
+    # Determine the correct queue channel
+    from searchmatchmaking import queue_state_2
+    if qs == queue_state_2:
+        queue_channel_id = QUEUE_CHANNEL_ID_2
+    else:
+        queue_channel_id = QUEUE_CHANNEL_ID
 
     # Always use queue channel for pregame embed
-    queue_channel = guild.get_channel(QUEUE_CHANNEL_ID)
+    queue_channel = guild.get_channel(queue_channel_id)
     target_channel = queue_channel if queue_channel else channel
 
     # Delete the old queue embed before posting pregame embed
@@ -234,7 +246,7 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
     log_action(f"Created Pregame Lobby VC: {pregame_vc.id}")
 
     # Store the pregame VC ID for cleanup later
-    queue_state.pregame_vc_id = pregame_vc.id
+    qs.pregame_vc_id = pregame_vc.id
 
     # Move players to pregame lobby
     # In TEST MODE: Only move the 2 testers, not the random fillers
@@ -243,7 +255,7 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
     players_not_in_voice = []
 
     # Get testers list for test mode
-    testers = getattr(queue_state, 'testers', []) if test_mode else []
+    testers = getattr(qs, 'testers', []) if test_mode else []
 
     for user_id in players:
         member = guild.get_member(user_id)
@@ -309,7 +321,7 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
     # Ping players in channel
     pings = " ".join([f"<@{uid}>" for uid in players])
     pregame_message = await target_channel.send(content=pings, embed=embed)
-    queue_state.pregame_message = pregame_message
+    qs.pregame_message = pregame_message
 
     # DM players not in voice to let them know to join
     for uid in players_not_in_voice:
@@ -332,7 +344,8 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
     # Start task to wait for all players and then show team selection
     asyncio.create_task(wait_for_players_and_show_selection(
         target_channel, pregame_message, players, pregame_vc.id,
-        test_mode=test_mode, testers=testers, match_label=match_label
+        test_mode=test_mode, testers=testers, match_label=match_label,
+        mlg_queue_state=qs
     ))
 
 
@@ -343,11 +356,15 @@ async def wait_for_players_and_show_selection(
     pregame_vc_id: int,
     test_mode: bool = False,
     testers: List[int] = None,
-    match_label: str = "Match"
+    match_label: str = "Match",
+    mlg_queue_state=None
 ):
     """Wait for all players to join pregame VC, then show team selection"""
     import asyncio
-    from searchmatchmaking import queue_state, get_queue_progress_image
+    from searchmatchmaking import queue_state as default_queue_state, get_queue_progress_image
+
+    # Use provided queue state or default
+    qs = mlg_queue_state if mlg_queue_state else default_queue_state
 
     guild = channel.guild
     testers = testers or []
@@ -361,7 +378,7 @@ async def wait_for_players_and_show_selection(
 
     while True:
         # Check if pregame was cancelled
-        if not hasattr(queue_state, 'pregame_vc_id') or queue_state.pregame_vc_id != pregame_vc_id:
+        if not hasattr(qs, 'pregame_vc_id') or qs.pregame_vc_id != pregame_vc_id:
             return  # Pregame was cancelled
 
         pregame_vc = guild.get_channel(pregame_vc_id)
