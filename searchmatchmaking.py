@@ -502,16 +502,6 @@ class QueueView(View):
             await interaction.response.send_message("You're already in matchmaking!", ephemeral=True)
             return
 
-        # Check if already in the OTHER MLG 4v4 queue
-        other_qs = queue_state_2 if qs == queue_state else queue_state
-        if user_id in other_qs.queue:
-            await interaction.response.send_message(
-                "You're already in the other MLG 4v4 queue!\n"
-                "Leave that queue first before joining this one.",
-                ephemeral=True
-            )
-            return
-
         # Check if in another playlist queue (except Head to Head which is exempt)
         try:
             from playlists import get_all_playlists, PlaylistType
@@ -832,16 +822,6 @@ class PingJoinView(View):
         # Check if already in this queue
         if user_id in qs.queue:
             await interaction.response.send_message("You're already in matchmaking!", ephemeral=True)
-            return
-
-        # Check if already in the OTHER MLG 4v4 queue
-        other_qs = queue_state_2 if qs == queue_state else queue_state
-        if user_id in other_qs.queue:
-            await interaction.response.send_message(
-                "You're already in the other MLG 4v4 queue!\n"
-                "Leave that queue first before joining this one.",
-                ephemeral=True
-            )
             return
 
         # Check if queue is full
