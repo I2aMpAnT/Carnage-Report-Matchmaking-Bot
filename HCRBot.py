@@ -21,6 +21,9 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 # Configuration - Channel IDs
 # MLG 4v4 (original queue)
 QUEUE_CHANNEL_ID = 1403855421625733151
+# MLG 4v4 (second queue - with banned role restriction)
+QUEUE_CHANNEL_ID_2 = 1449951027183882321
+QUEUE_2_BANNED_ROLE = "☢️"  # Users with this role cannot join queue 2
 # Team Hardcore 4v4
 TEAM_HARDCORE_CHANNEL_ID = 1443783840169721988
 # Double Team 2v2
@@ -90,6 +93,8 @@ def setup_module_config():
     # Set constants in searchmatchmaking module
     import searchmatchmaking
     searchmatchmaking.QUEUE_CHANNEL_ID = QUEUE_CHANNEL_ID
+    searchmatchmaking.QUEUE_CHANNEL_ID_2 = QUEUE_CHANNEL_ID_2
+    searchmatchmaking.QUEUE_2_BANNED_ROLE = QUEUE_2_BANNED_ROLE
     
     # Set constants in twitch module
     twitch.RED_TEAM_EMOJI_ID = RED_TEAM_EMOJI_ID
@@ -209,7 +214,7 @@ async def on_ready():
         import traceback
         traceback.print_exc()
     
-    # Initialize queue embed (MLG 4v4)
+    # Initialize queue embed (MLG 4v4 - primary channel)
     channel = bot.get_channel(QUEUE_CHANNEL_ID)
     if channel:
         await create_queue_embed(channel)
@@ -223,6 +228,14 @@ async def on_ready():
             print('✅ Queue inactivity timer started')
     else:
         print(f'⚠️ Could not find queue channel {QUEUE_CHANNEL_ID}')
+
+    # Initialize queue embed (MLG 4v4 - second channel with banned role)
+    channel2 = bot.get_channel(QUEUE_CHANNEL_ID_2)
+    if channel2:
+        await create_queue_embed(channel2)
+        print(f'✅ MLG 4v4 queue embed (restricted) created in {channel2.name}')
+    else:
+        print(f'⚠️ Could not find second queue channel {QUEUE_CHANNEL_ID_2}')
 
     # Initialize all other playlist embeds
     try:

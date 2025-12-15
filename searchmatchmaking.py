@@ -15,8 +15,10 @@ HEADER_IMAGE_URL = "https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.c
 # Matchmaking progress images (1-8 players)
 MATCHMAKING_IMAGE_BASE = "https://raw.githubusercontent.com/I2aMpAnT/H2CarnageReport.com/main/assets/matchmaking"
 
-# Queue channel ID (will be set by bot.py)
+# Queue channel IDs (will be set by bot.py)
 QUEUE_CHANNEL_ID = None
+QUEUE_CHANNEL_ID_2 = None  # Second MLG 4v4 queue channel
+QUEUE_2_BANNED_ROLE = None  # Role banned from queue 2
 
 def get_queue_progress_image(player_count: int) -> str:
     """Get the queue progress image URL for current player count, or None if empty"""
@@ -396,7 +398,7 @@ class QueueView(View):
     async def join_queue(self, interaction: discord.Interaction, button: discord.ui.Button):
         user_id = interaction.user.id
         user_roles = [role.name for role in interaction.user.roles]
-        
+
         # Check if matchmaking is paused
         if queue_state.paused:
             await interaction.response.send_message(
@@ -404,7 +406,16 @@ class QueueView(View):
                 ephemeral=True
             )
             return
-        
+
+        # Check if user has banned role for queue channel 2
+        if interaction.channel.id == QUEUE_CHANNEL_ID_2 and QUEUE_2_BANNED_ROLE:
+            if QUEUE_2_BANNED_ROLE in user_roles:
+                await interaction.response.send_message(
+                    f"❌ **You cannot join from this queue.**\n\nPlayers with the {QUEUE_2_BANNED_ROLE} role must use the other MLG 4v4 queue.",
+                    ephemeral=True
+                )
+                return
+
         # Check banned/required roles
         import json
         import os
