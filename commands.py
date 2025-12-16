@@ -4197,22 +4197,45 @@ python3 populate_stats.py'''
 
         return "No description provided."
 
-    def create_pr_notification(pr: dict, repo: str) -> str:
+    async def fetch_pr_commits(pr: dict) -> list:
+        """Fetch commit messages for a PR"""
+        import aiohttp
+
+        commits_url = pr.get("commits_url")
+        if not commits_url:
+            return []
+
+        github_token = os.getenv('GITHUB_TOKEN')
+        headers = {
+            "Accept": "application/vnd.github.v3+json",
+            "User-Agent": "CarnageReportBot"
+        }
+        if github_token:
+            headers["Authorization"] = f"token {github_token}"
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(commits_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as response:
+                    if response.status == 200:
+                        commits = await response.json()
+                        # Return commit messages
+                        return [c.get("commit", {}).get("message", "").split('\n')[0] for c in commits]
+        except:
+            pass
+        return []
+
+    async def create_pr_notification(pr: dict, repo: str) -> str:
         """Create a clean text notification for a merged PR"""
         repo_name = repo.split("/")[-1]
 
-        # Extract summary
+        # Extract summary from PR body
         summary = extract_pr_summary(pr.get("body", ""))
 
-        # Get merge date
-        merged_at = pr.get("merged_at", "")
-        merge_date = ""
-        if merged_at:
-            try:
-                dt = datetime.fromisoformat(merged_at.replace("Z", "+00:00"))
-                merge_date = dt.strftime("%Y-%m-%d")
-            except:
-                pass
+        # If no description, try to get commit messages
+        if summary == "No description provided.":
+            commits = await fetch_pr_commits(pr)
+            if commits:
+                summary = '\n'.join([f'• {msg}' for msg in commits[:5]])
 
         # Build message - clean and simple
         message = (
@@ -4262,7 +4285,7 @@ python3 populate_stats.py'''
                     continue
 
                 # Post notification
-                message = create_pr_notification(pr, repo)
+                message = await create_pr_notification(pr, repo)
                 try:
                     await dev_channel.send(message)
                     posted_prs.append(pr_url)
@@ -4328,7 +4351,7 @@ python3 populate_stats.py'''
                 skipped += 1
                 continue
 
-            message = create_pr_notification(pr, pr["_repo"])
+            message = await create_pr_notification(pr, pr["_repo"])
             try:
                 await dev_channel.send(message)
                 posted_prs.append(pr_url)
