@@ -1,7 +1,7 @@
 # commands.py - All Bot Commands
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.5.0"
+MODULE_VERSION = "1.5.1"
 
 import discord
 from discord import app_commands
@@ -3756,6 +3756,37 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         )
         log_action(f"[MMR] {interaction.user.name} set {player.name}'s MMR to {value}")
 
+    @bot.tree.command(name="checkmmr", description="Check a player's current MMR")
+    @app_commands.describe(
+        player="The player to check MMR for (optional, defaults to yourself)"
+    )
+    async def check_mmr(interaction: discord.Interaction, player: discord.User = None):
+        """Check a player's MMR value from MMR.json"""
+        import STATSRANKS
+
+        # Default to the user who ran the command if no player specified
+        if player is None:
+            player = interaction.user
+
+        # Load MMR.json
+        mmr_data = STATSRANKS.load_json_file(STATSRANKS.MMR_FILE)
+        user_key = str(player.id)
+
+        # Get MMR value
+        if user_key in mmr_data and "mmr" in mmr_data[user_key]:
+            mmr_value = mmr_data[user_key]["mmr"]
+            await interaction.response.send_message(
+                f"**{player.display_name}'s MMR:** {mmr_value}",
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                f"**{player.display_name}** does not have an MMR set yet.",
+                ephemeral=True
+            )
+
+        log_action(f"[MMR] {interaction.user.name} checked {player.name}'s MMR")
+
     @bot.tree.command(name="leaderboard", description="View the matchmaking leaderboard")
     async def leaderboard(interaction: discord.Interaction):
         """Show leaderboard - reads from ranks.json (website source of truth)"""
@@ -4049,5 +4080,190 @@ python3 populate_stats.py'''
         except Exception as e:
             log_action(f"[VOICE] Failed to create RvB channels: {e}")
             await interaction.followup.send(f"❌ Failed to create channels: {e}", ephemeral=True)
+
+    # Development channel for PR notifications
+    DEV_CHANNEL_ID = 1428871720793542756
+    POSTED_PRS_FILE = "posted_prs.json"
+
+    # I2aMpAnT repos to track
+    GITHUB_REPOS = [
+        "I2aMpAnT/CarnageReport.com",
+        "I2aMpAnT/Carnage-Report-Matchmaking-Bot"
+    ]
+
+    def load_posted_prs():
+        """Load list of already posted PR URLs"""
+        try:
+            if os.path.exists(POSTED_PRS_FILE):
+                with open(POSTED_PRS_FILE, 'r') as f:
+                    return json.load(f)
+        except:
+            pass
+        return []
+
+    def save_posted_prs(posted: list):
+        """Save list of posted PR URLs"""
+        with open(POSTED_PRS_FILE, 'w') as f:
+            json.dump(posted, f, indent=2)
+
+    async def fetch_github_prs(repo: str, state: str = "all") -> list:
+        """Fetch PRs from a GitHub repo using aiohttp"""
+        import aiohttp
+
+        github_token = os.getenv('GITHUB_TOKEN')
+        api_url = f"https://api.github.com/repos/{repo}/pulls"
+
+        headers = {
+            "Accept": "application/vnd.github.v3+json",
+            "User-Agent": "CarnageReportBot"
+        }
+        if github_token:
+            headers["Authorization"] = f"token {github_token}"
+
+        params = {"state": state, "per_page": 100}
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(api_url, headers=headers, params=params, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                    if response.status == 200:
+                        return await response.json()
+                    else:
+                        log_action(f"[GITHUB] Failed to fetch PRs from {repo}: {response.status}")
+                        return []
+        except Exception as e:
+            log_action(f"[GITHUB] Exception fetching PRs from {repo}: {e}")
+            return []
+
+    def create_pr_embed(pr: dict, repo: str) -> discord.Embed:
+        """Create an embed for a PR"""
+        # Determine state color
+        state = pr.get("state", "unknown")
+        merged = pr.get("merged_at") is not None
+
+        if merged:
+            color = discord.Color.purple()
+            status = "Merged"
+        elif state == "closed":
+            color = discord.Color.red()
+            status = "Closed"
+        else:
+            color = discord.Color.green()
+            status = "Open"
+
+        # Get repo short name
+        repo_name = repo.split("/")[-1]
+
+        embed = discord.Embed(
+            title=f"#{pr['number']} - {pr['title']}",
+            url=pr["html_url"],
+            color=color,
+            description=pr.get("body", "")[:500] if pr.get("body") else "No description"
+        )
+
+        embed.set_author(
+            name=f"{repo_name}",
+            icon_url=pr["user"]["avatar_url"] if pr.get("user") else None
+        )
+
+        embed.add_field(name="Status", value=status, inline=True)
+        embed.add_field(name="Author", value=pr["user"]["login"] if pr.get("user") else "Unknown", inline=True)
+
+        # Parse dates
+        created_at = pr.get("created_at", "")
+        if created_at:
+            try:
+                dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                embed.add_field(name="Created", value=dt.strftime("%Y-%m-%d"), inline=True)
+            except:
+                pass
+
+        if merged and pr.get("merged_at"):
+            try:
+                dt = datetime.fromisoformat(pr["merged_at"].replace("Z", "+00:00"))
+                embed.add_field(name="Merged", value=dt.strftime("%Y-%m-%d"), inline=True)
+            except:
+                pass
+
+        embed.set_footer(text=f"Pull Request • {repo}")
+
+        return embed
+
+    @bot.tree.command(name="postprs", description="[ADMIN] Post all GitHub PRs to development channel")
+    @has_admin_role()
+    @app_commands.describe(
+        include_historical="Include all historical PRs (default: True)",
+        repo_filter="Filter by repo name (optional)"
+    )
+    async def post_prs(interaction: discord.Interaction, include_historical: bool = True, repo_filter: str = None):
+        """Post GitHub PRs to development channel"""
+        await interaction.response.defer(ephemeral=True)
+
+        # Get development channel
+        dev_channel = bot.get_channel(DEV_CHANNEL_ID)
+        if not dev_channel:
+            await interaction.followup.send(f"❌ Could not find development channel (ID: {DEV_CHANNEL_ID})", ephemeral=True)
+            return
+
+        posted_prs = load_posted_prs()
+        new_posts = 0
+        skipped = 0
+
+        repos_to_check = GITHUB_REPOS
+        if repo_filter:
+            repos_to_check = [r for r in GITHUB_REPOS if repo_filter.lower() in r.lower()]
+
+        all_prs = []
+        for repo in repos_to_check:
+            prs = await fetch_github_prs(repo, "all")
+            for pr in prs:
+                pr["_repo"] = repo
+                all_prs.append(pr)
+
+        # Sort by created date (oldest first for historical)
+        all_prs.sort(key=lambda x: x.get("created_at", ""), reverse=False)
+
+        for pr in all_prs:
+            pr_url = pr["html_url"]
+
+            # Skip if already posted (unless we're doing historical and it's new)
+            if pr_url in posted_prs and not include_historical:
+                skipped += 1
+                continue
+
+            if pr_url in posted_prs:
+                skipped += 1
+                continue
+
+            # Create and send embed
+            embed = create_pr_embed(pr, pr["_repo"])
+            try:
+                await dev_channel.send(embed=embed)
+                posted_prs.append(pr_url)
+                new_posts += 1
+                # Small delay to avoid rate limits
+                await asyncio.sleep(0.5)
+            except Exception as e:
+                log_action(f"[GITHUB] Failed to post PR {pr_url}: {e}")
+
+        # Save updated posted PRs list
+        save_posted_prs(posted_prs)
+
+        await interaction.followup.send(
+            f"✅ **PR Posting Complete**\n"
+            f"• Posted: {new_posts} new PRs\n"
+            f"• Skipped: {skipped} (already posted)\n"
+            f"• Channel: {dev_channel.mention}",
+            ephemeral=True
+        )
+
+        log_action(f"[GITHUB] {interaction.user.name} posted {new_posts} PRs to dev channel")
+
+    @bot.tree.command(name="clearpostedprs", description="[ADMIN] Clear the list of posted PRs to allow reposting")
+    @has_admin_role()
+    async def clear_posted_prs(interaction: discord.Interaction):
+        """Clear the posted PRs tracking file"""
+        save_posted_prs([])
+        await interaction.response.send_message("✅ Cleared posted PRs list. You can now repost all PRs.", ephemeral=True)
+        log_action(f"[GITHUB] {interaction.user.name} cleared posted PRs list")
 
     return bot
