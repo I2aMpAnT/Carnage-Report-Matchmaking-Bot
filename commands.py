@@ -1,7 +1,7 @@
 # commands.py - All Bot Commands
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.5.0"
+MODULE_VERSION = "1.5.3"
 
 import discord
 from discord import app_commands
@@ -3756,6 +3756,37 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         )
         log_action(f"[MMR] {interaction.user.name} set {player.name}'s MMR to {value}")
 
+    @bot.tree.command(name="checkmmr", description="Check a player's current MMR")
+    @app_commands.describe(
+        player="The player to check MMR for (optional, defaults to yourself)"
+    )
+    async def check_mmr(interaction: discord.Interaction, player: discord.User = None):
+        """Check a player's MMR value from MMR.json"""
+        import STATSRANKS
+
+        # Default to the user who ran the command if no player specified
+        if player is None:
+            player = interaction.user
+
+        # Load MMR.json
+        mmr_data = STATSRANKS.load_json_file(STATSRANKS.MMR_FILE)
+        user_key = str(player.id)
+
+        # Get MMR value
+        if user_key in mmr_data and "mmr" in mmr_data[user_key]:
+            mmr_value = mmr_data[user_key]["mmr"]
+            await interaction.response.send_message(
+                f"**{player.display_name}'s MMR:** {mmr_value}",
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                f"**{player.display_name}** does not have an MMR set yet.",
+                ephemeral=True
+            )
+
+        log_action(f"[MMR] {interaction.user.name} checked {player.name}'s MMR")
+
     @bot.tree.command(name="leaderboard", description="View the matchmaking leaderboard")
     async def leaderboard(interaction: discord.Interaction):
         """Show leaderboard - reads from ranks.json (website source of truth)"""
@@ -4049,5 +4080,281 @@ python3 populate_stats.py'''
         except Exception as e:
             log_action(f"[VOICE] Failed to create RvB channels: {e}")
             await interaction.followup.send(f"❌ Failed to create channels: {e}", ephemeral=True)
+
+    # Development channel for PR notifications
+    DEV_CHANNEL_ID = 1428871720793542756
+    POSTED_PRS_FILE = "posted_prs.json"
+
+    # GitHub accounts to track all repos from
+    GITHUB_ACCOUNTS = ["I2aMpAnT", "Roasted-Codes"]
+
+    def load_posted_prs():
+        """Load list of already posted PR URLs"""
+        try:
+            if os.path.exists(POSTED_PRS_FILE):
+                with open(POSTED_PRS_FILE, 'r') as f:
+                    return json.load(f)
+        except:
+            pass
+        return []
+
+    def save_posted_prs(posted: list):
+        """Save list of posted PR URLs"""
+        with open(POSTED_PRS_FILE, 'w') as f:
+            json.dump(posted, f, indent=2)
+
+    async def fetch_all_repos(username: str) -> list:
+        """Fetch all repos for a GitHub user"""
+        import aiohttp
+
+        github_token = os.getenv('GITHUB_TOKEN')
+        api_url = f"https://api.github.com/users/{username}/repos"
+
+        headers = {
+            "Accept": "application/vnd.github.v3+json",
+            "User-Agent": "CarnageReportBot"
+        }
+        if github_token:
+            headers["Authorization"] = f"token {github_token}"
+
+        params = {"per_page": 100, "type": "all"}
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(api_url, headers=headers, params=params, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                    if response.status == 200:
+                        repos = await response.json()
+                        return [repo["full_name"] for repo in repos]
+                    else:
+                        log_action(f"[GITHUB] Failed to fetch repos for {username}: {response.status}")
+                        return []
+        except Exception as e:
+            log_action(f"[GITHUB] Exception fetching repos: {e}")
+            return []
+
+    async def fetch_github_prs(repo: str, state: str = "all") -> list:
+        """Fetch PRs from a GitHub repo using aiohttp"""
+        import aiohttp
+
+        github_token = os.getenv('GITHUB_TOKEN')
+        api_url = f"https://api.github.com/repos/{repo}/pulls"
+
+        headers = {
+            "Accept": "application/vnd.github.v3+json",
+            "User-Agent": "CarnageReportBot"
+        }
+        if github_token:
+            headers["Authorization"] = f"token {github_token}"
+
+        params = {"state": state, "per_page": 100}
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(api_url, headers=headers, params=params, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                    if response.status == 200:
+                        return await response.json()
+                    else:
+                        log_action(f"[GITHUB] Failed to fetch PRs from {repo}: {response.status}")
+                        return []
+        except Exception as e:
+            log_action(f"[GITHUB] Exception fetching PRs from {repo}: {e}")
+            return []
+
+    def extract_pr_summary(body: str) -> str:
+        """Extract the summary section from PR body"""
+        if not body:
+            return "No description provided."
+
+        # Look for ## Summary section
+        lines = body.split('\n')
+        summary_lines = []
+        in_summary = False
+
+        for line in lines:
+            # Start of summary section
+            if line.strip().lower().startswith('## summary'):
+                in_summary = True
+                continue
+            # End of summary section (next ## header)
+            if in_summary and line.strip().startswith('## '):
+                break
+            if in_summary and line.strip():
+                # Clean up bullet points
+                cleaned = line.strip()
+                if cleaned.startswith('- '):
+                    cleaned = cleaned[2:]
+                if cleaned.startswith('* '):
+                    cleaned = cleaned[2:]
+                summary_lines.append(cleaned)
+
+        # If we found a summary section, use it
+        if summary_lines:
+            return '\n'.join(summary_lines[:5])  # Max 5 lines
+
+        # Otherwise use first 200 chars of body
+        return body[:200] + ('...' if len(body) > 200 else '')
+
+    def create_pr_notification(pr: dict, repo: str) -> str:
+        """Create a clean text notification for a merged PR"""
+        repo_name = repo.split("/")[-1]
+
+        # Extract summary
+        summary = extract_pr_summary(pr.get("body", ""))
+
+        # Get merge date
+        merged_at = pr.get("merged_at", "")
+        merge_date = ""
+        if merged_at:
+            try:
+                dt = datetime.fromisoformat(merged_at.replace("Z", "+00:00"))
+                merge_date = dt.strftime("%Y-%m-%d")
+            except:
+                pass
+
+        # Build message - clean and simple
+        message = (
+            f"**[{repo_name}]** Merged: #{pr['number']}\n"
+            f"**{pr['title']}**\n"
+            f"\n"
+            f"{summary}\n"
+            f"\n"
+            f"<{pr['html_url']}>"
+        )
+
+        return message
+
+    # Background task for automatic PR checking
+    from discord.ext import tasks
+
+    @tasks.loop(minutes=5)
+    async def check_new_prs():
+        """Automatically check for new merged PRs and post them"""
+        dev_channel = bot.get_channel(DEV_CHANNEL_ID)
+        if not dev_channel:
+            return
+
+        # Fetch all repos from all tracked accounts
+        all_repos = []
+        for account in GITHUB_ACCOUNTS:
+            repos = await fetch_all_repos(account)
+            all_repos.extend(repos)
+
+        if not all_repos:
+            return
+
+        posted_prs = load_posted_prs()
+        new_posts = 0
+
+        for repo in all_repos:
+            # Only fetch closed PRs (merged PRs are closed)
+            prs = await fetch_github_prs(repo, "closed")
+            for pr in prs:
+                # Skip if not merged (just closed without merge)
+                if not pr.get("merged_at"):
+                    continue
+
+                pr_url = pr["html_url"]
+
+                if pr_url in posted_prs:
+                    continue
+
+                # Post notification
+                message = create_pr_notification(pr, repo)
+                try:
+                    await dev_channel.send(message)
+                    posted_prs.append(pr_url)
+                    new_posts += 1
+                    await asyncio.sleep(1)  # Rate limit
+                except Exception as e:
+                    log_action(f"[GITHUB] Failed to post PR {pr_url}: {e}")
+
+        if new_posts > 0:
+            save_posted_prs(posted_prs)
+            log_action(f"[GITHUB] Auto-posted {new_posts} merged PRs")
+
+    @check_new_prs.before_loop
+    async def before_check_prs():
+        """Wait for bot to be ready"""
+        await bot.wait_until_ready()
+
+    # Start the background task
+    if not check_new_prs.is_running():
+        check_new_prs.start()
+
+    @bot.tree.command(name="postprs", description="[ADMIN] Post all historical merged PRs to development channel")
+    @has_admin_role()
+    async def post_prs(interaction: discord.Interaction):
+        """Post all historical merged PRs to development channel"""
+        await interaction.response.defer(ephemeral=True)
+
+        dev_channel = bot.get_channel(DEV_CHANNEL_ID)
+        if not dev_channel:
+            await interaction.followup.send(f"Could not find development channel (ID: {DEV_CHANNEL_ID})", ephemeral=True)
+            return
+
+        # Fetch all repos from all tracked accounts
+        all_repos = []
+        for account in GITHUB_ACCOUNTS:
+            repos = await fetch_all_repos(account)
+            all_repos.extend(repos)
+
+        if not all_repos:
+            await interaction.followup.send("Could not fetch repos from GitHub", ephemeral=True)
+            return
+
+        await interaction.followup.send(f"Fetching PRs from {len(all_repos)} repos across {len(GITHUB_ACCOUNTS)} accounts...", ephemeral=True)
+
+        posted_prs = load_posted_prs()
+        new_posts = 0
+        skipped = 0
+
+        all_prs = []
+        for repo in all_repos:
+            # Only fetch closed PRs (merged PRs are closed)
+            prs = await fetch_github_prs(repo, "closed")
+            for pr in prs:
+                # Only include merged PRs
+                if not pr.get("merged_at"):
+                    continue
+                pr["_repo"] = repo
+                all_prs.append(pr)
+
+        # Sort by merge date (oldest first)
+        all_prs.sort(key=lambda x: x.get("merged_at", ""), reverse=False)
+
+        for pr in all_prs:
+            pr_url = pr["html_url"]
+
+            if pr_url in posted_prs:
+                skipped += 1
+                continue
+
+            message = create_pr_notification(pr, pr["_repo"])
+            try:
+                await dev_channel.send(message)
+                posted_prs.append(pr_url)
+                new_posts += 1
+                await asyncio.sleep(0.5)
+            except Exception as e:
+                log_action(f"[GITHUB] Failed to post PR {pr_url}: {e}")
+
+        save_posted_prs(posted_prs)
+
+        await interaction.followup.send(
+            f"**Merged PR Posting Complete**\n"
+            f"Posted: {new_posts} merged PRs\n"
+            f"Skipped: {skipped} (already posted)\n"
+            f"Channel: {dev_channel.mention}",
+            ephemeral=True
+        )
+        log_action(f"[GITHUB] {interaction.user.name} posted {new_posts} historical merged PRs")
+
+    @bot.tree.command(name="clearpostedprs", description="[ADMIN] Clear posted PRs list to allow reposting")
+    @has_admin_role()
+    async def clear_posted_prs(interaction: discord.Interaction):
+        """Clear the posted PRs tracking file"""
+        save_posted_prs([])
+        await interaction.response.send_message("Cleared posted PRs list. Run /postprs to repost all.", ephemeral=True)
+        log_action(f"[GITHUB] {interaction.user.name} cleared posted PRs list")
 
     return bot
