@@ -3784,13 +3784,6 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         players_list = []
         for uid, data in mmr_data.items():
             if "mmr" in data:
-                # Get player stats for rank info
-                try:
-                    stats = STATSRANKS.get_player_stats(int(uid))
-                    rank = stats.get("rank", 1)
-                except:
-                    rank = 1
-
                 # Try to get display name from guild
                 member = interaction.guild.get_member(int(uid))
                 name = member.display_name if member else data.get("discord_name", f"User {uid}")
@@ -3798,8 +3791,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                 players_list.append({
                     "id": uid,
                     "name": name,
-                    "mmr": data["mmr"],
-                    "rank": rank
+                    "mmr": data["mmr"]
                 })
 
         # Sort by MMR descending (highest first)
@@ -3833,9 +3825,9 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
 
             # Highlight the target player
             if i == target_idx:
-                lines.append(f"**#{position} ➤ {p['name']} - MMR: {p['mmr']} (Rank {p['rank']})**")
+                lines.append(f"**#{position} ➤ {p['name']} - {p['mmr']}**")
             else:
-                lines.append(f"#{position}   {p['name']} - MMR: {p['mmr']} (Rank {p['rank']})")
+                lines.append(f"#{position}   {p['name']} - {p['mmr']}")
 
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
         log_action(f"[MMR] {interaction.user.name} checked {player.name}'s MMR")
@@ -4330,10 +4322,6 @@ python3 populate_stats.py'''
         """Wait for bot to be ready"""
         await bot.wait_until_ready()
 
-    # Start the background task
-    if not check_new_prs.is_running():
-        check_new_prs.start()
-
     @bot.tree.command(name="postprs", description="[ADMIN] Post all historical merged PRs to development channel")
     @has_admin_role()
     async def post_prs(interaction: discord.Interaction):
@@ -4409,5 +4397,9 @@ python3 populate_stats.py'''
         save_posted_prs([])
         await interaction.response.send_message("Cleared posted PRs list. Run /postprs to repost all.", ephemeral=True)
         log_action(f"[GITHUB] {interaction.user.name} cleared posted PRs list")
+
+    # Start background task after all commands are registered
+    if not check_new_prs.is_running():
+        check_new_prs.start()
 
     return bot
