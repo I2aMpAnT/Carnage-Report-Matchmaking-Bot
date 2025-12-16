@@ -1,7 +1,7 @@
 # commands.py - All Bot Commands
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.5.1"
+MODULE_VERSION = "1.5.2"
 
 import discord
 from discord import app_commands
@@ -4134,136 +4134,180 @@ python3 populate_stats.py'''
             log_action(f"[GITHUB] Exception fetching PRs from {repo}: {e}")
             return []
 
-    def create_pr_embed(pr: dict, repo: str) -> discord.Embed:
-        """Create an embed for a PR"""
-        # Determine state color
-        state = pr.get("state", "unknown")
-        merged = pr.get("merged_at") is not None
+    def extract_pr_summary(body: str) -> str:
+        """Extract the summary section from PR body"""
+        if not body:
+            return "No description provided."
 
-        if merged:
-            color = discord.Color.purple()
-            status = "Merged"
-        elif state == "closed":
-            color = discord.Color.red()
-            status = "Closed"
-        else:
-            color = discord.Color.green()
-            status = "Open"
+        # Look for ## Summary section
+        lines = body.split('\n')
+        summary_lines = []
+        in_summary = False
 
-        # Get repo short name
+        for line in lines:
+            # Start of summary section
+            if line.strip().lower().startswith('## summary'):
+                in_summary = True
+                continue
+            # End of summary section (next ## header)
+            if in_summary and line.strip().startswith('## '):
+                break
+            if in_summary and line.strip():
+                # Clean up bullet points
+                cleaned = line.strip()
+                if cleaned.startswith('- '):
+                    cleaned = cleaned[2:]
+                if cleaned.startswith('* '):
+                    cleaned = cleaned[2:]
+                summary_lines.append(cleaned)
+
+        # If we found a summary section, use it
+        if summary_lines:
+            return '\n'.join(summary_lines[:5])  # Max 5 lines
+
+        # Otherwise use first 200 chars of body
+        return body[:200] + ('...' if len(body) > 200 else '')
+
+    def create_pr_notification(pr: dict, repo: str) -> str:
+        """Create a clean text notification for a merged PR"""
         repo_name = repo.split("/")[-1]
 
-        embed = discord.Embed(
-            title=f"#{pr['number']} - {pr['title']}",
-            url=pr["html_url"],
-            color=color,
-            description=pr.get("body", "")[:500] if pr.get("body") else "No description"
-        )
+        # Extract summary
+        summary = extract_pr_summary(pr.get("body", ""))
 
-        embed.set_author(
-            name=f"{repo_name}",
-            icon_url=pr["user"]["avatar_url"] if pr.get("user") else None
-        )
-
-        embed.add_field(name="Status", value=status, inline=True)
-        embed.add_field(name="Author", value=pr["user"]["login"] if pr.get("user") else "Unknown", inline=True)
-
-        # Parse dates
-        created_at = pr.get("created_at", "")
-        if created_at:
+        # Get merge date
+        merged_at = pr.get("merged_at", "")
+        merge_date = ""
+        if merged_at:
             try:
-                dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-                embed.add_field(name="Created", value=dt.strftime("%Y-%m-%d"), inline=True)
+                dt = datetime.fromisoformat(merged_at.replace("Z", "+00:00"))
+                merge_date = dt.strftime("%Y-%m-%d")
             except:
                 pass
 
-        if merged and pr.get("merged_at"):
-            try:
-                dt = datetime.fromisoformat(pr["merged_at"].replace("Z", "+00:00"))
-                embed.add_field(name="Merged", value=dt.strftime("%Y-%m-%d"), inline=True)
-            except:
-                pass
+        # Build message - clean and simple
+        message = (
+            f"**[{repo_name}]** Merged: #{pr['number']}\n"
+            f"**{pr['title']}**\n"
+            f"\n"
+            f"{summary}\n"
+            f"\n"
+            f"<{pr['html_url']}>"
+        )
 
-        embed.set_footer(text=f"Pull Request • {repo}")
+        return message
 
-        return embed
+    # Background task for automatic PR checking
+    from discord.ext import tasks
 
-    @bot.tree.command(name="postprs", description="[ADMIN] Post all GitHub PRs to development channel")
-    @has_admin_role()
-    @app_commands.describe(
-        include_historical="Include all historical PRs (default: True)",
-        repo_filter="Filter by repo name (optional)"
-    )
-    async def post_prs(interaction: discord.Interaction, include_historical: bool = True, repo_filter: str = None):
-        """Post GitHub PRs to development channel"""
-        await interaction.response.defer(ephemeral=True)
-
-        # Get development channel
+    @tasks.loop(minutes=5)
+    async def check_new_prs():
+        """Automatically check for new merged PRs and post them"""
         dev_channel = bot.get_channel(DEV_CHANNEL_ID)
         if not dev_channel:
-            await interaction.followup.send(f"❌ Could not find development channel (ID: {DEV_CHANNEL_ID})", ephemeral=True)
+            return
+
+        posted_prs = load_posted_prs()
+        new_posts = 0
+
+        for repo in GITHUB_REPOS:
+            # Only fetch closed PRs (merged PRs are closed)
+            prs = await fetch_github_prs(repo, "closed")
+            for pr in prs:
+                # Skip if not merged (just closed without merge)
+                if not pr.get("merged_at"):
+                    continue
+
+                pr_url = pr["html_url"]
+
+                if pr_url in posted_prs:
+                    continue
+
+                # Post notification
+                message = create_pr_notification(pr, repo)
+                try:
+                    await dev_channel.send(message)
+                    posted_prs.append(pr_url)
+                    new_posts += 1
+                    await asyncio.sleep(1)  # Rate limit
+                except Exception as e:
+                    log_action(f"[GITHUB] Failed to post PR {pr_url}: {e}")
+
+        if new_posts > 0:
+            save_posted_prs(posted_prs)
+            log_action(f"[GITHUB] Auto-posted {new_posts} merged PRs")
+
+    @check_new_prs.before_loop
+    async def before_check_prs():
+        """Wait for bot to be ready"""
+        await bot.wait_until_ready()
+
+    # Start the background task
+    if not check_new_prs.is_running():
+        check_new_prs.start()
+
+    @bot.tree.command(name="postprs", description="[ADMIN] Post all historical merged PRs to development channel")
+    @has_admin_role()
+    async def post_prs(interaction: discord.Interaction):
+        """Post all historical merged PRs to development channel"""
+        await interaction.response.defer(ephemeral=True)
+
+        dev_channel = bot.get_channel(DEV_CHANNEL_ID)
+        if not dev_channel:
+            await interaction.followup.send(f"Could not find development channel (ID: {DEV_CHANNEL_ID})", ephemeral=True)
             return
 
         posted_prs = load_posted_prs()
         new_posts = 0
         skipped = 0
 
-        repos_to_check = GITHUB_REPOS
-        if repo_filter:
-            repos_to_check = [r for r in GITHUB_REPOS if repo_filter.lower() in r.lower()]
-
         all_prs = []
-        for repo in repos_to_check:
-            prs = await fetch_github_prs(repo, "all")
+        for repo in GITHUB_REPOS:
+            # Only fetch closed PRs (merged PRs are closed)
+            prs = await fetch_github_prs(repo, "closed")
             for pr in prs:
+                # Only include merged PRs
+                if not pr.get("merged_at"):
+                    continue
                 pr["_repo"] = repo
                 all_prs.append(pr)
 
-        # Sort by created date (oldest first for historical)
-        all_prs.sort(key=lambda x: x.get("created_at", ""), reverse=False)
+        # Sort by merge date (oldest first)
+        all_prs.sort(key=lambda x: x.get("merged_at", ""), reverse=False)
 
         for pr in all_prs:
             pr_url = pr["html_url"]
-
-            # Skip if already posted (unless we're doing historical and it's new)
-            if pr_url in posted_prs and not include_historical:
-                skipped += 1
-                continue
 
             if pr_url in posted_prs:
                 skipped += 1
                 continue
 
-            # Create and send embed
-            embed = create_pr_embed(pr, pr["_repo"])
+            message = create_pr_notification(pr, pr["_repo"])
             try:
-                await dev_channel.send(embed=embed)
+                await dev_channel.send(message)
                 posted_prs.append(pr_url)
                 new_posts += 1
-                # Small delay to avoid rate limits
                 await asyncio.sleep(0.5)
             except Exception as e:
                 log_action(f"[GITHUB] Failed to post PR {pr_url}: {e}")
 
-        # Save updated posted PRs list
         save_posted_prs(posted_prs)
 
         await interaction.followup.send(
-            f"✅ **PR Posting Complete**\n"
-            f"• Posted: {new_posts} new PRs\n"
-            f"• Skipped: {skipped} (already posted)\n"
-            f"• Channel: {dev_channel.mention}",
+            f"**Merged PR Posting Complete**\n"
+            f"Posted: {new_posts} merged PRs\n"
+            f"Skipped: {skipped} (already posted)\n"
+            f"Channel: {dev_channel.mention}",
             ephemeral=True
         )
+        log_action(f"[GITHUB] {interaction.user.name} posted {new_posts} historical merged PRs")
 
-        log_action(f"[GITHUB] {interaction.user.name} posted {new_posts} PRs to dev channel")
-
-    @bot.tree.command(name="clearpostedprs", description="[ADMIN] Clear the list of posted PRs to allow reposting")
+    @bot.tree.command(name="clearpostedprs", description="[ADMIN] Clear posted PRs list to allow reposting")
     @has_admin_role()
     async def clear_posted_prs(interaction: discord.Interaction):
         """Clear the posted PRs tracking file"""
         save_posted_prs([])
-        await interaction.response.send_message("✅ Cleared posted PRs list. You can now repost all PRs.", ephemeral=True)
+        await interaction.response.send_message("Cleared posted PRs list. Run /postprs to repost all.", ephemeral=True)
         log_action(f"[GITHUB] {interaction.user.name} cleared posted PRs list")
 
     return bot
