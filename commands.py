@@ -4322,10 +4322,6 @@ python3 populate_stats.py'''
         """Wait for bot to be ready"""
         await bot.wait_until_ready()
 
-    # Start the background task
-    if not check_new_prs.is_running():
-        check_new_prs.start()
-
     @bot.tree.command(name="postprs", description="[ADMIN] Post all historical merged PRs to development channel")
     @has_admin_role()
     async def post_prs(interaction: discord.Interaction):
@@ -4401,5 +4397,9 @@ python3 populate_stats.py'''
         save_posted_prs([])
         await interaction.response.send_message("Cleared posted PRs list. Run /postprs to repost all.", ephemeral=True)
         log_action(f"[GITHUB] {interaction.user.name} cleared posted PRs list")
+
+    # Start background task after all commands are registered
+    if not check_new_prs.is_running():
+        check_new_prs.start()
 
     return bot
