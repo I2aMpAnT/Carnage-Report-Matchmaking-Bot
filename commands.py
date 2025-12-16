@@ -4153,37 +4153,49 @@ python3 populate_stats.py'''
 
     def extract_pr_summary(body: str) -> str:
         """Extract the summary section from PR body"""
-        if not body:
+        if not body or not body.strip():
             return "No description provided."
 
-        # Look for ## Summary section
         lines = body.split('\n')
         summary_lines = []
         in_summary = False
 
+        # First, look for ## Summary section
         for line in lines:
-            # Start of summary section
             if line.strip().lower().startswith('## summary'):
                 in_summary = True
                 continue
-            # End of summary section (next ## header)
             if in_summary and line.strip().startswith('## '):
                 break
             if in_summary and line.strip():
-                # Clean up bullet points
                 cleaned = line.strip()
                 if cleaned.startswith('- '):
-                    cleaned = cleaned[2:]
-                if cleaned.startswith('* '):
-                    cleaned = cleaned[2:]
+                    cleaned = '• ' + cleaned[2:]
+                elif cleaned.startswith('* '):
+                    cleaned = '• ' + cleaned[2:]
                 summary_lines.append(cleaned)
 
-        # If we found a summary section, use it
         if summary_lines:
-            return '\n'.join(summary_lines[:5])  # Max 5 lines
+            return '\n'.join(summary_lines[:5])
 
-        # Otherwise use first 200 chars of body
-        return body[:200] + ('...' if len(body) > 200 else '')
+        # No ## Summary found - look for any bullet points
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith('- ') or stripped.startswith('* '):
+                cleaned = '• ' + stripped[2:]
+                summary_lines.append(cleaned)
+                if len(summary_lines) >= 5:
+                    break
+
+        if summary_lines:
+            return '\n'.join(summary_lines)
+
+        # No bullets - just return first 200 chars
+        clean_body = body.strip()
+        if clean_body:
+            return clean_body[:200] + ('...' if len(clean_body) > 200 else '')
+
+        return "No description provided."
 
     def create_pr_notification(pr: dict, repo: str) -> str:
         """Create a clean text notification for a merged PR"""
