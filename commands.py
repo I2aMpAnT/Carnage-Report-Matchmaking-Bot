@@ -1277,6 +1277,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         # Public Commands
         commands_list.append("**📊 STATS & INFO**")
         commands_list.append("`/playerstats` - View player stats and MMR")
+        commands_list.append("`/checkmmr` - Check MMR rankings around a player")
         commands_list.append("`/leaderboard` - View MMR leaderboard")
         commands_list.append("`/verifystats` - Verify your stats are correct")
         commands_list.append("`/help` - Show this help message")
@@ -1354,6 +1355,10 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             commands_list.append("`/liststaffroles` - List staff roles")
             commands_list.append("`/rolerulechange` - Change command permissions")
             commands_list.append("`/listrolerules` - List permission overrides")
+            commands_list.append("`/dotcomrefresh` - Pull latest data from GitHub")
+            commands_list.append("`/backfillgamedata` - Backfill historical match embeds")
+            commands_list.append("`/postprs` - Post merged PRs to dev channel")
+            commands_list.append("`/clearpostedprs` - Reset posted PRs list")
 
         # Create embed
         embed = discord.Embed(
