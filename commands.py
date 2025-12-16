@@ -1,7 +1,7 @@
 # commands.py - All Bot Commands
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.5.2"
+MODULE_VERSION = "1.5.3"
 
 import discord
 from discord import app_commands
@@ -4085,11 +4085,8 @@ python3 populate_stats.py'''
     DEV_CHANNEL_ID = 1428871720793542756
     POSTED_PRS_FILE = "posted_prs.json"
 
-    # I2aMpAnT repos to track
-    GITHUB_REPOS = [
-        "I2aMpAnT/CarnageReport.com",
-        "I2aMpAnT/Carnage-Report-Matchmaking-Bot"
-    ]
+    # GitHub accounts to track all repos from
+    GITHUB_ACCOUNTS = ["I2aMpAnT", "Roasted-Codes"]
 
     def load_posted_prs():
         """Load list of already posted PR URLs"""
@@ -4105,6 +4102,35 @@ python3 populate_stats.py'''
         """Save list of posted PR URLs"""
         with open(POSTED_PRS_FILE, 'w') as f:
             json.dump(posted, f, indent=2)
+
+    async def fetch_all_repos(username: str) -> list:
+        """Fetch all repos for a GitHub user"""
+        import aiohttp
+
+        github_token = os.getenv('GITHUB_TOKEN')
+        api_url = f"https://api.github.com/users/{username}/repos"
+
+        headers = {
+            "Accept": "application/vnd.github.v3+json",
+            "User-Agent": "CarnageReportBot"
+        }
+        if github_token:
+            headers["Authorization"] = f"token {github_token}"
+
+        params = {"per_page": 100, "type": "all"}
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(api_url, headers=headers, params=params, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                    if response.status == 200:
+                        repos = await response.json()
+                        return [repo["full_name"] for repo in repos]
+                    else:
+                        log_action(f"[GITHUB] Failed to fetch repos for {username}: {response.status}")
+                        return []
+        except Exception as e:
+            log_action(f"[GITHUB] Exception fetching repos: {e}")
+            return []
 
     async def fetch_github_prs(repo: str, state: str = "all") -> list:
         """Fetch PRs from a GitHub repo using aiohttp"""
@@ -4207,10 +4233,19 @@ python3 populate_stats.py'''
         if not dev_channel:
             return
 
+        # Fetch all repos from all tracked accounts
+        all_repos = []
+        for account in GITHUB_ACCOUNTS:
+            repos = await fetch_all_repos(account)
+            all_repos.extend(repos)
+
+        if not all_repos:
+            return
+
         posted_prs = load_posted_prs()
         new_posts = 0
 
-        for repo in GITHUB_REPOS:
+        for repo in all_repos:
             # Only fetch closed PRs (merged PRs are closed)
             prs = await fetch_github_prs(repo, "closed")
             for pr in prs:
@@ -4257,12 +4292,24 @@ python3 populate_stats.py'''
             await interaction.followup.send(f"Could not find development channel (ID: {DEV_CHANNEL_ID})", ephemeral=True)
             return
 
+        # Fetch all repos from all tracked accounts
+        all_repos = []
+        for account in GITHUB_ACCOUNTS:
+            repos = await fetch_all_repos(account)
+            all_repos.extend(repos)
+
+        if not all_repos:
+            await interaction.followup.send("Could not fetch repos from GitHub", ephemeral=True)
+            return
+
+        await interaction.followup.send(f"Fetching PRs from {len(all_repos)} repos across {len(GITHUB_ACCOUNTS)} accounts...", ephemeral=True)
+
         posted_prs = load_posted_prs()
         new_posts = 0
         skipped = 0
 
         all_prs = []
-        for repo in GITHUB_REPOS:
+        for repo in all_repos:
             # Only fetch closed PRs (merged PRs are closed)
             prs = await fetch_github_prs(repo, "closed")
             for pr in prs:
