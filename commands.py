@@ -3819,23 +3819,9 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             )
             return
 
-        # Show 7 players total (3 above, target, 3 below) - adjust if near edges
-        total_to_show = 7
-        half = 3
-
-        # Calculate initial range
-        start_idx = target_idx - half
-        end_idx = target_idx + half + 1
-
-        # Adjust if we're near the top
-        if start_idx < 0:
-            end_idx = min(len(players_list), end_idx + abs(start_idx))
-            start_idx = 0
-
-        # Adjust if we're near the bottom
-        if end_idx > len(players_list):
-            start_idx = max(0, start_idx - (end_idx - len(players_list)))
-            end_idx = len(players_list)
+        # Up to 3 above and up to 3 below (no padding)
+        start_idx = max(0, target_idx - 3)
+        end_idx = min(len(players_list), target_idx + 4)
 
         # Build response
         lines = []
