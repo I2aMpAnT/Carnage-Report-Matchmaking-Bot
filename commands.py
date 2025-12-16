@@ -4254,13 +4254,13 @@ python3 populate_stats.py'''
                 try:
                     await dev_channel.send(message)
                     posted_prs.append(pr_url)
+                    save_posted_prs(posted_prs)  # Save immediately to prevent duplicates
                     new_posts += 1
                     await asyncio.sleep(1)  # Rate limit
                 except Exception as e:
                     log_action(f"[GITHUB] Failed to post PR {pr_url}: {e}")
 
         if new_posts > 0:
-            save_posted_prs(posted_prs)
             log_action(f"[GITHUB] Auto-posted {new_posts} merged PRs")
 
     @check_new_prs.before_loop
@@ -4320,6 +4320,7 @@ python3 populate_stats.py'''
             try:
                 await dev_channel.send(message)
                 posted_prs.append(pr_url)
+                save_posted_prs(posted_prs)  # Save immediately to prevent duplicates
                 new_posts += 1
                 await asyncio.sleep(0.5)
             except Exception as e:
