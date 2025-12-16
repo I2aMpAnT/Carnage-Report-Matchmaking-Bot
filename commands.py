@@ -1,7 +1,7 @@
 # commands.py - All Bot Commands
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.5.3"
+MODULE_VERSION = "1.5.4"
 
 import discord
 from discord import app_commands
@@ -3756,12 +3756,12 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         )
         log_action(f"[MMR] {interaction.user.name} set {player.name}'s MMR to {value}")
 
-    @bot.tree.command(name="checkmmr", description="Check a player's current MMR")
+    @bot.tree.command(name="checkmmr", description="Check a player's current MMR and nearby rankings")
     @app_commands.describe(
         player="The player to check MMR for (optional, defaults to yourself)"
     )
     async def check_mmr(interaction: discord.Interaction, player: discord.User = None):
-        """Check a player's MMR value from MMR.json"""
+        """Check a player's MMR value and show players ranked above/below"""
         import STATSRANKS
 
         # Default to the user who ran the command if no player specified
@@ -3772,19 +3772,72 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         mmr_data = STATSRANKS.load_json_file(STATSRANKS.MMR_FILE)
         user_key = str(player.id)
 
-        # Get MMR value
-        if user_key in mmr_data and "mmr" in mmr_data[user_key]:
-            mmr_value = mmr_data[user_key]["mmr"]
-            await interaction.response.send_message(
-                f"**{player.display_name}'s MMR:** {mmr_value}",
-                ephemeral=True
-            )
-        else:
+        # Check if player has MMR
+        if user_key not in mmr_data or "mmr" not in mmr_data[user_key]:
             await interaction.response.send_message(
                 f"**{player.display_name}** does not have an MMR set yet.",
                 ephemeral=True
             )
+            return
 
+        # Build sorted list of all players with MMR
+        players_list = []
+        for uid, data in mmr_data.items():
+            if "mmr" in data:
+                # Get player stats for rank info
+                try:
+                    stats = STATSRANKS.get_player_stats(int(uid))
+                    rank = stats.get("rank", 1)
+                except:
+                    rank = 1
+
+                # Try to get display name from guild
+                member = interaction.guild.get_member(int(uid))
+                name = member.display_name if member else data.get("discord_name", f"User {uid}")
+
+                players_list.append({
+                    "id": uid,
+                    "name": name,
+                    "mmr": data["mmr"],
+                    "rank": rank
+                })
+
+        # Sort by MMR descending (highest first)
+        players_list.sort(key=lambda x: x["mmr"], reverse=True)
+
+        # Find target player's position
+        target_idx = None
+        for i, p in enumerate(players_list):
+            if p["id"] == user_key:
+                target_idx = i
+                break
+
+        if target_idx is None:
+            await interaction.response.send_message(
+                f"**{player.display_name}** not found in MMR rankings.",
+                ephemeral=True
+            )
+            return
+
+        # Up to 3 above and up to 3 below (no padding)
+        start_idx = max(0, target_idx - 3)
+        end_idx = min(len(players_list), target_idx + 4)
+
+        # Build response
+        lines = []
+        lines.append(f"**MMR Rankings around {player.display_name}**\n")
+
+        for i in range(start_idx, end_idx):
+            p = players_list[i]
+            position = i + 1
+
+            # Highlight the target player
+            if i == target_idx:
+                lines.append(f"**#{position} ➤ {p['name']} - MMR: {p['mmr']} (Rank {p['rank']})**")
+            else:
+                lines.append(f"#{position}   {p['name']} - MMR: {p['mmr']} (Rank {p['rank']})")
+
+        await interaction.response.send_message("\n".join(lines), ephemeral=True)
         log_action(f"[MMR] {interaction.user.name} checked {player.name}'s MMR")
 
     @bot.tree.command(name="leaderboard", description="View the matchmaking leaderboard")
