@@ -3784,13 +3784,6 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         players_list = []
         for uid, data in mmr_data.items():
             if "mmr" in data:
-                # Get player stats for rank info
-                try:
-                    stats = STATSRANKS.get_player_stats(int(uid))
-                    rank = stats.get("rank", 1)
-                except:
-                    rank = 1
-
                 # Try to get display name from guild
                 member = interaction.guild.get_member(int(uid))
                 name = member.display_name if member else data.get("discord_name", f"User {uid}")
@@ -3798,8 +3791,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                 players_list.append({
                     "id": uid,
                     "name": name,
-                    "mmr": data["mmr"],
-                    "rank": rank
+                    "mmr": data["mmr"]
                 })
 
         # Sort by MMR descending (highest first)
@@ -3833,9 +3825,9 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
 
             # Highlight the target player
             if i == target_idx:
-                lines.append(f"**#{position} ➤ {p['name']} - MMR: {p['mmr']} (Rank {p['rank']})**")
+                lines.append(f"**#{position} ➤ {p['name']} - {p['mmr']}**")
             else:
-                lines.append(f"#{position}   {p['name']} - MMR: {p['mmr']} (Rank {p['rank']})")
+                lines.append(f"#{position}   {p['name']} - {p['mmr']}")
 
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
         log_action(f"[MMR] {interaction.user.name} checked {player.name}'s MMR")
