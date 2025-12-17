@@ -1,7 +1,7 @@
 # statsdedi.py - Vultr VPS Management for Stats Dedi
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.1.0"
+MODULE_VERSION = "1.1.1"
 
 import discord
 from discord import app_commands
@@ -205,8 +205,6 @@ async def wait_for_instance_ready(instance_id: str, user: discord.User, initial_
     print(f"[DEDI] 🔄 Starting wait_for_instance_ready for {instance_id[:8]}... (user: {user.name})")
 
     for attempt in range(max_attempts):
-        await asyncio.sleep(5)
-
         try:
             instance = await get_instance(instance_id)
             status = instance.get("status", "")
@@ -266,7 +264,7 @@ async def wait_for_instance_ready(instance_id: str, user: discord.User, initial_
 
                 try:
                     embed = discord.Embed(
-                        title=f"✅ Stats Dedi Ready!",
+                        title="✅ Stats Dedi Ready!",
                         description=f"**{label}** is now ready to use!",
                         color=discord.Color.green()
                     )
@@ -276,7 +274,7 @@ async def wait_for_instance_ready(instance_id: str, user: discord.User, initial_
                     embed.set_footer(text="Connect via Remote Desktop (RDP)")
 
                     await user.send(embed=embed)
-                    print(f"[DEDI] ✅ {user.name}'s StatsDedi is ready at {main_ip} (took {elapsed_str}) - DM sent")
+                    print(f"[DEDI] ✅ {user.name}'s StatsDedi is ready at {main_ip} (took {elapsed_str}) - Ready DM sent!")
                 except discord.Forbidden:
                     print(f"[DEDI] ❌ Could not DM {user.name} - DMs disabled")
                 except Exception as e:
@@ -286,10 +284,26 @@ async def wait_for_instance_ready(instance_id: str, user: discord.User, initial_
         except Exception as e:
             print(f"[DEDI] ❌ Error checking instance status on attempt {attempt}: {e}")
 
-    # Timeout - remove from pending but don't DM
+        # Sleep AFTER checking (not before)
+        await asyncio.sleep(5)
+
+    # Timeout - remove from pending and notify user
     if instance_id in pending_creates:
         del pending_creates[instance_id]
     print(f"[DEDI] ⏱️ TIMEOUT waiting for {instance_id[:8]}... after {max_attempts * 5} seconds")
+
+    # Send timeout DM
+    try:
+        embed = discord.Embed(
+            title="⏱️ Stats Dedi Timeout",
+            description=f"Your Stats Dedi took too long to start. It may still be setting up.\n\nUse `/statsdedi` to check its status.",
+            color=discord.Color.orange()
+        )
+        embed.add_field(name="IP Address", value=f"`{initial_ip}`", inline=True)
+        await user.send(embed=embed)
+        print(f"[DEDI] ⏱️ Timeout DM sent to {user.name}")
+    except:
+        pass
 
 
 class ErrorRestartView(View):
