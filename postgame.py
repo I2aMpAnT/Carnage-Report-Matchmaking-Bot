@@ -522,6 +522,15 @@ async def end_series(series_view_or_channel, channel: discord.TextChannel = None
     except Exception as e:
         log_action(f"Failed to delete general chat embed: {e}")
 
+    # Remove active matchmaking roles from all players
+    if not series.test_mode:
+        try:
+            from searchmatchmaking import remove_active_match_roles
+            all_match_players = series.red_team + series.blue_team
+            await remove_active_match_roles(channel.guild, all_match_players, "MLG4v4", series.match_number)
+        except Exception as e:
+            log_action(f"Failed to remove active match roles: {e}")
+
     # Move to postgame and delete VCs
     await cleanup_after_series(series, channel.guild)
 

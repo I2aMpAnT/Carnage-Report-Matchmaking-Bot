@@ -2,7 +2,7 @@
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 # Supports ALL playlists: MLG 4v4 (voting), Team Hardcore/Double Team (auto-balance), Head to Head (1v1)
 
-MODULE_VERSION = "1.6.5"
+MODULE_VERSION = "1.6.6"
 
 import discord
 from discord.ui import View, Button, Select
@@ -983,40 +983,8 @@ class TeamSelectionView(View):
         view = CaptainDraftView(captains, remaining, test_mode=self.test_mode, match_label=self.match_label, guild=interaction.guild)
         await view.initialize_buttons()
 
-        # Build embed with captain info and available players with MMR
-        embed = discord.Embed(
-            title=f"Captains Draft - {self.match_label}",
-            description=f"**<@{view.current_picker}>** is picking...",
-            color=discord.Color.purple()
-        )
-
-        # Get captain MMRs
-        captain1_mmr = await get_player_mmr(captains[0])
-        captain2_mmr = await get_player_mmr(captains[1])
-        captain1_member = interaction.guild.get_member(captains[0])
-        captain2_member = interaction.guild.get_member(captains[1])
-        captain1_name = captain1_member.display_name if captain1_member else f"Player {captains[0]}"
-        captain2_name = captain2_member.display_name if captain2_member else f"Player {captains[1]}"
-
-        embed.add_field(
-            name=f"<:redteam:{RED_TEAM_EMOJI_ID}> Red Team (1/4)",
-            value=f"{captain1_name} - {captain1_mmr}MMR",
-            inline=True
-        )
-        embed.add_field(
-            name=f"<:blueteam:{BLUE_TEAM_EMOJI_ID}> Blue Team (1/4)",
-            value=f"{captain2_name} - {captain2_mmr}MMR",
-            inline=True
-        )
-
-        # Show available players with MMR
-        available_lines = []
-        for uid in remaining:
-            member = interaction.guild.get_member(uid)
-            name = member.display_name if member else f"Player {uid}"
-            mmr = view.player_mmrs.get(uid, 1500)
-            available_lines.append(f"{name} - {mmr}MMR")
-        embed.add_field(name="Available Players", value="\n".join(available_lines), inline=False)
+        # Build initial embed (MMR shown in buttons only)
+        embed = view.build_draft_embed()
 
         # Edit the existing pregame message instead of posting new one
         if self.pregame_message:
@@ -1319,7 +1287,7 @@ class CaptainDraftView(View):
             await interaction.response.edit_message(embed=embed, view=self)
 
     def build_draft_embed(self, complete: bool = False) -> discord.Embed:
-        """Build the captain draft embed showing current team status with names and MMR"""
+        """Build the captain draft embed showing current team status (MMR shown in buttons only)"""
         if complete:
             embed = discord.Embed(
                 title=f"Captains Draft - {self.match_label}",
@@ -1333,43 +1301,29 @@ class CaptainDraftView(View):
                 color=discord.Color.purple()
             )
 
-        # Red team with names and MMR
-        red_lines = []
-        for uid in self.red_team:
-            member = self.guild.get_member(uid) if self.guild else None
-            name = member.display_name if member else f"Player {uid}"
-            mmr = self.player_mmrs.get(uid, 1500)
-            red_lines.append(f"{name} - {mmr}MMR")
-        red_text = "\n".join(red_lines)
+        # Red team - just names/mentions
+        red_text = "\n".join([f"<@{uid}>" for uid in self.red_team])
         embed.add_field(
             name=f"<:redteam:{RED_TEAM_EMOJI_ID}> Red Team ({len(self.red_team)}/4)",
             value=red_text or "*No players yet*",
             inline=True
         )
 
-        # Blue team with names and MMR
-        blue_lines = []
-        for uid in self.blue_team:
-            member = self.guild.get_member(uid) if self.guild else None
-            name = member.display_name if member else f"Player {uid}"
-            mmr = self.player_mmrs.get(uid, 1500)
-            blue_lines.append(f"{name} - {mmr}MMR")
-        blue_text = "\n".join(blue_lines)
+        # Blue team - just names/mentions
+        blue_text = "\n".join([f"<@{uid}>" for uid in self.blue_team])
         embed.add_field(
             name=f"<:blueteam:{BLUE_TEAM_EMOJI_ID}> Blue Team ({len(self.blue_team)}/4)",
             value=blue_text or "*No players yet*",
             inline=True
         )
 
-        # Available players with names and MMR
+        # Available players section removed - MMR shown in buttons
         if self.remaining:
-            remaining_lines = []
-            for uid in self.remaining:
-                member = self.guild.get_member(uid) if self.guild else None
-                name = member.display_name if member else f"Player {uid}"
-                mmr = self.player_mmrs.get(uid, 1500)
-                remaining_lines.append(f"{name} - {mmr}MMR")
-            embed.add_field(name="Available Players", value="\n".join(remaining_lines), inline=False)
+            embed.add_field(
+                name="Available Players",
+                value="*Click a button below to pick*",
+                inline=False
+            )
 
         return embed
 
@@ -1686,22 +1640,14 @@ async def finalize_teams(channel: discord.TextChannel, red_team: List[int], blue
     queue_state.current_series.red_vc_id = red_vc.id
     queue_state.current_series.blue_vc_id = blue_vc.id
     
-    # Remove SearchingMatchmaking role from all players (only for real matches)
+    # Add active matchmaking roles to all players (only for real matches)
     if not test_mode:
         try:
-            searching_role = discord.utils.get(guild.roles, name="SearchingMatchmaking")
-            if searching_role:
-                all_players = red_team + blue_team
-                for user_id in all_players:
-                    member = guild.get_member(user_id)
-                    if member:
-                        try:
-                            await member.remove_roles(searching_role)
-                        except:
-                            pass
-                log_action("Removed SearchingMatchmaking role from all players")
+            from searchmatchmaking import add_active_match_roles
+            all_players = red_team + blue_team
+            await add_active_match_roles(guild, all_players, "MLG4v4", temp_series.match_number)
         except Exception as e:
-            log_action(f"Failed to remove SearchingMatchmaking roles: {e}")
+            log_action(f"Failed to add active match roles: {e}")
         
         # Clear queue since match is starting (only for real matches)
         queue_state.queue.clear()
@@ -1936,6 +1882,13 @@ async def proceed_with_playlist_teams(
     match.map_name = map_name
     match.gametype = gametype
     ps.current_match = match
+
+    # Add active matchmaking roles to all players
+    try:
+        from searchmatchmaking import add_active_match_roles
+        await add_active_match_roles(guild, players, ps.name, match_number)
+    except Exception as e:
+        log_action(f"Failed to add active match roles: {e}")
 
     # Delete pregame message
     try:
@@ -2354,6 +2307,13 @@ class PlaylistPlayersPickView(View):
         match = PlaylistMatch(ps, self.players, red_team, blue_team)
         match.match_number = self.match_number  # Use projected number from pregame start
         ps.current_match = match
+
+        # Add active matchmaking roles to all players
+        try:
+            from searchmatchmaking import add_active_match_roles
+            await add_active_match_roles(guild, self.players, ps.name, self.match_number)
+        except Exception as e:
+            log_action(f"Failed to add active match roles: {e}")
 
         # Create text channel for this match: "Team {captain1} vs Team {captain2}"
         text_channel_name = f"Team {red_captain_name} vs Team {blue_captain_name}"

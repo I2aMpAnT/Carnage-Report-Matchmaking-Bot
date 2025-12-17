@@ -1891,6 +1891,14 @@ async def end_playlist_match(channel: discord.TextChannel, match: PlaylistMatch,
         except:
             pass
 
+    # Remove active matchmaking roles from all players
+    try:
+        from searchmatchmaking import remove_active_match_roles
+        all_players = match.team1 + match.team2
+        await remove_active_match_roles(guild, all_players, ps.name, match.match_number)
+    except Exception as e:
+        log_action(f"Failed to remove active match roles: {e}")
+
     # Clear current match
     ps.current_match = None
 
