@@ -54,6 +54,7 @@ class QueueState:
         self.inactivity_timer_task: Optional[asyncio.Task] = None  # Background task for inactivity checks
         self.locked: bool = False  # Queue locked when full - prevents leaving
         self.locked_players: List[int] = []  # Players locked into current match
+        self.pregame_text_channel_id: Optional[int] = None  # Pregame text channel for team selection
 
 # Global queue states - separate queues for each channel
 queue_state = QueueState()  # Primary MLG 4v4 queue
@@ -716,6 +717,16 @@ class QueueView(View):
             # Remove matched players from all other queues they might be in
             await remove_players_from_other_queues(interaction.guild, qs.locked_players, current_queue=qs)
 
+            # Clear the queue immediately so new players can join the next queue
+            # The locked_players list holds the 8 matched players
+            qs.queue.clear()
+            qs.queue_join_times.clear()
+            qs.locked = False  # Queue is no longer locked - only players are locked
+            log_action("Queue cleared - ready for new players")
+
+            # Update queue embed to show empty/available
+            await update_queue_embed(interaction.channel, qs)
+
             from pregame import start_pregame
             await start_pregame(interaction.channel, mlg_queue_state=qs)
 
@@ -1030,7 +1041,16 @@ class PingJoinView(View):
             # Remove matched players from all other queues they might be in
             await remove_players_from_other_queues(interaction.guild, qs.locked_players, current_queue=qs)
 
+            # Clear the queue immediately so new players can join the next queue
+            qs.queue.clear()
+            qs.queue_join_times.clear()
+            qs.locked = False
+            log_action("Queue cleared - ready for new players")
+
+            # Update queue embed to show empty/available
             if qs.queue_channel:
+                await update_queue_embed(qs.queue_channel, qs)
+
                 from pregame import start_pregame
                 await start_pregame(qs.queue_channel, mlg_queue_state=qs)
 

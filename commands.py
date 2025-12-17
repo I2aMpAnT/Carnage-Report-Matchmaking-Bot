@@ -454,7 +454,18 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                 except:
                     pass
             queue_state.pregame_vc_id = None
-            
+
+            # Delete pregame text channel
+            if hasattr(queue_state, 'pregame_text_channel_id') and queue_state.pregame_text_channel_id:
+                pregame_text = interaction.guild.get_channel(queue_state.pregame_text_channel_id)
+                if pregame_text:
+                    try:
+                        await pregame_text.delete(reason="Match cancelled")
+                        log_action("Deleted Pregame Text Channel")
+                    except:
+                        pass
+                queue_state.pregame_text_channel_id = None
+
             # Delete pregame message
             if hasattr(queue_state, 'pregame_message') and queue_state.pregame_message:
                 try:
@@ -575,7 +586,18 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                 except:
                     pass
             queue_state.pregame_vc_id = None
-            
+
+            # Delete pregame text channel
+            if hasattr(queue_state, 'pregame_text_channel_id') and queue_state.pregame_text_channel_id:
+                pregame_text = interaction.guild.get_channel(queue_state.pregame_text_channel_id)
+                if pregame_text:
+                    try:
+                        await pregame_text.delete(reason="Match cancelled")
+                        log_action("Deleted Pregame Text Channel")
+                    except:
+                        pass
+                queue_state.pregame_text_channel_id = None
+
             # Delete pregame message
             if hasattr(queue_state, 'pregame_message') and queue_state.pregame_message:
                 try:

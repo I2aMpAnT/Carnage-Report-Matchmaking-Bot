@@ -207,27 +207,19 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
     qs.test_mode = test_mode
 
     # Determine the correct queue channel
-    from searchmatchmaking import queue_state_2
+    from searchmatchmaking import queue_state_2, update_queue_embed
     if qs == queue_state_2:
         queue_channel_id = QUEUE_CHANNEL_ID_2
     else:
         queue_channel_id = QUEUE_CHANNEL_ID
 
-    # Always use queue channel for pregame embed
+    # Get queue channel for updating
     queue_channel = guild.get_channel(queue_channel_id)
-    target_channel = queue_channel if queue_channel else channel
 
-    # Delete the old queue embed before posting pregame embed
-    try:
-        async for msg in target_channel.history(limit=20):
-            if msg.author.bot and msg.embeds:
-                title = msg.embeds[0].title or ""
-                if "MLG 4v4 Matchmaking" in title:
-                    await msg.delete()
-                    log_action("Deleted queue embed - pregame starting")
-                    break
-    except Exception as e:
-        log_action(f"Failed to delete queue embed: {e}")
+    # Update the queue embed to show it's ready for new players
+    if queue_channel:
+        await update_queue_embed(queue_channel, qs)
+        log_action("Updated queue embed - ready for new players")
 
     # Get the next match number for naming
     from ingame import Series
@@ -245,8 +237,22 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
     )
     log_action(f"Created Pregame Lobby VC: {pregame_vc.id}")
 
+    # Create pregame text channel in the Matchmaking category
+    text_category_id = 1403855141857337501  # Matchmaking category
+    text_category = guild.get_channel(text_category_id)
+    pregame_text_channel = await guild.create_text_channel(
+        name=f"Pregame - {match_label}",
+        category=text_category,
+        topic=f"Team selection for {match_label} - Auto-deleted when teams are finalized"
+    )
+    log_action(f"Created Pregame Text Channel: {pregame_text_channel.id}")
+
     # Store the pregame VC ID for cleanup later
     qs.pregame_vc_id = pregame_vc.id
+    qs.pregame_text_channel_id = pregame_text_channel.id
+
+    # Use pregame text channel for all team selection
+    target_channel = pregame_text_channel
 
     # Move players to pregame lobby
     # In TEST MODE: Only move the 2 testers, not the random fillers
@@ -1695,6 +1701,17 @@ async def finalize_teams(channel: discord.TextChannel, red_team: List[int], blue
             except:
                 pass
         queue_state.pregame_vc_id = None
+
+    # Delete the pregame text channel (team selection is done)
+    if hasattr(queue_state, 'pregame_text_channel_id') and queue_state.pregame_text_channel_id:
+        pregame_text = guild.get_channel(queue_state.pregame_text_channel_id)
+        if pregame_text:
+            try:
+                await pregame_text.delete()
+                log_action("Deleted Pregame Text Channel")
+            except:
+                pass
+        queue_state.pregame_text_channel_id = None
     
     # Assign the series we created earlier and set VC IDs
     queue_state.current_series = temp_series
