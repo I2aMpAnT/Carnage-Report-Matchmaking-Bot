@@ -4180,7 +4180,7 @@ python3 populate_stats.py'''
                 summary_lines.append(cleaned)
 
         if summary_lines:
-            return '\n'.join(summary_lines[:5])
+            return '\n'.join(summary_lines)
 
         # No ## Summary found - look for any bullet points
         for line in lines:
@@ -4188,8 +4188,6 @@ python3 populate_stats.py'''
             if stripped.startswith('- ') or stripped.startswith('* '):
                 cleaned = '• ' + stripped[2:]
                 summary_lines.append(cleaned)
-                if len(summary_lines) >= 5:
-                    break
 
         if summary_lines:
             return '\n'.join(summary_lines)
@@ -4239,7 +4237,7 @@ python3 populate_stats.py'''
         if summary == "No description provided.":
             commits = await fetch_pr_commits(pr)
             if commits:
-                summary = '\n'.join([f'• {msg}' for msg in commits[:5]])
+                summary = '\n'.join([f'• {msg}' for msg in commits])
 
         # Build message - clean and simple
         message = (
