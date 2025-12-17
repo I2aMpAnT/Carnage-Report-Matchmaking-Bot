@@ -1,7 +1,7 @@
 # searchmatchmaking.py - MLG 4v4 Queue Management System
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.6.0"
+MODULE_VERSION = "1.6.2"
 
 import discord
 from discord.ui import View, Button
@@ -54,6 +54,7 @@ class QueueState:
         self.inactivity_timer_task: Optional[asyncio.Task] = None  # Background task for inactivity checks
         self.locked: bool = False  # Queue locked when full - prevents leaving
         self.locked_players: List[int] = []  # Players locked into current match
+        self.pregame_text_channel_id: Optional[int] = None  # Pregame text channel for team selection
 
 # Global queue states - separate queues for each channel
 queue_state = QueueState()  # Primary MLG 4v4 queue
@@ -118,6 +119,123 @@ async def remove_players_from_other_queues(guild: discord.Guild, player_ids: lis
             await update_queue_embed(other_qs.queue_channel, other_qs)
         except:
             pass
+
+
+async def add_active_match_roles(guild: discord.Guild, player_ids: list, playlist_name: str, match_number: int):
+    """
+    Add active matchmaking roles to players when they're locked into a match.
+    - Removes SearchingMatchmaking role
+    - Adds ActiveMatchmaking role (creates if doesn't exist)
+    - Adds active{playlist}{match#} role (creates for this match)
+    """
+    # Clean playlist name for role (remove spaces)
+    clean_playlist = playlist_name.replace(" ", "").replace("_", "")
+    match_role_name = f"Active{clean_playlist}Match{match_number}"
+
+    # Get or create ActiveMatchmaking role
+    active_mm_role = discord.utils.get(guild.roles, name="ActiveMatchmaking")
+    if not active_mm_role:
+        try:
+            active_mm_role = await guild.create_role(
+                name="ActiveMatchmaking",
+                color=discord.Color.orange(),
+                reason="Auto-created for active match tracking"
+            )
+            log_action(f"Created ActiveMatchmaking role")
+        except Exception as e:
+            log_action(f"Failed to create ActiveMatchmaking role: {e}")
+
+    # Create match-specific role
+    match_role = discord.utils.get(guild.roles, name=match_role_name)
+    if not match_role:
+        try:
+            match_role = await guild.create_role(
+                name=match_role_name,
+                color=discord.Color.purple(),
+                reason=f"Auto-created for {playlist_name} Match #{match_number}"
+            )
+            log_action(f"Created role: {match_role_name}")
+        except Exception as e:
+            log_action(f"Failed to create {match_role_name} role: {e}")
+
+    # Get SearchingMatchmaking role to remove
+    searching_role = discord.utils.get(guild.roles, name="SearchingMatchmaking")
+
+    # Apply roles to all players
+    for user_id in player_ids:
+        member = guild.get_member(user_id)
+        if not member:
+            continue
+
+        try:
+            # Remove searching role
+            if searching_role and searching_role in member.roles:
+                await member.remove_roles(searching_role)
+
+            # Add active roles
+            roles_to_add = []
+            if active_mm_role:
+                roles_to_add.append(active_mm_role)
+            if match_role:
+                roles_to_add.append(match_role)
+
+            if roles_to_add:
+                await member.add_roles(*roles_to_add)
+        except Exception as e:
+            log_action(f"Failed to update roles for {member.display_name}: {e}")
+
+    log_action(f"Added active match roles to {len(player_ids)} players: ActiveMatchmaking + {match_role_name}")
+
+
+async def remove_active_match_roles(guild: discord.Guild, player_ids: list, playlist_name: str, match_number: int):
+    """
+    Remove active matchmaking roles from players when series ends or is cancelled.
+    - Removes ActiveMatchmaking role (only if no other active matches)
+    - Removes and deletes the active{playlist}{match#} role
+    """
+    # Clean playlist name for role
+    clean_playlist = playlist_name.replace(" ", "").replace("_", "")
+    match_role_name = f"Active{clean_playlist}Match{match_number}"
+
+    # Get roles
+    active_mm_role = discord.utils.get(guild.roles, name="ActiveMatchmaking")
+    match_role = discord.utils.get(guild.roles, name=match_role_name)
+
+    # Remove roles from players
+    for user_id in player_ids:
+        member = guild.get_member(user_id)
+        if not member:
+            continue
+
+        try:
+            roles_to_remove = []
+            if match_role and match_role in member.roles:
+                roles_to_remove.append(match_role)
+
+            # Check if player has any OTHER active match roles before removing ActiveMatchmaking
+            if active_mm_role and active_mm_role in member.roles:
+                has_other_active = False
+                for role in member.roles:
+                    if role.name.startswith("Active") and role.name != "ActiveMatchmaking" and role.name != match_role_name:
+                        has_other_active = True
+                        break
+                if not has_other_active:
+                    roles_to_remove.append(active_mm_role)
+
+            if roles_to_remove:
+                await member.remove_roles(*roles_to_remove)
+        except Exception as e:
+            log_action(f"Failed to remove roles from {member.display_name}: {e}")
+
+    # Delete the match-specific role
+    if match_role:
+        try:
+            await match_role.delete(reason=f"Match #{match_number} ended")
+            log_action(f"Deleted role: {match_role_name}")
+        except Exception as e:
+            log_action(f"Failed to delete {match_role_name} role: {e}")
+
+    log_action(f"Removed active match roles from {len(player_ids)} players for {playlist_name} Match #{match_number}")
 
 
 async def auto_update_queue_times(qs=None):
@@ -507,25 +625,28 @@ class QueueView(View):
         # Check if player has MMR stats
         import STATSRANKS
         player_stats = STATSRANKS.get_existing_player_stats(user_id)
-        if not player_stats or 'mmr' not in player_stats:
-            # Tell the player they need MMR
+        has_mmr = player_stats and 'mmr' in player_stats
+
+        if not has_mmr:
+            # Notify player they don't have MMR - they can still join but will get temp 500 MMR
             await interaction.response.send_message(
-                "❌ **You don't have an MMR rating yet!**\n\n"
-                "You need to be assigned an MMR before you can join matchmaking.\n"
+                "⚠️ **You don't have an MMR rating yet!**\n\n"
+                "You can still join the queue, but you'll be assigned a **temporary 500 MMR** if a staff member doesn't set your MMR before the match starts.\n"
                 "A staff member has been notified to set your MMR.",
                 ephemeral=True
             )
-            # Send separate alert to general chat for staff
+            # Send alert to general chat for staff
             GENERAL_CHANNEL_ID = 1403855176460406805
             general_channel = interaction.guild.get_channel(GENERAL_CHANNEL_ID)
             if general_channel:
                 embed = discord.Embed(
                     title="⚠️ New Player Needs MMR",
-                    description=f"{interaction.user.mention} tried to join matchmaking but doesn't have an MMR rating.\n\n"
-                               f"Please use `/mmr` to assign them a starting MMR.",
+                    description=f"{interaction.user.mention} joined matchmaking but doesn't have an MMR rating.\n\n"
+                               f"Please use `/mmr` to assign them a starting MMR before the match starts!\n"
+                               f"**They will get 500 MMR temporarily if not set.**",
                     color=discord.Color.orange()
                 )
-                embed.set_footer(text="Player cannot queue until MMR is set")
+                embed.set_footer(text="Player joined queue - set MMR ASAP")
                 # Ping @Server Support role by name
                 server_support_role = discord.utils.get(interaction.guild.roles, name="Server Support")
                 role_ping = server_support_role.mention if server_support_role else "@Server Support"
@@ -533,7 +654,7 @@ class QueueView(View):
                     content=role_ping,
                     embed=embed
                 )
-            return
+            # Continue to add them to queue (don't return)
 
         # Check if already in this queue
         if user_id in qs.queue:
@@ -563,7 +684,8 @@ class QueueView(View):
             qs.recent_action = None
 
         queue_name = "MLG 4v4 (Restricted)" if qs == queue_state_2 else "MLG 4v4"
-        log_action(f"{interaction.user.display_name} joined {queue_name} ({len(qs.queue)}/{MAX_QUEUE_SIZE}) - MMR: {player_stats['mmr']}")
+        mmr_display = player_stats['mmr'] if has_mmr else "PENDING (500)"
+        log_action(f"{interaction.user.display_name} joined {queue_name} ({len(qs.queue)}/{MAX_QUEUE_SIZE}) - MMR: {mmr_display}")
         
         # Add SearchingMatchmaking role
         try:
@@ -598,6 +720,16 @@ class QueueView(View):
 
             # Remove matched players from all other queues they might be in
             await remove_players_from_other_queues(interaction.guild, qs.locked_players, current_queue=qs)
+
+            # Clear the queue immediately so new players can join the next queue
+            # The locked_players list holds the 8 matched players
+            qs.queue.clear()
+            qs.queue_join_times.clear()
+            qs.locked = False  # Queue is no longer locked - only players are locked
+            log_action("Queue cleared - ready for new players")
+
+            # Update queue embed to show empty/available
+            await update_queue_embed(interaction.channel, qs)
 
             from pregame import start_pregame
             await start_pregame(interaction.channel, mlg_queue_state=qs)
@@ -913,7 +1045,16 @@ class PingJoinView(View):
             # Remove matched players from all other queues they might be in
             await remove_players_from_other_queues(interaction.guild, qs.locked_players, current_queue=qs)
 
+            # Clear the queue immediately so new players can join the next queue
+            qs.queue.clear()
+            qs.queue_join_times.clear()
+            qs.locked = False
+            log_action("Queue cleared - ready for new players")
+
+            # Update queue embed to show empty/available
             if qs.queue_channel:
+                await update_queue_embed(qs.queue_channel, qs)
+
                 from pregame import start_pregame
                 await start_pregame(qs.queue_channel, mlg_queue_state=qs)
 
