@@ -2,7 +2,7 @@
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 # Supports ALL playlists: MLG 4v4 (voting), Team Hardcore/Double Team (auto-balance), Head to Head (1v1)
 
-MODULE_VERSION = "1.6.4"
+MODULE_VERSION = "1.6.5"
 
 import discord
 from discord.ui import View, Button, Select
@@ -979,17 +979,44 @@ class TeamSelectionView(View):
         captains = random.sample(self.players, 2)
         remaining = [p for p in self.players if p not in captains]
 
+        # Create view and initialize buttons with MMR
+        view = CaptainDraftView(captains, remaining, test_mode=self.test_mode, match_label=self.match_label, guild=interaction.guild)
+        await view.initialize_buttons()
+
+        # Build embed with captain info and available players with MMR
         embed = discord.Embed(
             title=f"Captains Draft - {self.match_label}",
-            description="Captains will pick their teams!",
+            description=f"**<@{view.current_picker}>** is picking...",
             color=discord.Color.purple()
         )
 
-        embed.add_field(name=f"<:redteam:{RED_TEAM_EMOJI_ID}> Captain 1 (Red)", value=f"<@{captains[0]}>", inline=True)
-        embed.add_field(name=f"<:blueteam:{BLUE_TEAM_EMOJI_ID}> Captain 2 (Blue)", value=f"<@{captains[1]}>", inline=True)
-        embed.add_field(name="Available Players", value="\n".join([f"<@{uid}>" for uid in remaining]), inline=False)
+        # Get captain MMRs
+        captain1_mmr = await get_player_mmr(captains[0])
+        captain2_mmr = await get_player_mmr(captains[1])
+        captain1_member = interaction.guild.get_member(captains[0])
+        captain2_member = interaction.guild.get_member(captains[1])
+        captain1_name = captain1_member.display_name if captain1_member else f"Player {captains[0]}"
+        captain2_name = captain2_member.display_name if captain2_member else f"Player {captains[1]}"
 
-        view = CaptainDraftView(captains, remaining, test_mode=self.test_mode, match_label=self.match_label)
+        embed.add_field(
+            name=f"<:redteam:{RED_TEAM_EMOJI_ID}> Red Team (1/4)",
+            value=f"{captain1_name} - {captain1_mmr}MMR",
+            inline=True
+        )
+        embed.add_field(
+            name=f"<:blueteam:{BLUE_TEAM_EMOJI_ID}> Blue Team (1/4)",
+            value=f"{captain2_name} - {captain2_mmr}MMR",
+            inline=True
+        )
+
+        # Show available players with MMR
+        available_lines = []
+        for uid in remaining:
+            member = interaction.guild.get_member(uid)
+            name = member.display_name if member else f"Player {uid}"
+            mmr = view.player_mmrs.get(uid, 1500)
+            available_lines.append(f"{name} - {mmr}MMR")
+        embed.add_field(name="Available Players", value="\n".join(available_lines), inline=False)
 
         # Edit the existing pregame message instead of posting new one
         if self.pregame_message:
@@ -1201,7 +1228,7 @@ class BalancedTeamsRejectView(View):
 
 
 class CaptainDraftView(View):
-    def __init__(self, captains: List[int], remaining: List[int], test_mode: bool = False, match_label: str = "Match"):
+    def __init__(self, captains: List[int], remaining: List[int], test_mode: bool = False, match_label: str = "Match", guild: discord.Guild = None):
         super().__init__(timeout=None)
         self.captain1 = captains[0]
         self.captain2 = captains[1]
@@ -1212,38 +1239,58 @@ class CaptainDraftView(View):
         self.test_mode = test_mode
         self.match_label = match_label
         self.draft_message = None  # Will be set after sending/editing
+        self.guild = guild
+        self.player_mmrs = {}  # Cache MMR values
 
-        # Add player selection dropdown
-        self.update_dropdown()
-    
-    def update_dropdown(self):
-        """Update player selection dropdown"""
+    async def initialize_buttons(self):
+        """Initialize buttons with player names and MMR - must be called after __init__"""
+        # Fetch MMR for captains (already on teams)
+        self.player_mmrs[self.captain1] = await get_player_mmr(self.captain1)
+        self.player_mmrs[self.captain2] = await get_player_mmr(self.captain2)
+        # Fetch MMR for all remaining players
+        for uid in self.remaining:
+            self.player_mmrs[uid] = await get_player_mmr(uid)
+        self.update_buttons()
+
+    def update_buttons(self):
+        """Update player selection buttons"""
         self.clear_items()
-        
+
         if not self.remaining:
             # Draft complete
             return
-        
-        options = [
-            discord.SelectOption(label=f"Player {i+1}", value=str(uid))
-            for i, uid in enumerate(self.remaining)
-        ]
-        
-        select = Select(
-            placeholder=f"Captain <@{self.current_picker}> - Pick a player",
-            options=options,
-            custom_id="pick_player"
-        )
-        select.callback = self.pick_player
-        self.add_item(select)
-    
-    async def pick_player(self, interaction: discord.Interaction):
+
+        # Create a button for each remaining player (max 6 players, fits in 2 rows of 3)
+        for i, uid in enumerate(self.remaining):
+            # Get player name
+            member = self.guild.get_member(uid) if self.guild else None
+            player_name = member.display_name if member else f"Player {uid}"
+            # Truncate name if too long (Discord button label limit is 80 chars)
+            if len(player_name) > 15:
+                player_name = player_name[:12] + "..."
+
+            mmr = self.player_mmrs.get(uid, 1500)
+
+            button = Button(
+                label=f"{player_name} - {mmr}MMR",
+                style=discord.ButtonStyle.secondary,
+                custom_id=f"pick_{uid}",
+                row=i // 3  # 3 buttons per row
+            )
+            button.callback = self.make_pick_callback(uid)
+            self.add_item(button)
+
+    def make_pick_callback(self, player_id: int):
+        """Create a callback for picking a specific player"""
+        async def callback(interaction: discord.Interaction):
+            await self.pick_player(interaction, player_id)
+        return callback
+
+    async def pick_player(self, interaction: discord.Interaction, selected_id: int):
         """Handle player pick"""
         if interaction.user.id != self.current_picker:
             await interaction.response.send_message("❌ Not your turn!", ephemeral=True)
             return
-
-        selected_id = int(interaction.values[0])
 
         # Add to current team
         if self.current_picker == self.captain1:
@@ -1266,13 +1313,13 @@ class CaptainDraftView(View):
                 pass
             await finalize_teams(interaction.channel, self.red_team, self.blue_team, test_mode=self.test_mode)
         else:
-            # Update dropdown and embed with current teams
-            self.update_dropdown()
+            # Update buttons and embed with current teams
+            self.update_buttons()
             embed = self.build_draft_embed()
             await interaction.response.edit_message(embed=embed, view=self)
 
     def build_draft_embed(self, complete: bool = False) -> discord.Embed:
-        """Build the captain draft embed showing current team status"""
+        """Build the captain draft embed showing current team status with names and MMR"""
         if complete:
             embed = discord.Embed(
                 title=f"Captains Draft - {self.match_label}",
@@ -1286,26 +1333,43 @@ class CaptainDraftView(View):
                 color=discord.Color.purple()
             )
 
-        # Red team
-        red_text = "\n".join([f"<@{uid}>" for uid in self.red_team])
+        # Red team with names and MMR
+        red_lines = []
+        for uid in self.red_team:
+            member = self.guild.get_member(uid) if self.guild else None
+            name = member.display_name if member else f"Player {uid}"
+            mmr = self.player_mmrs.get(uid, 1500)
+            red_lines.append(f"{name} - {mmr}MMR")
+        red_text = "\n".join(red_lines)
         embed.add_field(
             name=f"<:redteam:{RED_TEAM_EMOJI_ID}> Red Team ({len(self.red_team)}/4)",
             value=red_text or "*No players yet*",
             inline=True
         )
 
-        # Blue team
-        blue_text = "\n".join([f"<@{uid}>" for uid in self.blue_team])
+        # Blue team with names and MMR
+        blue_lines = []
+        for uid in self.blue_team:
+            member = self.guild.get_member(uid) if self.guild else None
+            name = member.display_name if member else f"Player {uid}"
+            mmr = self.player_mmrs.get(uid, 1500)
+            blue_lines.append(f"{name} - {mmr}MMR")
+        blue_text = "\n".join(blue_lines)
         embed.add_field(
             name=f"<:blueteam:{BLUE_TEAM_EMOJI_ID}> Blue Team ({len(self.blue_team)}/4)",
             value=blue_text or "*No players yet*",
             inline=True
         )
 
-        # Available players
+        # Available players with names and MMR
         if self.remaining:
-            remaining_text = "\n".join([f"<@{uid}>" for uid in self.remaining])
-            embed.add_field(name="Available Players", value=remaining_text, inline=False)
+            remaining_lines = []
+            for uid in self.remaining:
+                member = self.guild.get_member(uid) if self.guild else None
+                name = member.display_name if member else f"Player {uid}"
+                mmr = self.player_mmrs.get(uid, 1500)
+                remaining_lines.append(f"{name} - {mmr}MMR")
+            embed.add_field(name="Available Players", value="\n".join(remaining_lines), inline=False)
 
         return embed
 
