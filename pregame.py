@@ -1068,7 +1068,7 @@ async def show_balanced_teams_confirmation(
     match_label: str,
     pregame_message: discord.Message = None
 ):
-    """Show balanced teams with 30-second confirmation timer.
+    """Show balanced teams with 15-second confirmation timer.
     If majority doesn't reject, teams proceed automatically.
     Edits existing pregame_message instead of creating new one."""
     import asyncio
@@ -1084,8 +1084,8 @@ async def show_balanced_teams_confirmation(
     red_mentions = "\n".join([f"<@{uid}>" for uid in red_team])
     blue_mentions = "\n".join([f"<@{uid}>" for uid in blue_team])
 
-    # 30-second countdown
-    for seconds_left in range(30, -1, -1):
+    # 15-second countdown
+    for seconds_left in range(15, -1, -1):
         embed = discord.Embed(
             title=f"Balanced Teams - {match_label}",
             description=f"Teams will be locked in **{seconds_left}** seconds...\n\nVote **Reject** if you want to re-pick teams.",
@@ -1178,7 +1178,7 @@ async def show_team_selection_after_reject(
 
 
 class BalancedTeamsRejectView(View):
-    """View for rejecting balanced teams within 10 seconds"""
+    """View for rejecting balanced teams within 15 seconds"""
     def __init__(self, players: List[int], test_mode: bool = False, testers: List[int] = None):
         super().__init__(timeout=None)
         self.players = players
