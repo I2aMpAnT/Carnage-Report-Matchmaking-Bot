@@ -1,7 +1,7 @@
 # searchmatchmaking.py - MLG 4v4 Queue Management System
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.6.1"
+MODULE_VERSION = "1.6.2"
 
 import discord
 from discord.ui import View, Button
@@ -625,25 +625,28 @@ class QueueView(View):
         # Check if player has MMR stats
         import STATSRANKS
         player_stats = STATSRANKS.get_existing_player_stats(user_id)
-        if not player_stats or 'mmr' not in player_stats:
-            # Tell the player they need MMR
+        has_mmr = player_stats and 'mmr' in player_stats
+
+        if not has_mmr:
+            # Notify player they don't have MMR - they can still join but will get temp 500 MMR
             await interaction.response.send_message(
-                "❌ **You don't have an MMR rating yet!**\n\n"
-                "You need to be assigned an MMR before you can join matchmaking.\n"
+                "⚠️ **You don't have an MMR rating yet!**\n\n"
+                "You can still join the queue, but you'll be assigned a **temporary 500 MMR** if a staff member doesn't set your MMR before the match starts.\n"
                 "A staff member has been notified to set your MMR.",
                 ephemeral=True
             )
-            # Send separate alert to general chat for staff
+            # Send alert to general chat for staff
             GENERAL_CHANNEL_ID = 1403855176460406805
             general_channel = interaction.guild.get_channel(GENERAL_CHANNEL_ID)
             if general_channel:
                 embed = discord.Embed(
                     title="⚠️ New Player Needs MMR",
-                    description=f"{interaction.user.mention} tried to join matchmaking but doesn't have an MMR rating.\n\n"
-                               f"Please use `/mmr` to assign them a starting MMR.",
+                    description=f"{interaction.user.mention} joined matchmaking but doesn't have an MMR rating.\n\n"
+                               f"Please use `/mmr` to assign them a starting MMR before the match starts!\n"
+                               f"**They will get 500 MMR temporarily if not set.**",
                     color=discord.Color.orange()
                 )
-                embed.set_footer(text="Player cannot queue until MMR is set")
+                embed.set_footer(text="Player joined queue - set MMR ASAP")
                 # Ping @Server Support role by name
                 server_support_role = discord.utils.get(interaction.guild.roles, name="Server Support")
                 role_ping = server_support_role.mention if server_support_role else "@Server Support"
@@ -651,7 +654,7 @@ class QueueView(View):
                     content=role_ping,
                     embed=embed
                 )
-            return
+            # Continue to add them to queue (don't return)
 
         # Check if already in this queue
         if user_id in qs.queue:
@@ -681,7 +684,8 @@ class QueueView(View):
             qs.recent_action = None
 
         queue_name = "MLG 4v4 (Restricted)" if qs == queue_state_2 else "MLG 4v4"
-        log_action(f"{interaction.user.display_name} joined {queue_name} ({len(qs.queue)}/{MAX_QUEUE_SIZE}) - MMR: {player_stats['mmr']}")
+        mmr_display = player_stats['mmr'] if has_mmr else "PENDING (500)"
+        log_action(f"{interaction.user.display_name} joined {queue_name} ({len(qs.queue)}/{MAX_QUEUE_SIZE}) - MMR: {mmr_display}")
         
         # Add SearchingMatchmaking role
         try:

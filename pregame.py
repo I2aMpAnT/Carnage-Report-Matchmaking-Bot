@@ -2,7 +2,7 @@
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 # Supports ALL playlists: MLG 4v4 (voting), Team Hardcore/Double Team (auto-balance), Head to Head (1v1)
 
-MODULE_VERSION = "1.6.7"
+MODULE_VERSION = "1.6.8"
 
 import discord
 from discord.ui import View, Button, Select
@@ -27,23 +27,23 @@ def log_action(message: str):
     queue_log(message)
 
 async def get_player_mmr(user_id: int) -> int:
-    """Get player MMR from STATSRANKS or guest data"""
+    """Get player MMR from STATSRANKS or guest data. Returns 500 for unranked players."""
     from searchmatchmaking import queue_state
-    
+
     # Check if this is a guest
     if user_id in queue_state.guests:
         mmr = queue_state.guests[user_id]["mmr"]
         log_action(f"get_player_mmr({user_id}) = {mmr} (guest)")
         return mmr
-    
+
     import STATSRANKS
     stats = STATSRANKS.get_player_stats(user_id, skip_github=True)
     if stats and 'mmr' in stats:
         mmr = stats['mmr']
         log_action(f"get_player_mmr({user_id}) = {mmr}")
         return mmr
-    log_action(f"get_player_mmr({user_id}) = 1500 (default)")
-    return 1500  # Default MMR
+    log_action(f"get_player_mmr({user_id}) = 500 (unranked default)")
+    return 500  # Default MMR for unranked players
 
 async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, test_players: List[int] = None,
                         playlist_state: 'PlaylistQueueState' = None, playlist_players: List[int] = None,
@@ -1740,17 +1740,6 @@ async def finalize_teams(channel: discord.TextChannel, red_team: List[int], blue
 
     await show_series_embed(channel)
 
-    # Ping all players in the series text channel so they know where it is
-    if series_text_channel:
-        all_players = red_team + blue_team
-        mentions = " ".join([f"<@{uid}>" for uid in all_players])
-        await series_text_channel.send(
-            f"🎮 **{series_label} has started!**\n\n"
-            f"{mentions}\n\n"
-            f"Use the buttons below to report game results."
-        )
-        log_action(f"Pinged all players in series text channel: {series_text_channel.name}")
-
     # Notify players who couldn't be moved to voice
     if players_not_moved and series_text_channel:
         # Ping them in the series text channel
@@ -2456,15 +2445,6 @@ class PlaylistPlayersPickView(View):
 
         # Show match embed in the new text channel
         await show_playlist_match_embed(match_text_channel, match)
-
-        # Ping all players so they know where the match channel is
-        mentions = " ".join([f"<@{uid}>" for uid in self.players])
-        await match_text_channel.send(
-            f"🎮 **{self.match_label} has started!**\n\n"
-            f"{mentions}\n\n"
-            f"Use the buttons above to report game results."
-        )
-        log_action(f"Pinged all players in match text channel: {match_text_channel.name}")
 
         # Post to general chat
         await post_tournament_to_general(guild, match, red_captain_name, blue_captain_name)
