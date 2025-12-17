@@ -700,9 +700,9 @@ class TeamSelectionView(View):
         player_list = "\n".join([f"<@{uid}>" for uid in self.players])
         embed.add_field(name=f"Players ({player_count})", value=player_list, inline=False)
 
-        # Show votes with counts
+        # Show votes with counts - ALL votes count toward majority (players + staff + admins)
         if self.votes:
-            # Count votes per option
+            # Count ALL votes per option
             vote_counts = {}
             for vote in self.votes.values():
                 vote_counts[vote] = vote_counts.get(vote, 0) + 1
@@ -722,7 +722,7 @@ class TeamSelectionView(View):
             if self.test_mode and votes_mismatch:
                 embed.add_field(name=f"⚠️ Votes Don't Match ({len(self.votes)}/{len(self.testers)})", value=vote_text + "\n\n*Change your vote to match!*", inline=False)
             else:
-                embed.add_field(name=f"Vote Counts ({len(self.votes)} votes)", value="\n".join(vote_summary) if vote_summary else "No votes yet", inline=False)
+                embed.add_field(name=f"Vote Counts ({len(self.votes)} total)", value="\n".join(vote_summary) if vote_summary else "No votes yet", inline=False)
                 embed.add_field(name="Individual Votes", value=vote_text, inline=False)
 
         try:
@@ -825,7 +825,8 @@ class TeamSelectionView(View):
                         log_action(f"Team selection decided by 2 staff: {option}")
                         break
 
-            # Check player majority (5+ of 8)
+            # Check majority (5+ votes) - count ALL votes (players + staff + admins)
+            # So 4 players + 1 staff = 5 votes = majority
             if not winning_method:
                 vote_counts = {}
                 for vote in self.votes.values():
@@ -835,7 +836,7 @@ class TeamSelectionView(View):
                 for option, count in vote_counts.items():
                     if count >= majority_needed:
                         winning_method = option
-                        log_action(f"Team selection decided by majority: {option}")
+                        log_action(f"Team selection decided by majority: {option} ({count}/{majority_needed} votes)")
                         break
 
             if not winning_method:

@@ -71,53 +71,57 @@ def find_optimal_teams(player_ids: list, player_mmrs: dict) -> tuple:
     return best_team1, best_team2, best_diff
 
 def has_admin_role():
-    """Check if user has admin role (Overlord only)"""
+    """Check if user has admin role (Overlord only, case-insensitive)"""
     async def predicate(interaction: discord.Interaction):
-        user_roles = [role.name for role in interaction.user.roles]
-        if any(role in ADMIN_ROLES for role in user_roles):
+        user_roles = [role.name.lower() for role in interaction.user.roles]
+        admin_roles_lower = [r.lower() for r in ADMIN_ROLES]
+        if any(role in admin_roles_lower for role in user_roles):
             return True
         await interaction.response.send_message("❌ You need Overlord role!", ephemeral=True)
         return False
     return app_commands.check(predicate)
 
 def has_staff_role():
-    """Check if user has staff role"""
+    """Check if user has staff role (case-insensitive)"""
     async def predicate(interaction: discord.Interaction):
-        user_roles = [role.name for role in interaction.user.roles]
-        if any(role in STAFF_ROLES for role in user_roles):
+        user_roles = [role.name.lower() for role in interaction.user.roles]
+        staff_roles_lower = [r.lower() for r in STAFF_ROLES]
+        if any(role in staff_roles_lower for role in user_roles):
             return True
         await interaction.response.send_message("❌ You need Overlord, Staff, or Server Support role!", ephemeral=True)
         return False
     return app_commands.check(predicate)
 
 def check_command_permission(command_name: str):
-    """Dynamic permission check based on COMMAND_PERMISSIONS overrides"""
+    """Dynamic permission check based on COMMAND_PERMISSIONS overrides (case-insensitive)"""
     async def predicate(interaction: discord.Interaction):
         global COMMAND_PERMISSIONS
-        
+
         # Reload permissions in case they changed
         load_command_permissions()
-        
-        user_roles = [role.name for role in interaction.user.roles]
+
+        user_roles = [role.name.lower() for role in interaction.user.roles]
         permission_level = COMMAND_PERMISSIONS.get(command_name, None)
-        
+
         # If no override, use default (allow - let the decorator handle it)
         if permission_level is None:
             return True
-        
+
         if permission_level == "all":
             return True
         elif permission_level == "staff":
-            if any(role in STAFF_ROLES for role in user_roles):
+            staff_roles_lower = [r.lower() for r in STAFF_ROLES]
+            if any(role in staff_roles_lower for role in user_roles):
                 return True
             await interaction.response.send_message("❌ You need Overlord, Staff, or Server Support role!", ephemeral=True)
             return False
         elif permission_level == "admin":
-            if any(role in ADMIN_ROLES for role in user_roles):
+            admin_roles_lower = [r.lower() for r in ADMIN_ROLES]
+            if any(role in admin_roles_lower for role in user_roles):
                 return True
             await interaction.response.send_message("❌ You need Overlord role!", ephemeral=True)
             return False
-        
+
         return True
     return app_commands.check(predicate)
 

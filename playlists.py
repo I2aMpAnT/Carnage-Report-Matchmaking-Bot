@@ -103,6 +103,7 @@ PLAYLIST_CONFIG = {
         "show_map_gametype": False,  # Selected in pregame
         "players_pick_only": True,  # Skip team selection vote, go straight to players pick
         "description": "Tournament 4v4 with pre-set teams (players pick only)",
+        "enabled": False,  # Tournament 1 is over - settings preserved for future tournaments
     },
 }
 
@@ -1224,6 +1225,14 @@ class PlaylistQueueView(View):
         user_id = interaction.user.id
         ps = self.playlist_state
 
+        # Check if playlist is enabled
+        if not ps.config.get("enabled", True):
+            await interaction.response.send_message(
+                f"**{ps.name}** is currently disabled.",
+                ephemeral=True
+            )
+            return
+
         if ps.paused:
             await interaction.response.send_message(
                 f"**{ps.name}** is currently paused.",
@@ -1246,34 +1255,7 @@ class PlaylistQueueView(View):
             await interaction.response.send_message("You're already in this queue!", ephemeral=True)
             return
 
-        # Check if in another queue (Head to Head is exempt from this rule)
-        if ps.playlist_type != PlaylistType.HEAD_TO_HEAD:
-            # Check MLG 4v4 queue
-            try:
-                from searchmatchmaking import queue_state as mlg_queue
-                if user_id in mlg_queue.queue:
-                    await interaction.response.send_message(
-                        "You're already in the **MLG 4v4** queue!\n"
-                        f"Leave that queue first before joining {ps.name}.",
-                        ephemeral=True
-                    )
-                    return
-            except:
-                pass
-
-            # Check other playlist queues (except Head to Head)
-            for other_ps in get_all_playlists():
-                if other_ps == ps:
-                    continue  # Skip self
-                if other_ps.playlist_type == PlaylistType.HEAD_TO_HEAD:
-                    continue  # Head to Head exempt
-                if user_id in other_ps.queue:
-                    await interaction.response.send_message(
-                        f"You're already in the **{other_ps.name}** queue!\n"
-                        f"Leave that queue first before joining {ps.name}.",
-                        ephemeral=True
-                    )
-                    return
+        # Allow joining multiple queues - players will be removed from other queues when matched
 
         if len(ps.queue) >= ps.max_players:
             await interaction.response.send_message("Queue is full!", ephemeral=True)
@@ -1416,34 +1398,7 @@ class PlaylistPingJoinView(View):
             await interaction.response.send_message("You're already in this queue!", ephemeral=True)
             return
 
-        # Check if in another queue (Head to Head is exempt from this rule)
-        if ps.playlist_type != PlaylistType.HEAD_TO_HEAD:
-            # Check MLG 4v4 queue
-            try:
-                from searchmatchmaking import queue_state as mlg_queue
-                if user_id in mlg_queue.queue:
-                    await interaction.response.send_message(
-                        "You're already in the **MLG 4v4** queue!\n"
-                        f"Leave that queue first before joining {ps.name}.",
-                        ephemeral=True
-                    )
-                    return
-            except:
-                pass
-
-            # Check other playlist queues (except Head to Head)
-            for other_ps in get_all_playlists():
-                if other_ps == ps:
-                    continue  # Skip self
-                if other_ps.playlist_type == PlaylistType.HEAD_TO_HEAD:
-                    continue  # Head to Head exempt
-                if user_id in other_ps.queue:
-                    await interaction.response.send_message(
-                        f"You're already in the **{other_ps.name}** queue!\n"
-                        f"Leave that queue first before joining {ps.name}.",
-                        ephemeral=True
-                    )
-                    return
+        # Allow joining multiple queues - players will be removed from other queues when matched
 
         if len(ps.queue) >= ps.max_players:
             await interaction.response.send_message("Queue is full!", ephemeral=True)
@@ -1589,6 +1544,13 @@ async def start_playlist_match(channel: discord.TextChannel, playlist_state: Pla
     log_action(f"Reset ping cooldown for {ps.name}")
 
     log_action(f"Starting {ps.name} match with {len(players)} players")
+
+    # Remove matched players from all other queues they might be in
+    try:
+        from searchmatchmaking import remove_players_from_other_queues
+        await remove_players_from_other_queues(channel.guild, players, current_queue=None)
+    except Exception as e:
+        log_action(f"Error removing players from other queues: {e}")
 
     # Clear queue
     ps.queue.clear()
@@ -2150,6 +2112,11 @@ def set_playlist_hidden(playlist_type: str, hidden: bool) -> bool:
 async def initialize_all_playlists(bot):
     """Initialize all playlist embeds, restoring active matches from JSON if any"""
     for ptype, config in PLAYLIST_CONFIG.items():
+        # Skip disabled playlists
+        if not config.get("enabled", True):
+            log_action(f"Skipping disabled playlist: {config['name']}")
+            continue
+
         channel = bot.get_channel(config["channel_id"])
         if channel:
             ps = get_playlist_state(ptype)

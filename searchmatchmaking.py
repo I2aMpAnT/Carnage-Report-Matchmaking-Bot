@@ -1,7 +1,7 @@
 # searchmatchmaking.py - MLG 4v4 Queue Management System
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.5.1"
+MODULE_VERSION = "1.6.0"
 
 import discord
 from discord.ui import View, Button
@@ -81,6 +81,44 @@ def log_action(message: str):
     with open('log.txt', 'a') as f:
         f.write(f"[{timestamp}] {message}\n")
     print(f"[LOG] {message}")
+
+
+async def remove_players_from_other_queues(guild: discord.Guild, player_ids: list, current_queue=None):
+    """Remove matched players from all other queues they might be in"""
+    removed_from = []
+
+    # Remove from other MLG 4v4 queue
+    other_qs = queue_state_2 if current_queue == queue_state else queue_state
+    for user_id in player_ids:
+        if user_id in other_qs.queue:
+            other_qs.queue.remove(user_id)
+            if user_id in other_qs.queue_join_times:
+                del other_qs.queue_join_times[user_id]
+            removed_from.append(f"MLG 4v4 {'(Restricted)' if other_qs == queue_state_2 else ''}")
+
+    # Remove from playlist queues
+    try:
+        from playlists import get_all_playlists
+        for ps in get_all_playlists():
+            for user_id in player_ids:
+                if user_id in ps.queue:
+                    ps.queue.remove(user_id)
+                    if user_id in ps.queue_join_times:
+                        del ps.queue_join_times[user_id]
+                    removed_from.append(ps.name)
+    except:
+        pass
+
+    if removed_from:
+        log_action(f"Removed {len(player_ids)} matched players from other queues: {', '.join(set(removed_from))}")
+
+    # Update other queue embeds
+    if other_qs.queue_channel:
+        try:
+            await update_queue_embed(other_qs.queue_channel, other_qs)
+        except:
+            pass
+
 
 async def auto_update_queue_times(qs=None):
     """Background task to update queue times every 10 seconds"""
@@ -499,34 +537,11 @@ class QueueView(View):
 
         # Check if already in this queue
         if user_id in qs.queue:
-            await interaction.response.send_message("You're already in matchmaking!", ephemeral=True)
+            await interaction.response.send_message("You're already in this queue!", ephemeral=True)
             return
 
-        # Check if already in the OTHER MLG 4v4 queue
-        other_qs = queue_state_2 if qs == queue_state else queue_state
-        if user_id in other_qs.queue:
-            await interaction.response.send_message(
-                "You're already in the other MLG 4v4 queue!\n"
-                "Leave that queue first before joining this one.",
-                ephemeral=True
-            )
-            return
-
-        # Check if in another playlist queue (except Head to Head which is exempt)
-        try:
-            from playlists import get_all_playlists, PlaylistType
-            for ps in get_all_playlists():
-                if ps.playlist_type == PlaylistType.HEAD_TO_HEAD:
-                    continue  # Head to Head exempt from 1 queue rule
-                if user_id in ps.queue:
-                    await interaction.response.send_message(
-                        f"You're already in the **{ps.name}** queue!\n"
-                        "Leave that queue first before joining MLG 4v4.",
-                        ephemeral=True
-                    )
-                    return
-        except:
-            pass
+        # Allow joining multiple queues - no blocking checks
+        # Players will be removed from other queues when they get matched
 
         # Check if queue is full
         if len(qs.queue) >= MAX_QUEUE_SIZE:
@@ -581,9 +596,12 @@ class QueueView(View):
             qs.locked_players = qs.queue[:]
             log_action(f"Queue full - locked {len(qs.locked_players)} players")
 
+            # Remove matched players from all other queues they might be in
+            await remove_players_from_other_queues(interaction.guild, qs.locked_players, current_queue=qs)
+
             from pregame import start_pregame
             await start_pregame(interaction.channel, mlg_queue_state=qs)
-    
+
     @discord.ui.button(label="Leave Matchmaking", style=discord.ButtonStyle.danger, custom_id="leave_queue")
     async def leave_queue(self, interaction: discord.Interaction, button: discord.ui.Button):
         user_id = interaction.user.id
@@ -831,18 +849,11 @@ class PingJoinView(View):
 
         # Check if already in this queue
         if user_id in qs.queue:
-            await interaction.response.send_message("You're already in matchmaking!", ephemeral=True)
+            await interaction.response.send_message("You're already in this queue!", ephemeral=True)
             return
 
-        # Check if already in the OTHER MLG 4v4 queue
-        other_qs = queue_state_2 if qs == queue_state else queue_state
-        if user_id in other_qs.queue:
-            await interaction.response.send_message(
-                "You're already in the other MLG 4v4 queue!\n"
-                "Leave that queue first before joining this one.",
-                ephemeral=True
-            )
-            return
+        # Allow joining multiple queues - no blocking checks
+        # Players will be removed from other queues when they get matched
 
         # Check if queue is full
         if len(qs.queue) >= MAX_QUEUE_SIZE:
@@ -898,6 +909,9 @@ class PingJoinView(View):
             qs.locked = True
             qs.locked_players = qs.queue[:]
             log_action(f"Queue full - locked {len(qs.locked_players)} players")
+
+            # Remove matched players from all other queues they might be in
+            await remove_players_from_other_queues(interaction.guild, qs.locked_players, current_queue=qs)
 
             if qs.queue_channel:
                 from pregame import start_pregame
