@@ -103,6 +103,7 @@ PLAYLIST_CONFIG = {
         "show_map_gametype": False,  # Selected in pregame
         "players_pick_only": True,  # Skip team selection vote, go straight to players pick
         "description": "Tournament 4v4 with pre-set teams (players pick only)",
+        "enabled": False,  # Tournament 1 is over - settings preserved for future tournaments
     },
 }
 
@@ -1224,6 +1225,14 @@ class PlaylistQueueView(View):
         user_id = interaction.user.id
         ps = self.playlist_state
 
+        # Check if playlist is enabled
+        if not ps.config.get("enabled", True):
+            await interaction.response.send_message(
+                f"**{ps.name}** is currently disabled.",
+                ephemeral=True
+            )
+            return
+
         if ps.paused:
             await interaction.response.send_message(
                 f"**{ps.name}** is currently paused.",
@@ -2103,6 +2112,11 @@ def set_playlist_hidden(playlist_type: str, hidden: bool) -> bool:
 async def initialize_all_playlists(bot):
     """Initialize all playlist embeds, restoring active matches from JSON if any"""
     for ptype, config in PLAYLIST_CONFIG.items():
+        # Skip disabled playlists
+        if not config.get("enabled", True):
+            log_action(f"Skipping disabled playlist: {config['name']}")
+            continue
+
         channel = bot.get_channel(config["channel_id"])
         if channel:
             ps = get_playlist_state(ptype)
