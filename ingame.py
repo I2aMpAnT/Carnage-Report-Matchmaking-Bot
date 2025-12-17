@@ -348,12 +348,13 @@ class SeriesView(View):
                 inline=False
             )
 
-        # Show end series votes
+        # Show end series votes with actual threshold info
         end_vote_count = len(self.end_voters)
+        majority_needed = (total_players // 2) + 1  # 5 for 8 players
 
         embed.add_field(
-            name=f"End Series Votes ({end_vote_count}/{total_players})",
-            value=f"{end_vote_count} vote{'s' if end_vote_count != 1 else ''} - Click END SERIES when your games are done",
+            name=f"End Series Votes ({end_vote_count}/{majority_needed} majority OR 2 staff)",
+            value=f"{end_vote_count} vote{'s' if end_vote_count != 1 else ''} - Need **{majority_needed} votes** OR **2 staff/admin** to end series",
             inline=False
         )
 
@@ -547,10 +548,11 @@ async def show_series_embed(channel: discord.TextChannel):
         inline=True
     )
 
-    # End series votes
+    # End series votes with actual threshold info
+    majority_needed = (total_players // 2) + 1  # 5 for 8 players
     embed.add_field(
-        name=f"End Series Votes (0/{total_players})",
-        value="0 votes - Click END SERIES when your games are done",
+        name=f"End Series Votes (0/{majority_needed} majority OR 2 staff)",
+        value=f"0 votes - Need **{majority_needed} votes** OR **2 staff/admin** to end series",
         inline=False
     )
 
