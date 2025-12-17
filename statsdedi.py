@@ -1,7 +1,7 @@
 # statsdedi.py - Vultr VPS Management for Stats Dedi
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.0.9"
+MODULE_VERSION = "1.1.0"
 
 import discord
 from discord import app_commands
@@ -183,6 +183,12 @@ async def destroy_instance(instance_id: str) -> dict:
     return instance
 
 
+async def restart_instance(instance_id: str) -> dict:
+    """Restart/reboot a VPS instance"""
+    await vultr_request("POST", f"/instances/{instance_id}/reboot")
+    return await get_instance(instance_id)
+
+
 async def get_instance_bandwidth(instance_id: str) -> dict:
     """Get bandwidth usage for billing estimation"""
     try:
@@ -207,10 +213,40 @@ async def wait_for_instance_ready(instance_id: str, user: discord.User, initial_
             power_status = instance.get("power_status", "")
             server_status = instance.get("server_status", "")
             main_ip = instance.get("main_ip", initial_ip)
+            label = instance.get("label", "Stats Dedi")
 
             # Log status for debugging - more frequent at start, then every 30 seconds
             if attempt < 6 or attempt % 6 == 0:
                 print(f"[DEDI] {instance_id[:8]}... attempt={attempt} status={status}, power={power_status}, server={server_status}, ip={main_ip}")
+
+            # Check for error state (stopped means error)
+            if power_status == "stopped" and status == "active":
+                print(f"[DEDI] ❌ Instance {instance_id[:8]}... is in ERROR state (stopped)!")
+
+                # Remove from pending
+                if instance_id in pending_creates:
+                    del pending_creates[instance_id]
+
+                try:
+                    embed = discord.Embed(
+                        title="⚠️ Stats Dedi Error",
+                        description=f"**{label}** has entered an error state and stopped unexpectedly.",
+                        color=discord.Color.red()
+                    )
+                    embed.add_field(name="IP Address", value=f"`{main_ip}`", inline=True)
+                    embed.add_field(name="Status", value="🔴 Stopped (Error)", inline=True)
+                    embed.add_field(name="Instance ID", value=f"`{instance_id[:8]}...`", inline=True)
+                    embed.set_footer(text="Would you like to restart this dedi?")
+
+                    # Send error DM with restart option
+                    view = ErrorRestartView(instance_id, user)
+                    await user.send(embed=embed, view=view)
+                    print(f"[DEDI] ❌ {user.name}'s StatsDedi stopped unexpectedly - Error DM sent")
+                except discord.Forbidden:
+                    print(f"[DEDI] ❌ Could not DM {user.name} - DMs disabled")
+                except Exception as e:
+                    print(f"[DEDI] ❌ Error sending error DM to {user.name}: {e}")
+                return
 
             # Check if ready - just need active and running
             if status == "active" and power_status == "running":
@@ -230,11 +266,10 @@ async def wait_for_instance_ready(instance_id: str, user: discord.User, initial_
 
                 try:
                     embed = discord.Embed(
-                        title=f"Stats Dedi Ready! - {user.display_name}",
-                        description=f"**{user.display_name}**'s Stats Dedi is now ready to use!",
+                        title=f"✅ Stats Dedi Ready!",
+                        description=f"**{label}** is now ready to use!",
                         color=discord.Color.green()
                     )
-                    embed.add_field(name="Requested By", value=user.mention, inline=True)
                     embed.add_field(name="IP Address", value=f"`{main_ip}`", inline=True)
                     embed.add_field(name="Password", value=f"`{DEDI_PASSWORD}`", inline=True)
                     embed.add_field(name="Spin-up Time", value=elapsed_str, inline=True)
@@ -257,8 +292,66 @@ async def wait_for_instance_ready(instance_id: str, user: discord.User, initial_
     print(f"[DEDI] ⏱️ TIMEOUT waiting for {instance_id[:8]}... after {max_attempts * 5} seconds")
 
 
+class ErrorRestartView(View):
+    """View for restarting a dedi from an error DM"""
+
+    def __init__(self, instance_id: str, user: discord.User):
+        super().__init__(timeout=300)  # 5 minute timeout
+        self.instance_id = instance_id
+        self.user = user
+
+    @discord.ui.button(label="Restart Dedi", style=discord.ButtonStyle.success, custom_id="error_restart")
+    async def restart_btn(self, interaction: discord.Interaction, button: Button):
+        # Only the original user can restart
+        if interaction.user.id != self.user.id:
+            await interaction.response.send_message("Only the original owner can restart this dedi.", ephemeral=True)
+            return
+
+        await interaction.response.defer()
+
+        try:
+            instance = await restart_instance(self.instance_id)
+            label = instance.get("label", "Stats Dedi")
+            main_ip = instance.get("main_ip", "Unknown")
+
+            embed = discord.Embed(
+                title="🔄 Stats Dedi Restarting",
+                description=f"**{label}** is being restarted.\n\nYou'll receive another message when it's ready.",
+                color=discord.Color.gold()
+            )
+            embed.add_field(name="IP Address", value=f"`{main_ip}`", inline=True)
+
+            await interaction.followup.send(embed=embed)
+
+            # Disable buttons
+            self.restart_btn.disabled = True
+            self.cancel_btn.disabled = True
+            await interaction.message.edit(view=self)
+
+            # Start background task to wait for ready after restart
+            print(f"[DEDI] 🔄 Restarting {label} (ID: {self.instance_id[:8]}...) - monitoring for ready state")
+            task = asyncio.create_task(wait_for_instance_ready(self.instance_id, self.user, main_ip, time.time()))
+            task.set_name(f"dedi_restart_{self.instance_id[:8]}")
+
+        except Exception as e:
+            await interaction.followup.send(f"Error restarting dedi: {e}")
+
+    @discord.ui.button(label="Ignore", style=discord.ButtonStyle.secondary, custom_id="error_ignore")
+    async def cancel_btn(self, interaction: discord.Interaction, button: Button):
+        if interaction.user.id != self.user.id:
+            await interaction.response.send_message("Only the original owner can dismiss this.", ephemeral=True)
+            return
+
+        await interaction.response.send_message("Ignored. Use `/statsdedi` to manage your dedis.", ephemeral=True)
+
+        # Disable buttons
+        self.restart_btn.disabled = True
+        self.cancel_btn.disabled = True
+        await interaction.message.edit(view=self)
+
+
 class StatsDediView(View):
-    """View with List, Create, and Destroy buttons"""
+    """View with List, Create, Restart, and Destroy buttons"""
 
     def __init__(self):
         super().__init__(timeout=300)  # 5 minute timeout
@@ -270,6 +363,10 @@ class StatsDediView(View):
     @discord.ui.button(label="Create Dedi", style=discord.ButtonStyle.success, custom_id="dedi_create")
     async def create_btn(self, interaction: discord.Interaction, button: Button):
         await self.handle_create(interaction)
+
+    @discord.ui.button(label="Restart Dedi", style=discord.ButtonStyle.secondary, custom_id="dedi_restart")
+    async def restart_btn(self, interaction: discord.Interaction, button: Button):
+        await self.handle_restart(interaction)
 
     @discord.ui.button(label="Destroy Dedi", style=discord.ButtonStyle.danger, custom_id="dedi_destroy")
     async def destroy_btn(self, interaction: discord.Interaction, button: Button):
@@ -433,6 +530,40 @@ class StatsDediView(View):
             print(f"[DEDI] ❌ Error in _create_dedi: {e}")
             await interaction.followup.send(f"Error creating dedi: {e}", ephemeral=True)
 
+    async def handle_restart(self, interaction: discord.Interaction):
+        """Restart StatsDedi - shows all dedis for selection"""
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            instances = await list_instances()
+            stats_dedis = [i for i in instances if "StatsDedi" in i.get("label", "")]
+
+            if not stats_dedis:
+                await interaction.followup.send(
+                    embed=discord.Embed(
+                        title="No Dedis Found",
+                        description="No Stats Dedis are currently running.",
+                        color=discord.Color.orange()
+                    ),
+                    ephemeral=True
+                )
+                return
+
+            # Show all dedis to all users
+            view = DediRestartSelectView(stats_dedis, interaction.user)
+            await interaction.followup.send(
+                embed=discord.Embed(
+                    title="Select Dedi to Restart",
+                    description="Choose which Stats Dedi to restart:",
+                    color=discord.Color.gold()
+                ),
+                view=view,
+                ephemeral=True
+            )
+
+        except Exception as e:
+            await interaction.followup.send(f"Error listing dedis: {e}", ephemeral=True)
+
     async def handle_destroy(self, interaction: discord.Interaction):
         """Destroy StatsDedi - shows all dedis for selection"""
         await interaction.response.defer(ephemeral=True)
@@ -564,6 +695,56 @@ class DediDestroySelectView(View):
         return callback
 
 
+class DediRestartSelectView(View):
+    """View to select which dedi to restart"""
+
+    def __init__(self, dedis: List[dict], user: discord.User):
+        super().__init__(timeout=60)
+        self.dedis = dedis
+        self.user = user
+
+        # Add a button for each dedi
+        for dedi in dedis[:5]:  # Max 5 buttons
+            status_emoji = "🟢" if dedi.get("power_status") == "running" else "🔴"
+            btn = Button(
+                label=f"{status_emoji} {dedi.get('label', 'Unknown')[:35]}",
+                style=discord.ButtonStyle.secondary,
+                custom_id=f"restart_{dedi.get('id')}"
+            )
+            btn.callback = self.make_callback(dedi)
+            self.add_item(btn)
+
+    def make_callback(self, dedi: dict):
+        async def callback(interaction: discord.Interaction):
+            await interaction.response.defer(ephemeral=True)
+
+            instance_id = dedi.get("id")
+            label = dedi.get("label", "Unknown")
+            main_ip = dedi.get("main_ip", "Unknown")
+
+            try:
+                await restart_instance(instance_id)
+
+                await interaction.followup.send(
+                    embed=discord.Embed(
+                        title="🔄 Stats Dedi Restarting",
+                        description=f"**{label}** is being restarted.\n\nYou'll receive a DM when it's ready.",
+                        color=discord.Color.gold()
+                    ),
+                    ephemeral=True
+                )
+                print(f"[DEDI] 🔄 {interaction.user.name} restarted {label} (ID: {instance_id})")
+
+                # Start background task to wait for ready after restart
+                task = asyncio.create_task(wait_for_instance_ready(instance_id, interaction.user, main_ip, time.time()))
+                task.set_name(f"dedi_restart_{instance_id[:8]}")
+
+            except Exception as e:
+                await interaction.followup.send(f"Error restarting dedi: {e}", ephemeral=True)
+
+        return callback
+
+
 class StatsDediCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -611,6 +792,7 @@ class StatsDediCog(commands.Cog):
             description=f"Manage Vultr VPS instances for stats processing.\n\n"
                         f"**List** - View all running Stats Dedis\n"
                         f"**Create** - Spin up a new Stats Dedi\n"
+                        f"**Restart** - Reboot a Stats Dedi\n"
                         f"**Destroy** - Shut down your Stats Dedi{avg_text}",
             color=discord.Color.blue()
         )
