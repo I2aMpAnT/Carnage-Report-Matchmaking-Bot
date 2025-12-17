@@ -700,30 +700,32 @@ class TeamSelectionView(View):
         player_list = "\n".join([f"<@{uid}>" for uid in self.players])
         embed.add_field(name=f"Players ({player_count})", value=player_list, inline=False)
 
-        # Show votes with counts
+        # Show votes with counts - only count PLAYER votes for majority display
         if self.votes:
-            # Count votes per option
-            vote_counts = {}
-            for vote in self.votes.values():
-                vote_counts[vote] = vote_counts.get(vote, 0) + 1
+            # Count player votes per option (only players in match count for majority)
+            player_vote_counts = {}
+            for uid, vote in self.votes.items():
+                if uid in self.players:
+                    player_vote_counts[vote] = player_vote_counts.get(vote, 0) + 1
 
-            # Format vote summary
+            # Format vote summary showing player votes toward majority
             option_labels = {"balanced": "Balanced (MMR)", "captains": "Captains Pick", "players_pick": "Players Pick"}
             vote_summary = []
             for option in ["balanced", "captains", "players_pick"]:
-                count = vote_counts.get(option, 0)
+                count = player_vote_counts.get(option, 0)
                 if count > 0:
                     label = option_labels.get(option, option)
-                    vote_summary.append(f"**{label}**: {count}/{majority_needed}")
+                    vote_summary.append(f"**{label}**: {count}/{majority_needed} player votes")
 
-            # Individual votes
+            # Individual votes (show all including staff/admin)
             vote_text = "\n".join([f"<@{uid}>: {vote}" for uid, vote in self.votes.items()])
 
             if self.test_mode and votes_mismatch:
                 embed.add_field(name=f"⚠️ Votes Don't Match ({len(self.votes)}/{len(self.testers)})", value=vote_text + "\n\n*Change your vote to match!*", inline=False)
             else:
-                embed.add_field(name=f"Vote Counts ({len(self.votes)} votes)", value="\n".join(vote_summary) if vote_summary else "No votes yet", inline=False)
-                embed.add_field(name="Individual Votes", value=vote_text, inline=False)
+                total_player_votes = sum(1 for uid in self.votes if uid in self.players)
+                embed.add_field(name=f"Player Votes ({total_player_votes}/{len(self.players)})", value="\n".join(vote_summary) if vote_summary else "No player votes yet", inline=False)
+                embed.add_field(name="All Votes (2 staff/admin agreeing also wins)", value=vote_text, inline=False)
 
         try:
             await self.pregame_message.edit(embed=embed, view=self)
@@ -825,17 +827,19 @@ class TeamSelectionView(View):
                         log_action(f"Team selection decided by 2 staff: {option}")
                         break
 
-            # Check player majority (5+ of 8)
+            # Check player majority (5+ of 8) - only count votes from actual players
             if not winning_method:
-                vote_counts = {}
-                for vote in self.votes.values():
-                    vote_counts[vote] = vote_counts.get(vote, 0) + 1
+                player_vote_counts = {}
+                for uid, vote in self.votes.items():
+                    # Only count votes from players in the match (not staff/admins who aren't playing)
+                    if uid in self.players:
+                        player_vote_counts[vote] = player_vote_counts.get(vote, 0) + 1
 
                 majority_needed = (len(self.players) // 2) + 1  # 5 for 8 players
-                for option, count in vote_counts.items():
+                for option, count in player_vote_counts.items():
                     if count >= majority_needed:
                         winning_method = option
-                        log_action(f"Team selection decided by majority: {option}")
+                        log_action(f"Team selection decided by player majority: {option} ({count}/{majority_needed})")
                         break
 
             if not winning_method:
