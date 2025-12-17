@@ -2,7 +2,7 @@
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 # Supports ALL playlists: MLG 4v4 (voting), Team Hardcore/Double Team (auto-balance), Head to Head (1v1)
 
-MODULE_VERSION = "1.6.6"
+MODULE_VERSION = "1.6.7"
 
 import discord
 from discord.ui import View, Button, Select
@@ -1221,31 +1221,92 @@ class CaptainDraftView(View):
         self.update_buttons()
 
     def update_buttons(self):
-        """Update player selection buttons"""
+        """Update player selection buttons - show all players with team colors"""
         self.clear_items()
 
-        if not self.remaining:
-            # Draft complete
-            return
+        # Row 0: Captains (always shown with team colors)
+        # Red captain
+        c1_member = self.guild.get_member(self.captain1) if self.guild else None
+        c1_name = c1_member.display_name if c1_member else f"Captain"
+        if len(c1_name) > 12:
+            c1_name = c1_name[:9] + "..."
+        c1_mmr = self.player_mmrs.get(self.captain1, 1500)
+        captain1_btn = Button(
+            label=f"🔴 {c1_name} - {c1_mmr}MMR (C)",
+            style=discord.ButtonStyle.danger,
+            custom_id=f"captain_{self.captain1}",
+            disabled=True,
+            row=0
+        )
+        self.add_item(captain1_btn)
 
-        # Create a button for each remaining player (max 6 players, fits in 2 rows of 3)
-        for i, uid in enumerate(self.remaining):
-            # Get player name
+        # Blue captain
+        c2_member = self.guild.get_member(self.captain2) if self.guild else None
+        c2_name = c2_member.display_name if c2_member else f"Captain"
+        if len(c2_name) > 12:
+            c2_name = c2_name[:9] + "..."
+        c2_mmr = self.player_mmrs.get(self.captain2, 1500)
+        captain2_btn = Button(
+            label=f"🔵 {c2_name} - {c2_mmr}MMR (C)",
+            style=discord.ButtonStyle.primary,
+            custom_id=f"captain_{self.captain2}",
+            disabled=True,
+            row=0
+        )
+        self.add_item(captain2_btn)
+
+        # Build button list for other players: picked players first, then available
+        button_order = []
+        # Add red team picks (excluding captain)
+        for uid in self.red_team:
+            if uid != self.captain1:
+                button_order.append((uid, 'RED'))
+        # Add blue team picks (excluding captain)
+        for uid in self.blue_team:
+            if uid != self.captain2:
+                button_order.append((uid, 'BLUE'))
+        # Add remaining (available)
+        for uid in self.remaining:
+            button_order.append((uid, None))
+
+        # Create buttons for each player (rows 1-2 for up to 6 players)
+        for i, (uid, team) in enumerate(button_order):
             member = self.guild.get_member(uid) if self.guild else None
             player_name = member.display_name if member else f"Player {uid}"
-            # Truncate name if too long (Discord button label limit is 80 chars)
             if len(player_name) > 15:
                 player_name = player_name[:12] + "..."
 
             mmr = self.player_mmrs.get(uid, 1500)
+            row = 1 + (i // 3)  # Start at row 1 (row 0 is captains)
 
-            button = Button(
-                label=f"{player_name} - {mmr}MMR",
-                style=discord.ButtonStyle.secondary,
-                custom_id=f"pick_{uid}",
-                row=i // 3  # 3 buttons per row
-            )
-            button.callback = self.make_pick_callback(uid)
+            if team == 'RED':
+                # Picked for red team - red button, disabled
+                button = Button(
+                    label=f"🔴 {player_name} - {mmr}MMR",
+                    style=discord.ButtonStyle.danger,
+                    custom_id=f"picked_{uid}",
+                    disabled=True,
+                    row=row
+                )
+            elif team == 'BLUE':
+                # Picked for blue team - blue button, disabled
+                button = Button(
+                    label=f"🔵 {player_name} - {mmr}MMR",
+                    style=discord.ButtonStyle.primary,
+                    custom_id=f"picked_{uid}",
+                    disabled=True,
+                    row=row
+                )
+            else:
+                # Available - grey button, clickable
+                button = Button(
+                    label=f"{player_name} - {mmr}MMR",
+                    style=discord.ButtonStyle.secondary,
+                    custom_id=f"pick_{uid}",
+                    row=row
+                )
+                button.callback = self.make_pick_callback(uid)
+
             self.add_item(button)
 
     def make_pick_callback(self, player_id: int):
@@ -1661,6 +1722,17 @@ async def finalize_teams(channel: discord.TextChannel, red_team: List[int], blue
             log_action("Updated queue embed after match started")
 
     await show_series_embed(channel)
+
+    # Ping all players in the series text channel so they know where it is
+    if series_text_channel:
+        all_players = red_team + blue_team
+        mentions = " ".join([f"<@{uid}>" for uid in all_players])
+        await series_text_channel.send(
+            f"🎮 **{series_label} has started!**\n\n"
+            f"{mentions}\n\n"
+            f"Use the buttons below to report game results."
+        )
+        log_action(f"Pinged all players in series text channel: {series_text_channel.name}")
 
     # Notify players who couldn't be moved to voice
     if players_not_moved and series_text_channel:
@@ -2367,6 +2439,15 @@ class PlaylistPlayersPickView(View):
 
         # Show match embed in the new text channel
         await show_playlist_match_embed(match_text_channel, match)
+
+        # Ping all players so they know where the match channel is
+        mentions = " ".join([f"<@{uid}>" for uid in self.players])
+        await match_text_channel.send(
+            f"🎮 **{self.match_label} has started!**\n\n"
+            f"{mentions}\n\n"
+            f"Use the buttons above to report game results."
+        )
+        log_action(f"Pinged all players in match text channel: {match_text_channel.name}")
 
         # Post to general chat
         await post_tournament_to_general(guild, match, red_captain_name, blue_captain_name)
