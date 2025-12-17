@@ -1,7 +1,7 @@
 # statsdedi.py - Vultr VPS Management for Stats Dedi
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.1.1"
+MODULE_VERSION = "1.1.2"
 
 import discord
 from discord import app_commands
@@ -307,15 +307,31 @@ async def wait_for_instance_ready(instance_id: str, user: discord.User, initial_
 
 
 class ErrorRestartView(View):
-    """View for restarting a dedi from an error DM"""
+    """View for restarting a dedi from an error DM - persistent so it works after bot restarts"""
 
     def __init__(self, instance_id: str, user: discord.User):
-        super().__init__(timeout=300)  # 5 minute timeout
+        super().__init__(timeout=None)  # Persistent - no timeout
         self.instance_id = instance_id
         self.user = user
 
-    @discord.ui.button(label="Restart Dedi", style=discord.ButtonStyle.success, custom_id="error_restart")
-    async def restart_btn(self, interaction: discord.Interaction, button: Button):
+        # Create buttons with unique custom_ids so they persist
+        restart_btn = Button(
+            label="Restart Dedi",
+            style=discord.ButtonStyle.success,
+            custom_id=f"error_restart_{instance_id}"
+        )
+        restart_btn.callback = self.restart_callback
+        self.add_item(restart_btn)
+
+        ignore_btn = Button(
+            label="Ignore",
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"error_ignore_{instance_id}"
+        )
+        ignore_btn.callback = self.ignore_callback
+        self.add_item(ignore_btn)
+
+    async def restart_callback(self, interaction: discord.Interaction):
         # Only the original user can restart
         if interaction.user.id != self.user.id:
             await interaction.response.send_message("Only the original owner can restart this dedi.", ephemeral=True)
@@ -337,10 +353,11 @@ class ErrorRestartView(View):
 
             await interaction.followup.send(embed=embed)
 
-            # Disable buttons
-            self.restart_btn.disabled = True
-            self.cancel_btn.disabled = True
-            await interaction.message.edit(view=self)
+            # Disable buttons by editing with no view
+            try:
+                await interaction.message.edit(view=None)
+            except:
+                pass
 
             # Start background task to wait for ready after restart
             print(f"[DEDI] 🔄 Restarting {label} (ID: {self.instance_id[:8]}...) - monitoring for ready state")
@@ -350,18 +367,18 @@ class ErrorRestartView(View):
         except Exception as e:
             await interaction.followup.send(f"Error restarting dedi: {e}")
 
-    @discord.ui.button(label="Ignore", style=discord.ButtonStyle.secondary, custom_id="error_ignore")
-    async def cancel_btn(self, interaction: discord.Interaction, button: Button):
+    async def ignore_callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.user.id:
             await interaction.response.send_message("Only the original owner can dismiss this.", ephemeral=True)
             return
 
         await interaction.response.send_message("Ignored. Use `/statsdedi` to manage your dedis.", ephemeral=True)
 
-        # Disable buttons
-        self.restart_btn.disabled = True
-        self.cancel_btn.disabled = True
-        await interaction.message.edit(view=self)
+        # Disable buttons by editing with no view
+        try:
+            await interaction.message.edit(view=None)
+        except:
+            pass
 
 
 class StatsDediView(View):
@@ -762,6 +779,57 @@ class DediRestartSelectView(View):
 class StatsDediCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+
+    @commands.Cog.listener()
+    async def on_interaction(self, interaction: discord.Interaction):
+        """Handle persistent error restart/ignore buttons even after bot restart"""
+        if interaction.type != discord.InteractionType.component:
+            return
+
+        custom_id = interaction.data.get("custom_id", "")
+
+        # Handle error restart buttons (format: error_restart_{instance_id})
+        if custom_id.startswith("error_restart_"):
+            instance_id = custom_id.replace("error_restart_", "")
+            await interaction.response.defer()
+
+            try:
+                instance = await restart_instance(instance_id)
+                label = instance.get("label", "Stats Dedi")
+                main_ip = instance.get("main_ip", "Unknown")
+
+                embed = discord.Embed(
+                    title="🔄 Stats Dedi Restarting",
+                    description=f"**{label}** is being restarted.\n\nYou'll receive another message when it's ready.",
+                    color=discord.Color.gold()
+                )
+                embed.add_field(name="IP Address", value=f"`{main_ip}`", inline=True)
+
+                await interaction.followup.send(embed=embed)
+
+                # Disable buttons by editing with no view
+                try:
+                    await interaction.message.edit(view=None)
+                except:
+                    pass
+
+                # Start background task to wait for ready after restart
+                print(f"[DEDI] 🔄 Restarting {label} (ID: {instance_id[:8]}...) - monitoring for ready state")
+                task = asyncio.create_task(wait_for_instance_ready(instance_id, interaction.user, main_ip, time.time()))
+                task.set_name(f"dedi_restart_{instance_id[:8]}")
+
+            except Exception as e:
+                await interaction.followup.send(f"Error restarting dedi: {e}")
+
+        # Handle error ignore buttons (format: error_ignore_{instance_id})
+        elif custom_id.startswith("error_ignore_"):
+            await interaction.response.send_message("Ignored. Use `/statsdedi` to manage your dedis.", ephemeral=True)
+
+            # Disable buttons by editing with no view
+            try:
+                await interaction.message.edit(view=None)
+            except:
+                pass
 
     @app_commands.command(name="statsdedi", description="Manage Stats Dedi VPS instances")
     @has_allowed_role()
