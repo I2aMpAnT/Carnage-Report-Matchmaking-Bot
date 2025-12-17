@@ -37,7 +37,7 @@ class QueueState:
         self.pregame_timer_task: Optional[asyncio.Task] = None
         self.pregame_timer_end: Optional[datetime] = None
         self.recent_action: Optional[dict] = None
-        self.test_mode: bool = False
+        self.test_mode: bool = False  # Kid mode is a crybaby
         self.test_team: Optional[str] = None
         self.testers: List[int] = []  # List of tester IDs who can vote in test mode
         self.pregame_vc_id: Optional[int] = None  # Temporary pregame voice channel
