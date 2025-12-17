@@ -1201,6 +1201,51 @@ class BalancedTeamsRejectView(View):
                 self.rejected = True
 
 
+class PickConfirmationView(View):
+    """View with Yes/No buttons to confirm player pick during captain draft"""
+    def __init__(self, draft_view: 'CaptainDraftView', selected_id: int, picker_id: int):
+        super().__init__(timeout=60)  # 60 second timeout
+        self.draft_view = draft_view
+        self.selected_id = selected_id
+        self.picker_id = picker_id
+
+        # Get player name for button labels
+        member = draft_view.guild.get_member(selected_id) if draft_view.guild else None
+        player_name = member.display_name if member else f"Player {selected_id}"
+
+        # Green Yes button
+        yes_button = Button(
+            label=f"✅ Yes, pick {player_name}",
+            style=discord.ButtonStyle.success,
+            custom_id=f"confirm_pick_{selected_id}"
+        )
+        yes_button.callback = self.confirm_callback
+        self.add_item(yes_button)
+
+        # Red No button
+        no_button = Button(
+            label="❌ No, go back",
+            style=discord.ButtonStyle.danger,
+            custom_id=f"cancel_pick_{selected_id}"
+        )
+        no_button.callback = self.cancel_callback
+        self.add_item(no_button)
+
+    async def confirm_callback(self, interaction: discord.Interaction):
+        """Handle confirmation - proceed with the pick"""
+        if interaction.user.id != self.picker_id:
+            await interaction.response.send_message("❌ Only the current picker can confirm!", ephemeral=True)
+            return
+        await self.draft_view.confirm_pick(interaction, self.selected_id)
+
+    async def cancel_callback(self, interaction: discord.Interaction):
+        """Handle cancellation - go back to draft view"""
+        if interaction.user.id != self.picker_id:
+            await interaction.response.send_message("❌ Only the current picker can cancel!", ephemeral=True)
+            return
+        await self.draft_view.cancel_pick(interaction)
+
+
 class CaptainDraftView(View):
     def __init__(self, captains: List[int], remaining: List[int], test_mode: bool = False, match_label: str = "Match", guild: discord.Guild = None):
         super().__init__(timeout=None)
@@ -1271,8 +1316,9 @@ class CaptainDraftView(View):
         for uid in self.blue_team:
             if uid != self.captain2:
                 button_order.append((uid, 'BLUE'))
-        # Add remaining (available)
-        for uid in self.remaining:
+        # Add remaining (available) sorted by MMR (highest to lowest)
+        sorted_remaining = sorted(self.remaining, key=lambda uid: self.player_mmrs.get(uid, 500), reverse=True)
+        for uid in sorted_remaining:
             button_order.append((uid, None))
 
         # Create buttons for each player (rows 1-2 for up to 6 players)
@@ -1318,15 +1364,46 @@ class CaptainDraftView(View):
     def make_pick_callback(self, player_id: int):
         """Create a callback for picking a specific player"""
         async def callback(interaction: discord.Interaction):
-            await self.pick_player(interaction, player_id)
+            await self.show_pick_confirmation(interaction, player_id)
         return callback
 
-    async def pick_player(self, interaction: discord.Interaction, selected_id: int):
-        """Handle player pick"""
+    async def show_pick_confirmation(self, interaction: discord.Interaction, selected_id: int):
+        """Show confirmation buttons before picking a player"""
         if interaction.user.id != self.current_picker:
             await interaction.response.send_message("❌ Not your turn!", ephemeral=True)
             return
 
+        # Get player name for confirmation message
+        member = self.guild.get_member(selected_id) if self.guild else None
+        player_name = member.display_name if member else f"Player {selected_id}"
+        mmr = self.player_mmrs.get(selected_id, 500)
+
+        # Determine which team they'll join
+        team_name = "Red" if self.current_picker == self.captain1 else "Blue"
+        team_emoji = "🔴" if team_name == "Red" else "🔵"
+
+        # Build confirmation embed
+        embed = discord.Embed(
+            title=f"Confirm Pick - {self.match_label}",
+            description=f"**<@{self.current_picker}>**, are you sure you want to pick:\n\n"
+                       f"**{team_emoji} {player_name}** ({mmr} MMR)\n\n"
+                       f"This player will join **{team_name} Team**.",
+            color=discord.Color.gold()
+        )
+
+        # Show current team status
+        red_text = "\n".join([f"<@{uid}>" for uid in self.red_team]) or "*Captain only*"
+        blue_text = "\n".join([f"<@{uid}>" for uid in self.blue_team]) or "*Captain only*"
+        embed.add_field(name=f"🔴 Red Team ({len(self.red_team)}/4)", value=red_text, inline=True)
+        embed.add_field(name=f"🔵 Blue Team ({len(self.blue_team)}/4)", value=blue_text, inline=True)
+
+        # Create confirmation view
+        confirm_view = PickConfirmationView(self, selected_id, self.current_picker)
+
+        await interaction.response.edit_message(embed=embed, view=confirm_view)
+
+    async def confirm_pick(self, interaction: discord.Interaction, selected_id: int):
+        """Actually execute the pick after confirmation"""
         # Add to current team
         if self.current_picker == self.captain1:
             self.red_team.append(selected_id)
@@ -1352,6 +1429,12 @@ class CaptainDraftView(View):
             self.update_buttons()
             embed = self.build_draft_embed()
             await interaction.response.edit_message(embed=embed, view=self)
+
+    async def cancel_pick(self, interaction: discord.Interaction):
+        """Cancel the pick and return to normal view"""
+        self.update_buttons()
+        embed = self.build_draft_embed()
+        await interaction.response.edit_message(embed=embed, view=self)
 
     def build_draft_embed(self, complete: bool = False) -> discord.Embed:
         """Build the captain draft embed showing current team status (MMR shown in buttons only)"""
