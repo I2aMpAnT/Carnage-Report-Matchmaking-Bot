@@ -1421,6 +1421,14 @@ class CaptainDraftView(View):
             await interaction.response.send_message("❌ Only captains can pick players!", ephemeral=True)
             return
 
+        # Check if captain's team is already full (4 players)
+        if picker_id == self.captain1 and len(self.red_team) >= 4:
+            await interaction.response.send_message("❌ Your team is already full!", ephemeral=True)
+            return
+        if picker_id == self.captain2 and len(self.blue_team) >= 4:
+            await interaction.response.send_message("❌ Your team is already full!", ephemeral=True)
+            return
+
         # Get player name and rank for confirmation message
         member = self.guild.get_member(selected_id) if self.guild else None
         player_name = member.display_name if member else f"Player {selected_id}"
