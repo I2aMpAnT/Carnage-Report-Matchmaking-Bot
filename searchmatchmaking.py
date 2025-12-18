@@ -1127,7 +1127,7 @@ async def create_queue_embed(channel: discord.TextChannel, qs=None):
     # Determine title based on queue type
     is_restricted = (qs == queue_state_2)
     title = "MLG 4v4 Matchmaking (Restricted)" if is_restricted else "MLG 4v4 Matchmaking"
-    description = "**We are looking for MLG 4v4 players!**\nClick **Join Matchmaking** to start searching for a Match!\n*Classic 4v4 with team selection vote*"
+    description = "*Classic 4v4 with team selection vote*"
     if is_restricted:
         description += f"\n\n⚠️ *Players with the {QUEUE_2_BANNED_ROLE} role cannot join this queue.*"
 
@@ -1246,13 +1246,8 @@ async def update_queue_embed(channel: discord.TextChannel, qs=None):
     # Create embed
     player_count = len(qs.queue)
 
-    # Build description with "looking for" message
-    needed = MAX_QUEUE_SIZE - player_count
-    base_desc = "**We are looking for MLG 4v4 players!**\n"
-    if player_count > 0:
-        desc = f"{base_desc}We have **{player_count}/{MAX_QUEUE_SIZE}** players searching. Need **{needed}** more to start!\n*Classic 4v4 with team selection vote*"
-    else:
-        desc = f"{base_desc}Click **Join Matchmaking** to start searching for a Match!\n*Classic 4v4 with team selection vote*"
+    # Build description
+    desc = "*Classic 4v4 with team selection vote*"
 
     if is_restricted:
         desc += f"\n\n⚠️ *Players with the {QUEUE_2_BANNED_ROLE} role cannot join this queue.*"
