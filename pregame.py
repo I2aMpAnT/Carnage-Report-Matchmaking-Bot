@@ -273,7 +273,7 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
         name=f"{series_label}-team-selection",
         category=text_category,
         topic=f"Team selection and match channel - {match_label}",
-        position=0  # Position at top of category (above voice channels)
+        position=998  # Position at bottom of category, just above voice channels
     )
     log_action(f"Created Series Text Channel: {series_text_channel.id}")
 
@@ -1797,7 +1797,7 @@ async def finalize_teams(channel: discord.TextChannel, red_team: List[int], blue
             name=series_text_channel_name,
             category=text_category,
             topic=f"Series channel for {series_label} - Auto-deleted when series ends",
-            position=0  # Position at top of category (above voice channels)
+            position=998  # Position at bottom of category, just above voice channels
         )
         log_action(f"Created series text channel (fallback): {series_text_channel.name}")
 
