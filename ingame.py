@@ -557,6 +557,13 @@ async def show_series_embed(channel: discord.TextChannel):
     view = SeriesView(series)
     series.series_message = await target_channel.send(embed=embed, view=view)
 
+    # Ping the match role (separate from embed)
+    match_number = series.match_number if hasattr(series, 'match_number') else 1
+    match_role_name = f"ActiveMLG4v4Match{match_number}"
+    match_role = discord.utils.get(channel.guild.roles, name=match_role_name)
+    if match_role:
+        await target_channel.send(match_role.mention)
+
     # Also send to general chat (no buttons)
     try:
         await update_general_chat_embed(channel.guild, series)

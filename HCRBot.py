@@ -192,6 +192,11 @@ async def on_ready():
         # Get the main guild for instant sync
         guild = bot.guilds[0] if bot.guilds else None
         if guild:
+            # Clear any old global commands (prevents duplicates)
+            bot.tree.clear_commands(guild=None)
+            await bot.tree.sync()  # Sync empty global commands
+            print(f'✅ Cleared global commands (using guild-specific only)')
+
             # Copy global commands to guild first, then sync
             bot.tree.copy_global_to(guild=guild)
             synced = await bot.tree.sync(guild=guild)
