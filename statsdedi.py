@@ -1,7 +1,7 @@
 # statsdedi.py - Vultr VPS Management for Stats Dedi
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.1.2"
+MODULE_VERSION = "1.2.0"
 
 import discord
 from discord import app_commands
@@ -39,6 +39,14 @@ active_dedis: Dict[str, int] = {}
 # Track spin-up times for averaging
 spinup_times: List[float] = []  # List of spin-up times in seconds
 pending_creates: Dict[str, float] = {}  # instance_id -> start_time
+
+# Hourly activity check settings
+ACTIVITY_CHECK_MINUTES = 60  # Send activity check DM every hour
+ACTIVITY_RESPONSE_MINUTES = 10  # Time user has to respond before auto-destroy
+
+# Track last activity confirmation for each dedi (instance_id -> timestamp)
+dedi_last_activity: Dict[str, float] = {}  # instance_id -> time.time()
+dedi_pending_checks: Dict[str, dict] = {}  # instance_id -> {"message_id": int, "prompt_time": float}
 
 
 def get_average_spinup_time() -> Optional[str]:
@@ -256,6 +264,9 @@ async def wait_for_instance_ready(instance_id: str, user: discord.User, initial_
 
                     await user.send(embed=embed)
                     print(f"[DEDI] ✅ {user.name}'s StatsDedi is ready at {main_ip} (took {elapsed_str}) - Ready DM sent!")
+
+                    # Start tracking activity for hourly checks
+                    dedi_last_activity[instance_id] = time.time()
                 except discord.Forbidden:
                     print(f"[DEDI] ❌ Could not DM {user.name} - DMs disabled")
                 except Exception as e:
@@ -360,6 +371,85 @@ class ErrorRestartView(View):
             await interaction.message.edit(view=None)
         except:
             pass
+
+
+class ActivityCheckView(View):
+    """View for hourly activity check DMs - persistent so it works after bot restarts"""
+
+    def __init__(self, instance_id: str, user_id: int):
+        super().__init__(timeout=None)  # Persistent - no timeout
+        self.instance_id = instance_id
+        self.user_id = user_id
+
+        # Create buttons with unique custom_ids so they persist
+        yes_btn = Button(
+            label="Yes, Still Using",
+            style=discord.ButtonStyle.success,
+            custom_id=f"activity_yes_{instance_id}"
+        )
+        yes_btn.callback = self.yes_callback
+        self.add_item(yes_btn)
+
+        destroy_btn = Button(
+            label="Destroy Dedi",
+            style=discord.ButtonStyle.danger,
+            custom_id=f"activity_destroy_{instance_id}"
+        )
+        destroy_btn.callback = self.destroy_callback
+        self.add_item(destroy_btn)
+
+    async def yes_callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This is not your dedi.", ephemeral=True)
+            return
+
+        # Reset activity timer
+        dedi_last_activity[self.instance_id] = time.time()
+
+        # Clear pending check
+        if self.instance_id in dedi_pending_checks:
+            del dedi_pending_checks[self.instance_id]
+
+        await interaction.response.edit_message(
+            content="✅ **Got it!** Your Stats Dedi will remain active. You'll be asked again in 1 hour.",
+            embed=None,
+            view=None
+        )
+        print(f"[DEDI] ✅ User confirmed still using dedi {self.instance_id[:8]}...")
+
+    async def destroy_callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This is not your dedi.", ephemeral=True)
+            return
+
+        await interaction.response.defer()
+
+        try:
+            instance = await destroy_instance(self.instance_id)
+            label = instance.get("label", "Stats Dedi")
+
+            # Clean up tracking
+            if self.instance_id in active_dedis:
+                del active_dedis[self.instance_id]
+            if self.instance_id in dedi_last_activity:
+                del dedi_last_activity[self.instance_id]
+            if self.instance_id in dedi_pending_checks:
+                del dedi_pending_checks[self.instance_id]
+
+            await interaction.followup.send(
+                f"🗑️ **{label}** has been destroyed. Thanks for using Stats Dedi!"
+            )
+
+            # Edit original message to remove buttons
+            try:
+                await interaction.message.edit(view=None)
+            except:
+                pass
+
+            print(f"[DEDI] 🗑️ User destroyed dedi {self.instance_id[:8]}... via activity check")
+
+        except Exception as e:
+            await interaction.followup.send(f"Error destroying dedi: {e}")
 
 
 class StatsDediView(View):
@@ -759,6 +849,111 @@ class DediRestartSelectView(View):
         return callback
 
 
+async def check_dedi_activity(bot):
+    """Background task to send hourly activity check DMs for active dedis"""
+    await asyncio.sleep(60)  # Wait 1 minute on startup before first check
+
+    while True:
+        try:
+            now = time.time()
+
+            # Check each active dedi
+            for instance_id, user_id in list(active_dedis.items()):
+                # Skip if there's already a pending check for this dedi
+                if instance_id in dedi_pending_checks:
+                    pending = dedi_pending_checks[instance_id]
+                    prompt_time = pending.get("prompt_time", 0)
+                    elapsed = now - prompt_time
+
+                    # Check if user didn't respond in time - auto destroy
+                    if elapsed >= ACTIVITY_RESPONSE_MINUTES * 60:
+                        print(f"[DEDI] ⏱️ No response to activity check for {instance_id[:8]}... - auto destroying")
+                        try:
+                            instance = await destroy_instance(instance_id)
+                            label = instance.get("label", "Stats Dedi")
+
+                            # Notify user
+                            user = bot.get_user(user_id)
+                            if user:
+                                try:
+                                    await user.send(
+                                        f"⏱️ **{label}** was automatically destroyed due to inactivity.\n\n"
+                                        f"You didn't respond to the activity check within {ACTIVITY_RESPONSE_MINUTES} minutes."
+                                    )
+                                except:
+                                    pass
+
+                            # Clean up tracking
+                            if instance_id in active_dedis:
+                                del active_dedis[instance_id]
+                            if instance_id in dedi_last_activity:
+                                del dedi_last_activity[instance_id]
+                            if instance_id in dedi_pending_checks:
+                                del dedi_pending_checks[instance_id]
+
+                            print(f"[DEDI] 🗑️ Auto-destroyed {label} (ID: {instance_id[:8]}...) due to no activity response")
+                        except Exception as e:
+                            print(f"[DEDI] ❌ Error auto-destroying {instance_id[:8]}...: {e}")
+                    continue
+
+                # Check if it's time to send activity check (1 hour since last activity)
+                last_activity = dedi_last_activity.get(instance_id, now)
+                elapsed = now - last_activity
+
+                if elapsed >= ACTIVITY_CHECK_MINUTES * 60:
+                    # Time to send activity check DM
+                    user = bot.get_user(user_id)
+                    if not user:
+                        try:
+                            user = await bot.fetch_user(user_id)
+                        except:
+                            continue
+
+                    try:
+                        # Get instance details for the DM
+                        instance = await get_instance(instance_id)
+                        if not instance:
+                            continue
+
+                        label = instance.get("label", "Stats Dedi")
+                        main_ip = instance.get("main_ip", "Unknown")
+
+                        embed = discord.Embed(
+                            title="⏰ Stats Dedi Activity Check",
+                            description=f"Are you still using **{label}**?\n\n"
+                                        f"If you don't respond within **{ACTIVITY_RESPONSE_MINUTES} minutes**, "
+                                        f"your dedi will be automatically destroyed to save costs.",
+                            color=discord.Color.orange()
+                        )
+                        embed.add_field(name="IP Address", value=f"`{main_ip}`", inline=True)
+                        embed.set_footer(text="Stats Dedis are billed hourly. Destroy when done to save money!")
+
+                        view = ActivityCheckView(instance_id, user_id)
+                        msg = await user.send(embed=embed, view=view)
+
+                        # Track pending check
+                        dedi_pending_checks[instance_id] = {
+                            "message_id": msg.id,
+                            "prompt_time": now
+                        }
+
+                        print(f"[DEDI] 📨 Sent activity check DM to {user.name} for {label}")
+
+                    except discord.Forbidden:
+                        print(f"[DEDI] ❌ Could not DM user {user_id} for activity check - DMs disabled")
+                    except Exception as e:
+                        print(f"[DEDI] ❌ Error sending activity check DM: {e}")
+
+            # Check every minute for more responsive timeout handling
+            await asyncio.sleep(60)
+
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            print(f"[DEDI] ❌ Error in activity check task: {e}")
+            await asyncio.sleep(60)
+
+
 class StatsDediCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -813,6 +1008,56 @@ class StatsDediCog(commands.Cog):
                 await interaction.message.edit(view=None)
             except:
                 pass
+
+        # Handle activity check "Yes" buttons (format: activity_yes_{instance_id})
+        elif custom_id.startswith("activity_yes_"):
+            instance_id = custom_id.replace("activity_yes_", "")
+
+            # Reset activity timer
+            dedi_last_activity[instance_id] = time.time()
+
+            # Clear pending check
+            if instance_id in dedi_pending_checks:
+                del dedi_pending_checks[instance_id]
+
+            await interaction.response.edit_message(
+                content="✅ **Got it!** Your Stats Dedi will remain active. You'll be asked again in 1 hour.",
+                embed=None,
+                view=None
+            )
+            print(f"[DEDI] ✅ User {interaction.user.name} confirmed still using dedi {instance_id[:8]}...")
+
+        # Handle activity check "Destroy" buttons (format: activity_destroy_{instance_id})
+        elif custom_id.startswith("activity_destroy_"):
+            instance_id = custom_id.replace("activity_destroy_", "")
+            await interaction.response.defer()
+
+            try:
+                instance = await destroy_instance(instance_id)
+                label = instance.get("label", "Stats Dedi")
+
+                # Clean up tracking
+                if instance_id in active_dedis:
+                    del active_dedis[instance_id]
+                if instance_id in dedi_last_activity:
+                    del dedi_last_activity[instance_id]
+                if instance_id in dedi_pending_checks:
+                    del dedi_pending_checks[instance_id]
+
+                await interaction.followup.send(
+                    f"🗑️ **{label}** has been destroyed. Thanks for using Stats Dedi!"
+                )
+
+                # Edit original message to remove buttons
+                try:
+                    await interaction.message.edit(view=None)
+                except:
+                    pass
+
+                print(f"[DEDI] 🗑️ User {interaction.user.name} destroyed dedi {instance_id[:8]}... via activity check")
+
+            except Exception as e:
+                await interaction.followup.send(f"Error destroying dedi: {e}")
 
     @app_commands.command(name="statsdedi", description="Manage Stats Dedi VPS instances")
     @has_allowed_role()
@@ -927,4 +1172,8 @@ class StatsDediCog(commands.Cog):
 async def setup(bot):
     """Setup function to add cog to bot"""
     await bot.add_cog(StatsDediCog(bot))
-    print(f"[DEDI] Stats Dedi module loaded (v{MODULE_VERSION})")
+
+    # Start background task for hourly activity checks
+    task = asyncio.create_task(check_dedi_activity(bot))
+    task.set_name("dedi_activity_check")
+    print(f"[DEDI] Stats Dedi module loaded (v{MODULE_VERSION}) - Activity check task started")
