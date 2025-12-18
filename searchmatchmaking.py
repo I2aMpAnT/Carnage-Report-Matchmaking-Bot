@@ -626,6 +626,7 @@ class QueueView(View):
         import STATSRANKS
         player_stats = STATSRANKS.get_existing_player_stats(user_id)
         has_mmr = player_stats and 'mmr' in player_stats
+        response_sent = False  # Track if we've already responded
 
         if not has_mmr:
             # Notify player they don't have MMR - they can still join but will get temp 500 MMR
@@ -635,6 +636,7 @@ class QueueView(View):
                 "A staff member has been notified to set your MMR.",
                 ephemeral=True
             )
+            response_sent = True
             # Send alert to general chat for staff
             GENERAL_CHANNEL_ID = 1403855176460406805
             general_channel = interaction.guild.get_channel(GENERAL_CHANNEL_ID)
@@ -702,9 +704,10 @@ class QueueView(View):
             state_manager.save_state()
         except:
             pass
-        
-        # Just defer and update - no message shown
-        await interaction.response.defer()
+
+        # Only defer if we haven't already responded (no MMR warning sent)
+        if not response_sent:
+            await interaction.response.defer()
         await update_queue_embed(interaction.channel, qs)
 
         # Update ping message if exists (only for primary queue)
