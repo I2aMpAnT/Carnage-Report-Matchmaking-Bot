@@ -39,8 +39,7 @@ JSON_FILES = {
     "double_team.json": "double_team.json",
     "head_to_head.json": "head_to_head.json",
     "testmatchhistory.json": "testmatchhistory.json",
-    # Stats and config
-    "MMR.json": "MMR.json",
+    # Stats and config (MMR.json excluded - local is always most recent)
     "gamestats.json": "gamestats.json",
     "queue_config.json": "queue_config.json",
     "xp_config.json": "xp_config.json",
