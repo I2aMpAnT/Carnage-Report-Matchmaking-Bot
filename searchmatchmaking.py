@@ -54,7 +54,7 @@ class QueueState:
         self.inactivity_timer_task: Optional[asyncio.Task] = None  # Background task for inactivity checks
         self.locked: bool = False  # Queue locked when full - prevents leaving
         self.locked_players: List[int] = []  # Players locked into current match
-        self.pregame_text_channel_id: Optional[int] = None  # Pregame text channel for team selection
+        self.series_text_channel_id: Optional[int] = None  # Series text channel (created early, renamed when teams set)
 
 # Global queue states - separate queues for each channel
 queue_state = QueueState()  # Primary MLG 4v4 queue
