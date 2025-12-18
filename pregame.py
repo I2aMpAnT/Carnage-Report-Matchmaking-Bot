@@ -727,12 +727,9 @@ class TeamSelectionView(View):
         """Update the embed to show current votes"""
         from searchmatchmaking import get_queue_progress_image
 
-        # Calculate majority threshold
-        majority_needed = (len(self.players) // 2) + 1  # 5 for 8 players
-
         embed = discord.Embed(
             title=f"Pregame Lobby - {self.match_label}",
-            description=f"Select your preferred team selection method:\n**{majority_needed} votes needed** for majority!",
+            description=f"Select your preferred team selection method:",
             color=discord.Color.gold()
         )
 
@@ -752,23 +749,22 @@ class TeamSelectionView(View):
             for vote in self.votes.values():
                 vote_counts[vote] = vote_counts.get(vote, 0) + 1
 
-            # Format vote summary
+            # Format vote summary (just show counts, threshold logged internally)
             option_labels = {"balanced": "Balanced (MMR)", "captains": "Captains Pick", "players_pick": "Players Pick"}
             vote_summary = []
             for option in ["balanced", "captains", "players_pick"]:
                 count = vote_counts.get(option, 0)
                 if count > 0:
                     label = option_labels.get(option, option)
-                    vote_summary.append(f"**{label}**: {count}/{majority_needed}")
+                    vote_summary.append(f"**{label}**: {count}")
 
             # Individual votes
             vote_text = "\n".join([f"<@{uid}>: {vote}" for uid, vote in self.votes.items()])
 
             if self.test_mode and votes_mismatch:
-                embed.add_field(name=f"⚠️ Votes Don't Match ({len(self.votes)}/{len(self.testers)})", value=vote_text + "\n\n*Change your vote to match!*", inline=False)
+                embed.add_field(name=f"⚠️ Votes Don't Match", value=vote_text + "\n\n*Change your vote to match!*", inline=False)
             else:
-                embed.add_field(name=f"Vote Counts ({len(self.votes)} total)", value="\n".join(vote_summary) if vote_summary else "No votes yet", inline=False)
-                embed.add_field(name="Individual Votes", value=vote_text, inline=False)
+                embed.add_field(name=f"Votes", value="\n".join(vote_summary) if vote_summary else "No votes yet", inline=False)
 
         try:
             await self.pregame_message.edit(embed=embed, view=self)
@@ -1120,9 +1116,8 @@ async def show_balanced_teams_confirmation(
 
         # Show reject votes
         reject_count = len(view.reject_votes)
-        majority_needed = (len(all_players) // 2) + 1  # 5 for 8 players
         embed.add_field(
-            name=f"Reject Votes ({reject_count}/{majority_needed} needed)",
+            name=f"Reject Votes ({reject_count})",
             value=", ".join([f"<@{uid}>" for uid in view.reject_votes]) if view.reject_votes else "None",
             inline=False
         )
