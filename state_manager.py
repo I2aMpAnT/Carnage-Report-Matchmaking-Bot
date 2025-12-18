@@ -28,8 +28,12 @@ def save_state():
         "saved_at": datetime.now().isoformat(),
         "queue": queue_state.queue,
         "queue_join_times": {
-            str(uid): time.isoformat() 
+            str(uid): time.isoformat()
             for uid, time in queue_state.queue_join_times.items()
+        },
+        "last_activity_times": {
+            str(uid): time.isoformat()
+            for uid, time in queue_state.last_activity_times.items()
         },
         "test_mode": queue_state.test_mode,
         "test_team": queue_state.test_team,
@@ -108,7 +112,12 @@ async def restore_state(bot) -> bool:
         queue_join_times = state.get("queue_join_times", {})
         for uid_str, time_str in queue_join_times.items():
             queue_state.queue_join_times[int(uid_str)] = datetime.fromisoformat(time_str)
-        
+
+        # Restore activity times (for inactivity check)
+        last_activity_times = state.get("last_activity_times", {})
+        for uid_str, time_str in last_activity_times.items():
+            queue_state.last_activity_times[int(uid_str)] = datetime.fromisoformat(time_str)
+
         log_state(f"Restored queue: {len(queue_state.queue)} players")
         
         # Restore series if active

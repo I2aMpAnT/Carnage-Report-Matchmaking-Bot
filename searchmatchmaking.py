@@ -32,7 +32,8 @@ def get_queue_progress_image(player_count: int) -> str:
 class QueueState:
     def __init__(self):
         self.queue: List[int] = []
-        self.queue_join_times: dict = {}  # user_id -> datetime
+        self.queue_join_times: dict = {}  # user_id -> datetime (when they joined, for display)
+        self.last_activity_times: dict = {}  # user_id -> datetime (for inactivity check)
         self.current_series = None
         self.pregame_timer_task: Optional[asyncio.Task] = None
         self.pregame_timer_end: Optional[datetime] = None
@@ -95,6 +96,8 @@ async def remove_players_from_other_queues(guild: discord.Guild, player_ids: lis
             other_qs.queue.remove(user_id)
             if user_id in other_qs.queue_join_times:
                 del other_qs.queue_join_times[user_id]
+            if user_id in other_qs.last_activity_times:
+                del other_qs.last_activity_times[user_id]
             removed_from.append(f"MLG 4v4 {'(Restricted)' if other_qs == queue_state_2 else ''}")
 
     # Remove from playlist queues
@@ -292,10 +295,10 @@ class InactivityConfirmView(View):
 
         self.responded = True
 
-        # Reset their join time to give them another hour
+        # Reset their activity time to give them another hour (keep original join time for display)
         if self.user_id in self.qs.queue:
-            self.qs.queue_join_times[self.user_id] = datetime.now()
-            log_action(f"User {interaction.user.display_name} confirmed to stay in queue - timer reset")
+            self.qs.last_activity_times[self.user_id] = datetime.now()
+            log_action(f"User {interaction.user.display_name} confirmed to stay in queue - activity timer reset")
 
             # Clean up pending confirmation
             await cleanup_inactivity_messages(self.user_id, self.qs)
@@ -389,6 +392,8 @@ async def remove_inactive_user(guild: discord.Guild, user_id: int, qs=None, reas
             time_in_queue = f"{total_minutes}m"
 
         del qs.queue_join_times[user_id]
+    if user_id in qs.last_activity_times:
+        del qs.last_activity_times[user_id]
 
     # Get member for display name and role removal
     member = guild.get_member(user_id)
@@ -400,7 +405,8 @@ async def remove_inactive_user(guild: discord.Guild, user_id: int, qs=None, reas
         'type': 'leave',
         'user_id': user_id,
         'name': display_name,
-        'time_in_queue': time_in_queue
+        'time_in_queue': time_in_queue,
+        'reason': reason  # e.g., "AFK" for inactivity kicks
     }
 
     queue_name = "MLG 4v4 (Restricted)" if qs == queue_state_2 else "MLG 4v4"
@@ -547,14 +553,14 @@ async def check_queue_inactivity(qs=None):
                         is_in_afk = guild.afk_channel and voice_state.channel == guild.afk_channel
                         # Exempt if: in voice, NOT in AFK channel, and NOT deafened
                         if not is_in_afk and not voice_state.self_deaf and not voice_state.deaf:
-                            # User is active in voice - reset their timer silently
-                            qs.queue_join_times[user_id] = now
+                            # User is active in voice - reset their activity timer (not join time)
+                            qs.last_activity_times[user_id] = now
                             continue
 
-                # Check how long they've been in queue
-                join_time = qs.queue_join_times.get(user_id)
-                if join_time:
-                    elapsed = now - join_time
+                # Check how long since last activity (for inactivity kick)
+                last_activity = qs.last_activity_times.get(user_id)
+                if last_activity:
+                    elapsed = now - last_activity
                     if elapsed.total_seconds() >= INACTIVITY_CHECK_MINUTES * 60:
                         # User has been in queue for 1 hour - send prompt
                         if qs.queue_channel:
@@ -680,6 +686,7 @@ class QueueView(View):
         # Add to queue with join time
         qs.queue.append(user_id)
         qs.queue_join_times[user_id] = datetime.now()
+        qs.last_activity_times[user_id] = datetime.now()  # For inactivity check
 
         # Clear recent action if this user was the one who left (they're rejoining)
         if qs.recent_action and qs.recent_action.get('user_id') == user_id:
@@ -728,6 +735,7 @@ class QueueView(View):
             # The locked_players list holds the 8 matched players
             qs.queue.clear()
             qs.queue_join_times.clear()
+            qs.last_activity_times.clear()
             qs.locked = False  # Queue is no longer locked - only players are locked
             log_action("Queue cleared - ready for new players")
 
@@ -771,6 +779,8 @@ class QueueView(View):
                 time_in_queue = f"{seconds}s"
 
             del qs.queue_join_times[user_id]
+        if user_id in qs.last_activity_times:
+            del qs.last_activity_times[user_id]
 
         qs.queue.remove(user_id)
         qs.recent_action = {
@@ -1002,6 +1012,7 @@ class PingJoinView(View):
         # Add to queue
         qs.queue.append(user_id)
         qs.queue_join_times[user_id] = datetime.now()
+        qs.last_activity_times[user_id] = datetime.now()  # For inactivity check
 
         # Clear recent action if this user was the one who left (they're rejoining)
         if qs.recent_action and qs.recent_action.get('user_id') == user_id:
@@ -1049,6 +1060,7 @@ class PingJoinView(View):
             # Clear the queue immediately so new players can join the next queue
             qs.queue.clear()
             qs.queue_join_times.clear()
+            qs.last_activity_times.clear()
             qs.locked = False
             log_action("Queue cleared - ready for new players")
 
@@ -1269,10 +1281,13 @@ async def update_queue_embed(channel: discord.TextChannel, qs=None):
         action = qs.recent_action
         if action['type'] == 'leave':
             time_str = action.get('time_in_queue', '')
+            reason = action.get('reason', '')
+            # Show AFK annotation if kicked for inactivity
+            afk_tag = " - AFK" if reason and "inactivity" in reason.lower() else ""
             if time_str:
                 embed.add_field(
                     name="Recent Activity",
-                    value=f"**{action['name']}** left matchmaking (was in queue {time_str})",
+                    value=f"**{action['name']}** left matchmaking ({time_str}{afk_tag})",
                     inline=False
                 )
             else:
