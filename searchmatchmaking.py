@@ -880,16 +880,9 @@ class QueueView(View):
         # Create view with join button - pass the queue state
         view = PingJoinView(qs)
 
-        # Send @here first, then delete it (pings but disappears)
-        here_msg = await general_channel.send("@here")
-        await asyncio.sleep(0.1)
-        try:
-            await here_msg.delete()
-        except:
-            pass
-
-        # Send embed
-        qs.ping_message = await general_channel.send(embed=content_embed, view=view)
+        # Send message with @here ping and player count
+        ping_text = f"@here **{queue_title}** - We have **{current_count}/{MAX_QUEUE_SIZE}** players! Need **{needed}** more to start!"
+        qs.ping_message = await general_channel.send(content=ping_text, embed=content_embed, view=view)
 
         queue_name = "MLG 4v4 (Restricted)" if qs == queue_state_2 else "MLG 4v4"
         log_action(f"{interaction.user.display_name} pinged general chat for {queue_name} ({current_count}/{MAX_QUEUE_SIZE})")
