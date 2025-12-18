@@ -54,7 +54,7 @@ class QueueState:
         self.inactivity_timer_task: Optional[asyncio.Task] = None  # Background task for inactivity checks
         self.locked: bool = False  # Queue locked when full - prevents leaving
         self.locked_players: List[int] = []  # Players locked into current match
-        self.pregame_text_channel_id: Optional[int] = None  # Pregame text channel for team selection
+        self.series_text_channel_id: Optional[int] = None  # Series text channel (created early, renamed when teams set)
 
 # Global queue states - separate queues for each channel
 queue_state = QueueState()  # Primary MLG 4v4 queue
@@ -862,15 +862,13 @@ class QueueView(View):
             except:
                 pass
 
-        # Create embed with progress image (no banner)
+        # Create embed with progress image (no title, simple description)
         current_count = len(qs.queue)
-        needed = MAX_QUEUE_SIZE - current_count
 
-        # Use different title for restricted queue
+        # Use different name for restricted queue
         queue_title = "MLG 4v4 (Restricted)" if qs == queue_state_2 else "MLG 4v4"
         content_embed = discord.Embed(
-            title=f"{queue_title} - Players Needed!",
-            description=f"We have **{current_count}/{MAX_QUEUE_SIZE}** players searching.\nNeed **{needed}** more to start!",
+            description=f"**{queue_title}** - We have **{current_count}/{MAX_QUEUE_SIZE}** players searching!",
             color=discord.Color.green()
         )
         progress_image = get_queue_progress_image(current_count)

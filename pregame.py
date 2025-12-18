@@ -215,17 +215,19 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
     qs.last_ping_time = None
     log_action("Reset ping cooldown for new match")
 
-    # Use test players if provided, otherwise use queue
-    players = test_players if test_players else qs.queue[:]
+    # Use test players if provided, otherwise use locked_players (set by searchmatchmaking when queue fills)
+    players = test_players if test_players else qs.locked_players[:]
+
+    # Verify we have players
+    if not players:
+        log_action("ERROR: No players found for pregame! Check queue/locked_players.")
+        return
 
     # Lock these players into the match - they cannot leave
     if not test_mode:
         qs.locked = True
-        qs.locked_players = players[:]
-        # Clear the queue so new players can queue for the next match
-        qs.queue.clear()
-        qs.queue_join_times.clear()
-        log_action(f"Queue locked with {len(players)} players, queue reset for next match")
+        # locked_players already set by searchmatchmaking.py when queue fills
+        log_action(f"Pregame starting with {len(players)} locked players")
 
     # Store test mode info
     qs.test_mode = test_mode
@@ -254,6 +256,30 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
         next_num = Series.match_counter + 1
         match_label = f"Match {next_num}"
 
+    # Create series text channel early - will be renamed with MMRs when teams are set
+    text_category_id = 1403855141857337501  # Matchmaking category
+    text_category = guild.get_channel(text_category_id)
+
+    # Determine series label for channel name
+    from ingame import Series as SeriesClass
+    if test_mode:
+        series_num = SeriesClass.test_counter + 1
+        series_label = f"test-{series_num}"
+    else:
+        series_num = SeriesClass.match_counter + 1
+        series_label = f"series-{series_num}"
+
+    series_text_channel = await guild.create_text_channel(
+        name=f"{series_label}-team-selection",
+        category=text_category,
+        topic=f"Team selection and match channel - {match_label}",
+        position=999  # Position at bottom of category
+    )
+    log_action(f"Created Series Text Channel: {series_text_channel.id}")
+
+    # Store the series text channel ID for later use
+    qs.series_text_channel_id = series_text_channel.id
+
     pregame_vc = await guild.create_voice_channel(
         name=f"Pregame Lobby - {match_label}",
         category=category,
@@ -261,22 +287,11 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
     )
     log_action(f"Created Pregame Lobby VC: {pregame_vc.id}")
 
-    # Create pregame text channel in the Matchmaking category
-    text_category_id = 1403855141857337501  # Matchmaking category
-    text_category = guild.get_channel(text_category_id)
-    pregame_text_channel = await guild.create_text_channel(
-        name=f"Pregame - {match_label}",
-        category=text_category,
-        topic=f"Team selection for {match_label} - Auto-deleted when teams are finalized"
-    )
-    log_action(f"Created Pregame Text Channel: {pregame_text_channel.id}")
-
     # Store the pregame VC ID for cleanup later
     qs.pregame_vc_id = pregame_vc.id
-    qs.pregame_text_channel_id = pregame_text_channel.id
 
-    # Use pregame text channel for all team selection
-    target_channel = pregame_text_channel
+    # Use series text channel for all team selection
+    target_channel = series_text_channel
 
     # Move players to pregame lobby
     # In TEST MODE: Only move the 2 testers, not the random fillers
@@ -712,12 +727,9 @@ class TeamSelectionView(View):
         """Update the embed to show current votes"""
         from searchmatchmaking import get_queue_progress_image
 
-        # Calculate majority threshold
-        majority_needed = (len(self.players) // 2) + 1  # 5 for 8 players
-
         embed = discord.Embed(
             title=f"Pregame Lobby - {self.match_label}",
-            description=f"Select your preferred team selection method:\n**{majority_needed} votes needed** for majority!",
+            description=f"Select your preferred team selection method:",
             color=discord.Color.gold()
         )
 
@@ -737,23 +749,22 @@ class TeamSelectionView(View):
             for vote in self.votes.values():
                 vote_counts[vote] = vote_counts.get(vote, 0) + 1
 
-            # Format vote summary
+            # Format vote summary (just show counts, threshold logged internally)
             option_labels = {"balanced": "Balanced (MMR)", "captains": "Captains Pick", "players_pick": "Players Pick"}
             vote_summary = []
             for option in ["balanced", "captains", "players_pick"]:
                 count = vote_counts.get(option, 0)
                 if count > 0:
                     label = option_labels.get(option, option)
-                    vote_summary.append(f"**{label}**: {count}/{majority_needed}")
+                    vote_summary.append(f"**{label}**: {count}")
 
             # Individual votes
             vote_text = "\n".join([f"<@{uid}>: {vote}" for uid, vote in self.votes.items()])
 
             if self.test_mode and votes_mismatch:
-                embed.add_field(name=f"⚠️ Votes Don't Match ({len(self.votes)}/{len(self.testers)})", value=vote_text + "\n\n*Change your vote to match!*", inline=False)
+                embed.add_field(name=f"⚠️ Votes Don't Match", value=vote_text + "\n\n*Change your vote to match!*", inline=False)
             else:
-                embed.add_field(name=f"Vote Counts ({len(self.votes)} total)", value="\n".join(vote_summary) if vote_summary else "No votes yet", inline=False)
-                embed.add_field(name="Individual Votes", value=vote_text, inline=False)
+                embed.add_field(name=f"Votes", value="\n".join(vote_summary) if vote_summary else "No votes yet", inline=False)
 
         try:
             await self.pregame_message.edit(embed=embed, view=self)
@@ -1105,9 +1116,8 @@ async def show_balanced_teams_confirmation(
 
         # Show reject votes
         reject_count = len(view.reject_votes)
-        majority_needed = (len(all_players) // 2) + 1  # 5 for 8 players
         embed.add_field(
-            name=f"Reject Votes ({reject_count}/{majority_needed} needed)",
+            name=f"Reject Votes ({reject_count})",
             value=", ".join([f"<@{uid}>" for uid in view.reject_votes]) if view.reject_votes else "None",
             inline=False
         )
@@ -1762,19 +1772,36 @@ async def finalize_teams(channel: discord.TextChannel, red_team: List[int], blue
     temp_series = Series(red_team, blue_team, test_mode, testers=testers)
     series_label = temp_series.series_number  # "Series 1" or "Test 1"
 
-    # Create series text channel - format: "Series # - 🔴avgmmr vs 🔵avgmmr"
-    # Use a text channel category (Matchmaking category)
-    text_category_id = 1403855141857337501  # Matchmaking category
-    text_category = guild.get_channel(text_category_id)
+    # Get the existing series text channel (created in start_pregame) and rename it with MMRs
+    series_text_channel = None
+    if hasattr(queue_state, 'series_text_channel_id') and queue_state.series_text_channel_id:
+        series_text_channel = guild.get_channel(queue_state.series_text_channel_id)
 
-    series_text_channel_name = f"{series_label} - 🔴{red_avg_mmr} vs 🔵{blue_avg_mmr}"
-    series_text_channel = await guild.create_text_channel(
-        name=series_text_channel_name,
-        category=text_category,
-        topic=f"Series channel for {series_label} - Auto-deleted when series ends"
-    )
+    if series_text_channel:
+        # Rename existing channel with MMRs
+        series_text_channel_name = f"{series_label}-🔴{red_avg_mmr}-vs-🔵{blue_avg_mmr}"
+        try:
+            await series_text_channel.edit(
+                name=series_text_channel_name,
+                topic=f"Series channel for {series_label} - Auto-deleted when series ends"
+            )
+            log_action(f"Renamed series text channel to: {series_text_channel_name}")
+        except Exception as e:
+            log_action(f"Failed to rename series text channel: {e}")
+    else:
+        # Fallback: create new channel if none exists (shouldn't happen normally)
+        text_category_id = 1403855141857337501  # Matchmaking category
+        text_category = guild.get_channel(text_category_id)
+        series_text_channel_name = f"{series_label}-🔴{red_avg_mmr}-vs-🔵{blue_avg_mmr}"
+        series_text_channel = await guild.create_text_channel(
+            name=series_text_channel_name,
+            category=text_category,
+            topic=f"Series channel for {series_label} - Auto-deleted when series ends",
+            position=999  # Position at bottom of category
+        )
+        log_action(f"Created series text channel (fallback): {series_text_channel.name}")
+
     temp_series.text_channel_id = series_text_channel.id
-    log_action(f"Created series text channel: {series_text_channel.name} (ID: {series_text_channel.id})")
     
     # Get the Voice Channels category (not the Matchmaking category)
     voice_category_id = 1403916181554860112
@@ -1868,17 +1895,9 @@ async def finalize_teams(channel: discord.TextChannel, red_team: List[int], blue
                 pass
         queue_state.pregame_vc_id = None
 
-    # Delete the pregame text channel (team selection is done)
-    if hasattr(queue_state, 'pregame_text_channel_id') and queue_state.pregame_text_channel_id:
-        pregame_text = guild.get_channel(queue_state.pregame_text_channel_id)
-        if pregame_text:
-            try:
-                await pregame_text.delete()
-                log_action("Deleted Pregame Text Channel")
-            except:
-                pass
-        queue_state.pregame_text_channel_id = None
-    
+    # Clear the series text channel ID from queue state (now owned by the series)
+    queue_state.series_text_channel_id = None
+
     # Assign the series we created earlier and set VC IDs
     queue_state.current_series = temp_series
     queue_state.current_series.red_vc_id = red_vc.id
