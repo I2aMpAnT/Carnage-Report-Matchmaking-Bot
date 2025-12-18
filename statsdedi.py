@@ -249,6 +249,7 @@ async def wait_for_instance_ready(instance_id: str, user: discord.User, initial_
                         color=discord.Color.green()
                     )
                     embed.add_field(name="IP Address", value=f"`{main_ip}`", inline=True)
+                    embed.add_field(name="Username", value="`Administrator`", inline=True)
                     embed.add_field(name="Password", value=f"`{DEDI_PASSWORD}`", inline=True)
                     embed.add_field(name="Spin-up Time", value=elapsed_str, inline=True)
                     embed.set_footer(text="Connect via Remote Desktop (RDP)")
@@ -509,18 +510,20 @@ class StatsDediView(View):
             if main_ip:
                 try:
                     avg_time = get_average_spinup_time()
-                    estimate_text = f"Average spin-up time: {avg_time}" if avg_time else "This usually takes 1-3 minutes."
+                    avg_time_text = avg_time if avg_time else "~2 minutes"
 
                     dm_embed = discord.Embed(
                         title=f"Stats Dedi Creating - {interaction.user.display_name}",
-                        description=f"**{interaction.user.display_name}**'s Stats Dedi is being set up. {estimate_text}",
+                        description=f"**{interaction.user.display_name}**'s Stats Dedi is being set up.",
                         color=discord.Color.gold()
                     )
                     dm_embed.add_field(name="Requested By", value=interaction.user.mention, inline=True)
                     dm_embed.add_field(name="IP Address", value=f"`{main_ip}`", inline=True)
+                    dm_embed.add_field(name="Username", value="`Administrator`", inline=True)
                     dm_embed.add_field(name="Password", value=f"`{DEDI_PASSWORD}`", inline=True)
-                    dm_embed.add_field(name="Status", value="🟡 Setting up...", inline=False)
-                    dm_embed.set_footer(text="You'll receive another message when it's ready!")
+                    dm_embed.add_field(name="Avg Spin-up Time", value=avg_time_text, inline=True)
+                    dm_embed.add_field(name="Status", value="🟡 Setting up...", inline=True)
+                    dm_embed.set_footer(text="Connect via Remote Desktop (RDP) - You'll receive another message when it's ready!")
 
                     await interaction.user.send(embed=dm_embed)
                     print(f"[DEDI] 📤 Creating {user_label} (ID: {instance_id}) - IP: {main_ip} - Initial DM sent")
