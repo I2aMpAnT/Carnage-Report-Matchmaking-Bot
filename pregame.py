@@ -215,17 +215,19 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
     qs.last_ping_time = None
     log_action("Reset ping cooldown for new match")
 
-    # Use test players if provided, otherwise use queue
-    players = test_players if test_players else qs.queue[:]
+    # Use test players if provided, otherwise use locked_players (set by searchmatchmaking when queue fills)
+    players = test_players if test_players else qs.locked_players[:]
+
+    # Verify we have players
+    if not players:
+        log_action("ERROR: No players found for pregame! Check queue/locked_players.")
+        return
 
     # Lock these players into the match - they cannot leave
     if not test_mode:
         qs.locked = True
-        qs.locked_players = players[:]
-        # Clear the queue so new players can queue for the next match
-        qs.queue.clear()
-        qs.queue_join_times.clear()
-        log_action(f"Queue locked with {len(players)} players, queue reset for next match")
+        # locked_players already set by searchmatchmaking.py when queue fills
+        log_action(f"Pregame starting with {len(players)} locked players")
 
     # Store test mode info
     qs.test_mode = test_mode
