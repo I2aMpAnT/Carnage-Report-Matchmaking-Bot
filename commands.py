@@ -4422,6 +4422,58 @@ python3 populate_stats.py'''
         await interaction.response.send_message("Cleared posted PRs list. Run /postprs to repost all.", ephemeral=True)
         log_action(f"[GITHUB] {interaction.user.name} cleared posted PRs list")
 
+    @bot.tree.command(name="deletemessages", description="[ADMIN] Delete all messages in a channel")
+    @app_commands.describe(channel_id="The ID of the channel to clear")
+    @has_admin_role()
+    async def delete_messages(interaction: discord.Interaction, channel_id: str):
+        """Delete all messages in a specified channel"""
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            # Parse channel ID
+            cid = int(channel_id.strip())
+            channel = interaction.guild.get_channel(cid)
+
+            if not channel:
+                await interaction.followup.send(f"❌ Channel with ID `{channel_id}` not found.", ephemeral=True)
+                return
+
+            if not isinstance(channel, discord.TextChannel):
+                await interaction.followup.send(f"❌ Channel must be a text channel.", ephemeral=True)
+                return
+
+            # Delete messages in batches
+            deleted_count = 0
+            await interaction.followup.send(f"🗑️ Deleting messages in {channel.mention}...", ephemeral=True)
+
+            while True:
+                # Fetch messages (up to 100 at a time)
+                messages = [msg async for msg in channel.history(limit=100)]
+                if not messages:
+                    break
+
+                # Delete messages
+                for msg in messages:
+                    try:
+                        await msg.delete()
+                        deleted_count += 1
+                    except discord.NotFound:
+                        pass  # Already deleted
+                    except discord.Forbidden:
+                        pass  # No permission
+                    except Exception:
+                        pass
+
+                await asyncio.sleep(1)  # Rate limit protection
+
+            log_action(f"{interaction.user.display_name} deleted {deleted_count} messages from #{channel.name}")
+            await interaction.followup.send(f"✅ Deleted **{deleted_count}** messages from {channel.mention}", ephemeral=True)
+
+        except ValueError:
+            await interaction.followup.send(f"❌ Invalid channel ID: `{channel_id}`", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+
     # Start background task after all commands are registered
     if not check_new_prs.is_running():
         check_new_prs.start()
