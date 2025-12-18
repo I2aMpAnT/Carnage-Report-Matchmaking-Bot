@@ -1802,27 +1802,27 @@ async def finalize_teams(channel: discord.TextChannel, red_team: List[int], blue
         log_action(f"Created series text channel (fallback): {series_text_channel.name}")
 
     temp_series.text_channel_id = series_text_channel.id
-    
-    # Get the Voice Channels category (not the Matchmaking category)
-    voice_category_id = 1403916181554860112
-    category = guild.get_channel(voice_category_id)
-    
+
+    # Create Red/Blue voice channels in Matchmaking category (below text channel)
+    text_category_id = 1403855141857337501  # Matchmaking category
+    mm_category = guild.get_channel(text_category_id)
+
     # Create Red Team voice channel with team emoji and series number (no "Red" text)
     red_vc_name = f"🔴 {series_label}"
     red_vc = await guild.create_voice_channel(
         name=red_vc_name,
-        category=category,
+        category=mm_category,
         user_limit=None,
-        position=999  # Position at bottom
+        position=999  # Position at bottom (below text channel)
     )
 
     # Create Blue Team voice channel with team emoji and series number (no "Blue" text)
     blue_vc_name = f"🔵 {series_label}"
     blue_vc = await guild.create_voice_channel(
         name=blue_vc_name,
-        category=category,
+        category=mm_category,
         user_limit=None,
-        position=999  # Position at bottom
+        position=999  # Position at bottom (below text channel)
     )
 
     # Move players from pregame (or any voice channel) to their team channels

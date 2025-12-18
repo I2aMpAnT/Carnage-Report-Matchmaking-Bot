@@ -217,34 +217,14 @@ async def wait_for_instance_ready(instance_id: str, user: discord.User, initial_
             if attempt < 6 or attempt % 6 == 0:
                 print(f"[DEDI] {instance_id[:8]}... attempt={attempt} status={status}, power={power_status}, server={server_status}, ip={main_ip}")
 
-            # Check for error state (stopped means error)
-            if power_status == "stopped" and status == "active":
-                print(f"[DEDI] ❌ Instance {instance_id[:8]}... is in ERROR state (stopped)!")
-
-                # Remove from pending
-                if instance_id in pending_creates:
-                    del pending_creates[instance_id]
-
-                try:
-                    embed = discord.Embed(
-                        title="⚠️ Stats Dedi Error",
-                        description=f"**{label}** has entered an error state and stopped unexpectedly.",
-                        color=discord.Color.red()
-                    )
-                    embed.add_field(name="IP Address", value=f"`{main_ip}`", inline=True)
-                    embed.add_field(name="Status", value="🔴 Stopped (Error)", inline=True)
-                    embed.add_field(name="Instance ID", value=f"`{instance_id[:8]}...`", inline=True)
-                    embed.set_footer(text="Would you like to restart this dedi?")
-
-                    # Send error DM with restart option
-                    view = ErrorRestartView(instance_id, user)
-                    await user.send(embed=embed, view=view)
-                    print(f"[DEDI] ❌ {user.name}'s StatsDedi stopped unexpectedly - Error DM sent")
-                except discord.Forbidden:
-                    print(f"[DEDI] ❌ Could not DM {user.name} - DMs disabled")
-                except Exception as e:
-                    print(f"[DEDI] ❌ Error sending error DM to {user.name}: {e}")
-                return
+            # Stopped status is temporary during spin-up - just log and continue waiting
+            if power_status == "stopped":
+                # Only log occasionally to avoid spam
+                if attempt % 6 == 0:
+                    elapsed = time.time() - start_time
+                    avg_time = get_average_spinup_time()
+                    avg_msg = f" (avg: {avg_time})" if avg_time else ""
+                    print(f"[DEDI] ⏳ Instance {instance_id[:8]}... is stopped (temporary) - waiting for running... ({int(elapsed)}s elapsed{avg_msg})")
 
             # Check if ready - just need active and running
             if status == "active" and power_status == "running":
