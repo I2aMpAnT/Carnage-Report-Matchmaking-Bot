@@ -527,7 +527,8 @@ async def end_series(series_view_or_channel, channel: discord.TextChannel = None
         try:
             from searchmatchmaking import remove_active_match_roles
             all_match_players = series.red_team + series.blue_team
-            await remove_active_match_roles(channel.guild, all_match_players, "MLG4v4", series.match_number)
+            playlist_name = getattr(series, 'playlist_name', 'MLG4v4')
+            await remove_active_match_roles(channel.guild, all_match_players, playlist_name, series.match_number)
         except Exception as e:
             log_action(f"Failed to remove active match roles: {e}")
 

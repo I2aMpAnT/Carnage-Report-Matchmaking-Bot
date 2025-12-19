@@ -57,10 +57,13 @@ class QueueState:
         self.locked_players: List[int] = []  # Players locked into current match
         self.series_text_channel_id: Optional[int] = None  # Series text channel (created early, renamed when teams set)
         self.pending_match_number: Optional[int] = None  # Match number assigned when queue fills (for early role assignment)
+        self.playlist_name: str = "MLG4v4"  # Playlist name for dynamic role naming
 
 # Global queue states - separate queues for each channel
 queue_state = QueueState()  # Primary MLG 4v4 queue
+queue_state.playlist_name = "MLG4v4"
 queue_state_2 = QueueState()  # Second MLG 4v4 queue (with banned role restriction)
+queue_state_2.playlist_name = "MLG4v4"
 
 def get_queue_state(channel_id: int):
     """Get the appropriate queue state based on channel ID"""
@@ -750,7 +753,7 @@ class QueueView(View):
             log_action(f"Assigned pending match number: {next_match_number}")
 
             # Add active match roles to locked players immediately
-            await add_active_match_roles(interaction.guild, qs.locked_players, "MLG4v4", next_match_number)
+            await add_active_match_roles(interaction.guild, qs.locked_players, qs.playlist_name, next_match_number)
 
             # Remove matched players from all other queues they might be in
             await remove_players_from_other_queues(interaction.guild, qs.locked_players, current_queue=qs)
@@ -1086,7 +1089,7 @@ class PingJoinView(View):
             log_action(f"Assigned pending match number: {next_match_number}")
 
             # Add active match roles to locked players immediately
-            await add_active_match_roles(interaction.guild, qs.locked_players, "MLG4v4", next_match_number)
+            await add_active_match_roles(interaction.guild, qs.locked_players, qs.playlist_name, next_match_number)
 
             # Remove matched players from all other queues they might be in
             await remove_players_from_other_queues(interaction.guild, qs.locked_players, current_queue=qs)

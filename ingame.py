@@ -141,11 +141,12 @@ class Series:
     match_counter = 0  # For real matches
     test_counter = 0   # For test matches
 
-    def __init__(self, red_team: List[int], blue_team: List[int], test_mode: bool = False, testers: List[int] = None, pending_match_number: int = None):
+    def __init__(self, red_team: List[int], blue_team: List[int], test_mode: bool = False, testers: List[int] = None, pending_match_number: int = None, playlist_name: str = "MLG4v4"):
         from datetime import datetime
 
         self.test_mode = test_mode
         self.testers = testers or []  # List of user IDs who can vote in test mode
+        self.playlist_name = playlist_name  # For dynamic role naming
 
         if test_mode:
             Series.test_counter += 1
