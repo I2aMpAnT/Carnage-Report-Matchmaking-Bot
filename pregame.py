@@ -561,7 +561,7 @@ async def handle_pregame_timeout(
     match_label: str
 ):
     """Handle timeout - cancel match and return players to postgame lobby if not all players showed up"""
-    from searchmatchmaking import queue_state, create_queue_embed
+    from searchmatchmaking import queue_state, create_queue_embed, QUEUE_CHANNEL_ID
 
     guild = channel.guild
     pregame_vc = guild.get_channel(pregame_vc_id)
@@ -570,7 +570,7 @@ async def handle_pregame_timeout(
     POSTGAME_CARNAGE_REPORT_ID = 1424845826362048643
     postgame_vc = guild.get_channel(POSTGAME_CARNAGE_REPORT_ID)
 
-    # Move all players currently in the pregame VC to postgame lobby
+    # Move all members from pregame VC to postgame (including spectators)
     if pregame_vc and postgame_vc:
         for member in list(pregame_vc.members):
             try:
@@ -578,6 +578,43 @@ async def handle_pregame_timeout(
                 log_action(f"Moved {member.name} to Postgame Carnage Report (no-show cancellation)")
             except Exception as e:
                 log_action(f"Failed to move {member.name} to postgame: {e}")
+
+    # Also move members from red/blue team VCs if they exist (including spectators/listeners)
+    series = queue_state.current_series if hasattr(queue_state, 'current_series') else None
+    if series and postgame_vc:
+        # Red team VC
+        red_vc_id = getattr(series, 'red_vc_id', None)
+        if red_vc_id:
+            red_vc = guild.get_channel(red_vc_id)
+            if red_vc:
+                for member in list(red_vc.members):
+                    try:
+                        await member.move_to(postgame_vc)
+                        log_action(f"Moved {member.name} from Red VC to Postgame (cancellation)")
+                    except Exception as e:
+                        log_action(f"Failed to move {member.name} from Red VC: {e}")
+                try:
+                    await red_vc.delete(reason="Match cancelled")
+                    log_action(f"Deleted Red team VC for {match_label}")
+                except Exception as e:
+                    log_action(f"Failed to delete Red VC: {e}")
+
+        # Blue team VC
+        blue_vc_id = getattr(series, 'blue_vc_id', None)
+        if blue_vc_id:
+            blue_vc = guild.get_channel(blue_vc_id)
+            if blue_vc:
+                for member in list(blue_vc.members):
+                    try:
+                        await member.move_to(postgame_vc)
+                        log_action(f"Moved {member.name} from Blue VC to Postgame (cancellation)")
+                    except Exception as e:
+                        log_action(f"Failed to move {member.name} from Blue VC: {e}")
+                try:
+                    await blue_vc.delete(reason="Match cancelled")
+                    log_action(f"Deleted Blue team VC for {match_label}")
+                except Exception as e:
+                    log_action(f"Failed to delete Blue VC: {e}")
 
     # Delete the pregame VC
     if pregame_vc:
@@ -600,26 +637,36 @@ async def handle_pregame_timeout(
     embed.add_field(name="⚠️ No-Shows", value=no_show_mentions, inline=False)
     embed.add_field(name="✅ Players Who Showed Up", value=showed_mentions, inline=False)
 
-    # Delete the old pregame message and post cancellation
-    try:
-        await pregame_message.delete()
-    except:
-        pass
+    # Post cancellation to queue channel (not the series channel we're about to delete)
+    queue_channel = guild.get_channel(QUEUE_CHANNEL_ID)
+    if queue_channel:
+        all_player_pings = " ".join([f"<@{uid}>" for uid in players])
+        await queue_channel.send(content=all_player_pings, embed=embed)
 
-    # Ping all players so they get notified
-    all_player_pings = " ".join([f"<@{uid}>" for uid in players])
-    await channel.send(content=all_player_pings, embed=embed)
     log_action(f"{match_label} cancelled due to no-shows: {[guild.get_member(uid).display_name if guild.get_member(uid) else str(uid) for uid in no_show_players]}")
+
+    # Delete the series text channel
+    series_channel_id = getattr(queue_state, 'series_text_channel_id', None)
+    if series_channel_id:
+        series_channel = guild.get_channel(series_channel_id)
+        if series_channel:
+            try:
+                await series_channel.delete(reason="Match cancelled - not all players showed up")
+                log_action(f"Deleted series text channel for {match_label}")
+            except Exception as e:
+                log_action(f"Failed to delete series text channel: {e}")
 
     # Reset queue state
     queue_state.locked = False
     queue_state.locked_players.clear()
     queue_state.pregame_vc_id = None
     queue_state.pregame_message = None
+    queue_state.series_text_channel_id = None
     queue_state.test_mode = False
 
-    # Recreate the queue embed
-    await create_queue_embed(channel)
+    # Recreate the queue embed in the queue channel
+    if queue_channel:
+        await create_queue_embed(queue_channel)
 
 
 async def check_no_shows(channel: discord.TextChannel, view, no_show_players: List[int], pregame_vc_id: int, timeout_seconds: int):
