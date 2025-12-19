@@ -570,7 +570,7 @@ async def handle_pregame_timeout(
     POSTGAME_CARNAGE_REPORT_ID = 1424845826362048643
     postgame_vc = guild.get_channel(POSTGAME_CARNAGE_REPORT_ID)
 
-    # Move all players currently in the pregame VC to postgame lobby
+    # Move all members from pregame VC to postgame (including spectators)
     if pregame_vc and postgame_vc:
         for member in list(pregame_vc.members):
             try:
@@ -578,6 +578,43 @@ async def handle_pregame_timeout(
                 log_action(f"Moved {member.name} to Postgame Carnage Report (no-show cancellation)")
             except Exception as e:
                 log_action(f"Failed to move {member.name} to postgame: {e}")
+
+    # Also move members from red/blue team VCs if they exist (including spectators/listeners)
+    series = queue_state.current_series if hasattr(queue_state, 'current_series') else None
+    if series and postgame_vc:
+        # Red team VC
+        red_vc_id = getattr(series, 'red_vc_id', None)
+        if red_vc_id:
+            red_vc = guild.get_channel(red_vc_id)
+            if red_vc:
+                for member in list(red_vc.members):
+                    try:
+                        await member.move_to(postgame_vc)
+                        log_action(f"Moved {member.name} from Red VC to Postgame (cancellation)")
+                    except Exception as e:
+                        log_action(f"Failed to move {member.name} from Red VC: {e}")
+                try:
+                    await red_vc.delete(reason="Match cancelled")
+                    log_action(f"Deleted Red team VC for {match_label}")
+                except Exception as e:
+                    log_action(f"Failed to delete Red VC: {e}")
+
+        # Blue team VC
+        blue_vc_id = getattr(series, 'blue_vc_id', None)
+        if blue_vc_id:
+            blue_vc = guild.get_channel(blue_vc_id)
+            if blue_vc:
+                for member in list(blue_vc.members):
+                    try:
+                        await member.move_to(postgame_vc)
+                        log_action(f"Moved {member.name} from Blue VC to Postgame (cancellation)")
+                    except Exception as e:
+                        log_action(f"Failed to move {member.name} from Blue VC: {e}")
+                try:
+                    await blue_vc.delete(reason="Match cancelled")
+                    log_action(f"Deleted Blue team VC for {match_label}")
+                except Exception as e:
+                    log_action(f"Failed to delete Blue VC: {e}")
 
     # Delete the pregame VC
     if pregame_vc:
