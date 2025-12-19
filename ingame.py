@@ -141,7 +141,7 @@ class Series:
     match_counter = 0  # For real matches
     test_counter = 0   # For test matches
 
-    def __init__(self, red_team: List[int], blue_team: List[int], test_mode: bool = False, testers: List[int] = None):
+    def __init__(self, red_team: List[int], blue_team: List[int], test_mode: bool = False, testers: List[int] = None, pending_match_number: int = None):
         from datetime import datetime
 
         self.test_mode = test_mode
@@ -152,9 +152,16 @@ class Series:
             self.match_number = Series.test_counter
             self.series_number = f"Test {Series.test_counter}"
         else:
-            Series.match_counter += 1
-            self.match_number = Series.match_counter
-            self.series_number = f"Series {Series.match_counter}"
+            # Use pending match number if provided (roles already assigned), otherwise increment
+            if pending_match_number:
+                self.match_number = pending_match_number
+                # Make sure match_counter is at least this value
+                if Series.match_counter < pending_match_number:
+                    Series.match_counter = pending_match_number
+            else:
+                Series.match_counter += 1
+                self.match_number = Series.match_counter
+            self.series_number = f"Series {self.match_number}"
 
         self.red_team = red_team
         self.blue_team = blue_team
