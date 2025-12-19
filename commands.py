@@ -895,24 +895,44 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                 with open(history_file, 'r') as f:
                     history = json.load(f)
 
-                # Find match by match number
+                # Get matches list from history object
+                matches = history.get("matches", [])
+                if not matches:
+                    await interaction.followup.send(f"❌ No matches found in {playlist_name} history!", ephemeral=True)
+                    return
+
+                # Find match by match_id (not match_number)
                 found_idx = None
                 found_match = None
-                for i, match in enumerate(history):
-                    if match.get('match_number') == match_number:
+                for i, match in enumerate(matches):
+                    if match.get('match_id') == match_number:
                         found_idx = i
                         found_match = match
                         break
 
                 if found_idx is None:
-                    await interaction.followup.send(f"❌ Match #{match_number} not found in {playlist_name} history!", ephemeral=True)
+                    available = [m.get('match_id') for m in matches if m.get('match_id')]
+                    if available:
+                        await interaction.followup.send(
+                            f"❌ Match #{match_number} not found in {playlist_name} history!\n"
+                            f"Available match IDs: {', '.join(map(str, sorted(available)))}",
+                            ephemeral=True
+                        )
+                    else:
+                        await interaction.followup.send(f"❌ Match #{match_number} not found in {playlist_name} history!", ephemeral=True)
                     return
 
-                result = found_match.get('result', 'Unknown')
-                timestamp = found_match.get('timestamp', 'Unknown')
+                result = found_match.get('winner', 'Unknown')
+                timestamp = found_match.get('end_time', found_match.get('timestamp', 'Unknown'))
 
-                # Delete the match
-                history.pop(found_idx)
+                # Delete the match from matches list
+                matches.pop(found_idx)
+                history["matches"] = matches
+
+                # Update total count
+                if "total_ranked_matches" in history and history["total_ranked_matches"] > 0:
+                    history["total_ranked_matches"] -= 1
+
                 with open(history_file, 'w') as f:
                     json.dump(history, f, indent=2)
 
