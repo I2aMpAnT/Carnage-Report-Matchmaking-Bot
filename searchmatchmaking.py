@@ -129,13 +129,13 @@ async def add_active_match_roles(guild: discord.Guild, player_ids: list, playlis
     """
     Add active matchmaking roles to players when they're locked into a match.
     - Removes SearchingMatchmaking role
-    - Adds Active{playlist} role (e.g., ActiveMLG4v4) - playlist-specific
-    - Adds Active{playlist}Match{#} role (e.g., ActiveMLG4v4Match1) - match-specific
+    - Adds Active{playlist} role (e.g., ActiveMLG4v4) - for pinging all active matches in playlist
+    - Adds {playlist}Match{#} role (e.g., MLG4v4Match1) - for pinging specific match
     """
     # Clean playlist name for role (remove spaces)
     clean_playlist = playlist_name.replace(" ", "").replace("_", "")
     playlist_role_name = f"Active{clean_playlist}"
-    match_role_name = f"Active{clean_playlist}Match{match_number}"
+    match_role_name = f"{clean_playlist}Match{match_number}"
 
     # Get or create playlist-specific role (e.g., ActiveMLG4v4)
     playlist_role = discord.utils.get(guild.roles, name=playlist_role_name)
@@ -150,7 +150,7 @@ async def add_active_match_roles(guild: discord.Guild, player_ids: list, playlis
         except Exception as e:
             log_action(f"Failed to create {playlist_role_name} role: {e}")
 
-    # Create match-specific role (e.g., ActiveMLG4v4Match1)
+    # Create match-specific role (e.g., MLG4v4Match1)
     match_role = discord.utils.get(guild.roles, name=match_role_name)
     if not match_role:
         try:
@@ -196,12 +196,12 @@ async def remove_active_match_roles(guild: discord.Guild, player_ids: list, play
     """
     Remove active matchmaking roles from players when series ends or is cancelled.
     - Removes Active{playlist} role (only if no other active matches in that playlist)
-    - Removes and deletes the Active{playlist}Match{#} role
+    - Removes and deletes the {playlist}Match{#} role
     """
     # Clean playlist name for role
     clean_playlist = playlist_name.replace(" ", "").replace("_", "")
     playlist_role_name = f"Active{clean_playlist}"
-    match_role_name = f"Active{clean_playlist}Match{match_number}"
+    match_role_name = f"{clean_playlist}Match{match_number}"
 
     # Get roles
     playlist_role = discord.utils.get(guild.roles, name=playlist_role_name)
@@ -222,8 +222,8 @@ async def remove_active_match_roles(guild: discord.Guild, player_ids: list, play
             if playlist_role and playlist_role in member.roles:
                 has_other_active = False
                 for role in member.roles:
-                    # Check for other match roles in this playlist (e.g., ActiveMLG4v4Match2)
-                    if role.name.startswith(f"Active{clean_playlist}Match") and role.name != match_role_name:
+                    # Check for other match roles in this playlist (e.g., MLG4v4Match2)
+                    if role.name.startswith(f"{clean_playlist}Match") and role.name != match_role_name:
                         has_other_active = True
                         break
                 if not has_other_active:
