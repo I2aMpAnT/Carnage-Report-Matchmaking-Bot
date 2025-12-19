@@ -21,8 +21,8 @@ GITHUB_BRANCH = "main"
 #   - matchmakingstate.json (internal bot state only)
 #   - players.json (confidential player data - stays on server only)
 JSON_FILES = {
-    "matchhistory.json": "matchhistory.json",
-    "testmatchhistory.json": "testmatchhistory.json",
+    "MLG4v4.json": "MLG4v4.json",
+    "testMLG4v4.json": "testMLG4v4.json",
     "rankstats.json": "rankstats.json",
     "gamestats.json": "gamestats.json",
     "queue_config.json": "queue_config.json",
@@ -118,12 +118,12 @@ def push_file_to_github(local_file: str, github_path: str, commit_message: str =
 
 # Convenience functions for each file type
 def update_matchhistory_on_github():
-    """Push matchhistory.json to GitHub"""
-    return push_file_to_github("matchhistory.json", "matchhistory.json")
+    """Push MLG4v4.json to GitHub"""
+    return push_file_to_github("MLG4v4.json", "MLG4v4.json")
 
 def update_testmatchhistory_on_github():
-    """Push testmatchhistory.json to GitHub"""
-    return push_file_to_github("testmatchhistory.json", "testmatchhistory.json")
+    """Push testMLG4v4.json to GitHub"""
+    return push_file_to_github("testMLG4v4.json", "testMLG4v4.json")
 
 def update_rankstats_on_github():
     """Push rankstats.json to GitHub"""
@@ -156,12 +156,12 @@ def update_all_on_github():
 
 # Legacy function for backwards compatibility
 def push_to_github(file_content: str, commit_message: str = "Update match history") -> bool:
-    """Legacy function - pushes matchhistory.json content directly"""
+    """Legacy function - pushes MLG4v4.json content directly"""
     if not GITHUB_TOKEN:
         log_github_action("⚠️ GITHUB_TOKEN not set in .env file")
         return False
-    
-    api_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/matchhistory.json"
+
+    api_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/MLG4v4.json"
     headers = {
         "Authorization": f"token {GITHUB_TOKEN}",
         "Accept": "application/vnd.github.v3+json"

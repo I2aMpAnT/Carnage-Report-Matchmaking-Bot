@@ -19,7 +19,7 @@ def log_action(message: str):
     queue_log(message)
 
 def save_match_history(series, winner: str):
-    """Save match results to matchhistory.json with comprehensive data"""
+    """Save match results to MLG4v4.json with comprehensive data"""
     import json
     import os
     from datetime import datetime
@@ -84,9 +84,9 @@ def save_match_history(series, winner: str):
     
     # Save to different files based on match type
     if match_type == "RANKED":
-        history_file = 'matchhistory.json'
+        history_file = 'MLG4v4.json'
     else:
-        history_file = 'testmatchhistory.json'
+        history_file = 'testMLG4v4.json'
     
     # Load existing history or create new
     if os.path.exists(history_file):
@@ -199,10 +199,10 @@ def log_individual_game(series, game_number: int, winner: str):
     
     # Determine file
     if series.test_mode:
-        history_file = 'testmatchhistory.json'
+        history_file = 'testMLG4v4.json'
         key = 'total_test_matches'
     else:
-        history_file = 'matchhistory.json'
+        history_file = 'MLG4v4.json'
         key = 'total_ranked_matches'
     
     game_entry = {

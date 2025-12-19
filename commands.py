@@ -873,7 +873,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             import os
 
             # File paths for match history
-            MLG_HISTORY_FILE = "matchhistory.json"  # MLG 4v4 match history
+            MLG_HISTORY_FILE = "MLG4v4.json"  # MLG 4v4 match history
             # Other playlists use per-playlist files via playlists.get_playlist_history_file()
 
             playlist_names = {
