@@ -257,7 +257,7 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
         match_label = f"Match {next_num}"
 
     # Create series text channel early - will be renamed with MMRs when teams are set
-    text_category_id = 1403855141857337501  # Matchmaking category
+    text_category_id = 1403916181554860112  # Matchmaking category
     text_category = guild.get_channel(text_category_id)
 
     # Determine series label for channel name
@@ -1790,7 +1790,7 @@ async def finalize_teams(channel: discord.TextChannel, red_team: List[int], blue
             log_action(f"Failed to rename series text channel: {e}")
     else:
         # Fallback: create new channel if none exists (shouldn't happen normally)
-        text_category_id = 1403855141857337501  # Matchmaking category
+        text_category_id = 1403916181554860112  # Matchmaking category
         text_category = guild.get_channel(text_category_id)
         series_text_channel_name = f"{series_label}-🔴{red_avg_mmr}-vs-🔵{blue_avg_mmr}"
         series_text_channel = await guild.create_text_channel(
@@ -1804,7 +1804,7 @@ async def finalize_teams(channel: discord.TextChannel, red_team: List[int], blue
     temp_series.text_channel_id = series_text_channel.id
 
     # Create Red/Blue voice channels in Matchmaking category (below text channel)
-    text_category_id = 1403855141857337501  # Matchmaking category
+    text_category_id = 1403916181554860112  # Matchmaking category
     mm_category = guild.get_channel(text_category_id)
 
     # Create Red Team voice channel with team emoji and series number (no "Red" text)
@@ -2549,7 +2549,7 @@ class PlaylistPlayersPickView(View):
         category = guild.get_channel(voice_category_id)
 
         # Text channel category (Matchmaking)
-        text_category_id = 1403855141857337501
+        text_category_id = 1403916181554860112
         text_category = guild.get_channel(text_category_id)
 
         # Randomly assign team colors (team1/team2 -> red/blue)
