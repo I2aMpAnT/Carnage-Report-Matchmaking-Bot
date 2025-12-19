@@ -476,12 +476,13 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
 
             # Remove match roles if assigned during pregame (before series created)
             pending_match = getattr(queue_state, 'pending_match_number', None)
+            playlist_name = getattr(queue_state, 'playlist_name', 'MLG4v4')
             if pending_match and not test_mode and not has_series:
                 try:
                     from searchmatchmaking import remove_active_match_roles
                     locked_players = queue_state.locked_players if queue_state.locked_players else []
                     if locked_players:
-                        await remove_active_match_roles(interaction.guild, locked_players, "MLG4v4", pending_match)
+                        await remove_active_match_roles(interaction.guild, locked_players, playlist_name, pending_match)
                         log_action(f"Removed match roles for cancelled pregame match #{pending_match}")
 
                         # Recycle the match number
@@ -553,7 +554,8 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                 try:
                     from searchmatchmaking import remove_active_match_roles
                     all_players = series.red_team + series.blue_team
-                    await remove_active_match_roles(interaction.guild, all_players, "MLG4v4", series.match_number)
+                    playlist_name = getattr(series, 'playlist_name', 'MLG4v4')
+                    await remove_active_match_roles(interaction.guild, all_players, playlist_name, series.match_number)
                 except Exception as e:
                     log_action(f"Failed to remove active match roles: {e}")
 
@@ -628,12 +630,13 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
 
             # Remove match roles if assigned during pregame (before series created)
             pending_match = getattr(queue_state, 'pending_match_number', None)
+            playlist_name = getattr(queue_state, 'playlist_name', 'MLG4v4')
             if pending_match and not has_series:
                 try:
                     from searchmatchmaking import remove_active_match_roles
                     locked_players = queue_state.locked_players if queue_state.locked_players else []
                     if locked_players:
-                        await remove_active_match_roles(interaction.guild, locked_players, "MLG4v4", pending_match)
+                        await remove_active_match_roles(interaction.guild, locked_players, playlist_name, pending_match)
                         log_action(f"Removed match roles for cancelled pregame match #{pending_match}")
 
                         # Recycle the match number
@@ -705,7 +708,8 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                 try:
                     from searchmatchmaking import remove_active_match_roles
                     all_players = series.red_team + series.blue_team
-                    await remove_active_match_roles(interaction.guild, all_players, "MLG4v4", series.match_number)
+                    playlist_name = getattr(series, 'playlist_name', 'MLG4v4')
+                    await remove_active_match_roles(interaction.guild, all_players, playlist_name, series.match_number)
                 except Exception as e:
                     log_action(f"Failed to remove active match roles: {e}")
 

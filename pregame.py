@@ -766,10 +766,11 @@ async def handle_pregame_timeout(
 
     # Remove active match roles from all players and recycle match number
     pending_match = getattr(queue_state, 'pending_match_number', None)
+    playlist_name = getattr(queue_state, 'playlist_name', 'MLG4v4')
     if pending_match and not test_mode:
         try:
             from searchmatchmaking import remove_active_match_roles
-            await remove_active_match_roles(guild, players, "MLG4v4", pending_match)
+            await remove_active_match_roles(guild, players, playlist_name, pending_match)
             log_action(f"Removed match roles for cancelled match #{pending_match}")
 
             # Recycle the match number - decrement counter so next match reuses this number
@@ -2119,7 +2120,8 @@ async def finalize_teams(channel: discord.TextChannel, red_team: List[int], blue
 
     # Use pending match number if roles were already assigned when queue filled
     pending_match = getattr(queue_state, 'pending_match_number', None)
-    temp_series = Series(red_team, blue_team, test_mode, testers=testers, pending_match_number=pending_match)
+    playlist_name = getattr(queue_state, 'playlist_name', 'MLG4v4')
+    temp_series = Series(red_team, blue_team, test_mode, testers=testers, pending_match_number=pending_match, playlist_name=playlist_name)
     # Clear the pending match number since it's been used
     queue_state.pending_match_number = None
     series_label = temp_series.series_number  # "Series 1" or "Test 1"
