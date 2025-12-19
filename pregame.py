@@ -561,7 +561,7 @@ async def handle_pregame_timeout(
     match_label: str
 ):
     """Handle timeout - cancel match and return players to postgame lobby if not all players showed up"""
-    from searchmatchmaking import queue_state, create_queue_embed
+    from searchmatchmaking import queue_state, create_queue_embed, QUEUE_CHANNEL_ID
 
     guild = channel.guild
     pregame_vc = guild.get_channel(pregame_vc_id)
@@ -600,26 +600,36 @@ async def handle_pregame_timeout(
     embed.add_field(name="⚠️ No-Shows", value=no_show_mentions, inline=False)
     embed.add_field(name="✅ Players Who Showed Up", value=showed_mentions, inline=False)
 
-    # Delete the old pregame message and post cancellation
-    try:
-        await pregame_message.delete()
-    except:
-        pass
+    # Post cancellation to queue channel (not the series channel we're about to delete)
+    queue_channel = guild.get_channel(QUEUE_CHANNEL_ID)
+    if queue_channel:
+        all_player_pings = " ".join([f"<@{uid}>" for uid in players])
+        await queue_channel.send(content=all_player_pings, embed=embed)
 
-    # Ping all players so they get notified
-    all_player_pings = " ".join([f"<@{uid}>" for uid in players])
-    await channel.send(content=all_player_pings, embed=embed)
     log_action(f"{match_label} cancelled due to no-shows: {[guild.get_member(uid).display_name if guild.get_member(uid) else str(uid) for uid in no_show_players]}")
+
+    # Delete the series text channel
+    series_channel_id = getattr(queue_state, 'series_text_channel_id', None)
+    if series_channel_id:
+        series_channel = guild.get_channel(series_channel_id)
+        if series_channel:
+            try:
+                await series_channel.delete(reason="Match cancelled - not all players showed up")
+                log_action(f"Deleted series text channel for {match_label}")
+            except Exception as e:
+                log_action(f"Failed to delete series text channel: {e}")
 
     # Reset queue state
     queue_state.locked = False
     queue_state.locked_players.clear()
     queue_state.pregame_vc_id = None
     queue_state.pregame_message = None
+    queue_state.series_text_channel_id = None
     queue_state.test_mode = False
 
-    # Recreate the queue embed
-    await create_queue_embed(channel)
+    # Recreate the queue embed in the queue channel
+    if queue_channel:
+        await create_queue_embed(queue_channel)
 
 
 async def check_no_shows(channel: discord.TextChannel, view, no_show_players: List[int], pregame_vc_id: int, timeout_seconds: int):
