@@ -473,9 +473,28 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                 except:
                     pass
                 queue_state.pregame_message = None
-        
+
+            # Remove match roles if assigned during pregame (before series created)
+            pending_match = getattr(queue_state, 'pending_match_number', None)
+            if pending_match and not test_mode and not has_series:
+                try:
+                    from searchmatchmaking import remove_active_match_roles
+                    locked_players = queue_state.locked_players if queue_state.locked_players else []
+                    if locked_players:
+                        await remove_active_match_roles(interaction.guild, locked_players, "MLG4v4", pending_match)
+                        log_action(f"Removed match roles for cancelled pregame match #{pending_match}")
+
+                        # Recycle the match number
+                        from ingame import Series
+                        if Series.match_counter >= pending_match:
+                            Series.match_counter = pending_match - 1
+                            log_action(f"Recycled match number - counter reset to {Series.match_counter}")
+                except Exception as e:
+                    log_action(f"Failed to remove pregame match roles: {e}")
+                queue_state.pending_match_number = None
+
         match_type = "Test" if test_mode else "Match #"
-        
+
         # Handle series cleanup
         if has_series:
             series = queue_state.current_series
@@ -545,6 +564,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         queue_state.testers = []
         queue_state.locked = False
         queue_state.locked_players = []
+        queue_state.pending_match_number = None
 
         # Clear saved state
         try:
@@ -605,13 +625,32 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                 except:
                     pass
                 queue_state.pregame_message = None
-        
+
+            # Remove match roles if assigned during pregame (before series created)
+            pending_match = getattr(queue_state, 'pending_match_number', None)
+            if pending_match and not has_series:
+                try:
+                    from searchmatchmaking import remove_active_match_roles
+                    locked_players = queue_state.locked_players if queue_state.locked_players else []
+                    if locked_players:
+                        await remove_active_match_roles(interaction.guild, locked_players, "MLG4v4", pending_match)
+                        log_action(f"Removed match roles for cancelled pregame match #{pending_match}")
+
+                        # Recycle the match number
+                        from ingame import Series
+                        if Series.match_counter >= pending_match:
+                            Series.match_counter = pending_match - 1
+                            log_action(f"Recycled match number - counter reset to {Series.match_counter}")
+                except Exception as e:
+                    log_action(f"Failed to remove pregame match roles: {e}")
+                queue_state.pending_match_number = None
+
         # Handle series cleanup
         if has_series:
             series = queue_state.current_series
             match_type = "Test" if series.test_mode else "Match #"
             match_num = series.match_number
-            
+
             if series.games:
                 log_action(f"Staff {interaction.user.name} cancelled {match_type}{match_num} - {len(series.games)} games played")
                 save_match_history(series, 'CANCELLED')
@@ -677,6 +716,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         queue_state.testers = []
         queue_state.locked = False
         queue_state.locked_players = []
+        queue_state.pending_match_number = None
 
         # Clear saved state
         try:
@@ -2797,9 +2837,50 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
     async def restart_bot(interaction: discord.Interaction):
         """Restart the bot"""
         import sys
+        import subprocess
+        import os
 
         log_action(f"Bot restart initiated by {interaction.user.display_name}")
-        await interaction.response.send_message("🔄 Restarting bot...", ephemeral=True)
+        await interaction.response.send_message("🔄 Backing up MMR.json and restarting bot...", ephemeral=True)
+
+        # Backup MMR.json to git before restart
+        try:
+            mmr_file = "/home/user/Carnage-Report-Matchmaking-Bot/MMR.json"
+            if os.path.exists(mmr_file):
+                # Get current timestamp for commit message
+                from datetime import datetime, timezone, timedelta
+                EST = timezone(timedelta(hours=-5))
+                timestamp = datetime.now(EST).strftime('%Y-%m-%d %H:%M:%S EST')
+
+                # Git add, commit, and push
+                subprocess.run(
+                    ['git', 'add', 'MMR.json'],
+                    cwd='/home/user/Carnage-Report-Matchmaking-Bot',
+                    capture_output=True,
+                    timeout=30
+                )
+                commit_result = subprocess.run(
+                    ['git', 'commit', '-m', f'Auto-backup MMR.json before restart - {timestamp}'],
+                    cwd='/home/user/Carnage-Report-Matchmaking-Bot',
+                    capture_output=True,
+                    timeout=30
+                )
+                if commit_result.returncode == 0:
+                    push_result = subprocess.run(
+                        ['git', 'push'],
+                        cwd='/home/user/Carnage-Report-Matchmaking-Bot',
+                        capture_output=True,
+                        timeout=60
+                    )
+                    if push_result.returncode == 0:
+                        log_action("Successfully backed up MMR.json to git")
+                    else:
+                        log_action(f"Git push failed: {push_result.stderr.decode()}")
+                else:
+                    # No changes to commit is okay
+                    log_action("No MMR.json changes to commit")
+        except Exception as e:
+            log_action(f"Failed to backup MMR.json to git: {e}")
 
         # Give time for the message to be seen
         await asyncio.sleep(1)

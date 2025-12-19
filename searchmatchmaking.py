@@ -1,7 +1,7 @@
 # searchmatchmaking.py - MLG 4v4 Queue Management System
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.6.2"
+MODULE_VERSION = "1.7.0"
 
 import discord
 from discord.ui import View, Button
@@ -56,6 +56,7 @@ class QueueState:
         self.locked: bool = False  # Queue locked when full - prevents leaving
         self.locked_players: List[int] = []  # Players locked into current match
         self.series_text_channel_id: Optional[int] = None  # Series text channel (created early, renamed when teams set)
+        self.pending_match_number: Optional[int] = None  # Match number assigned when queue fills (for early role assignment)
 
 # Global queue states - separate queues for each channel
 queue_state = QueueState()  # Primary MLG 4v4 queue
@@ -728,6 +729,16 @@ class QueueView(View):
             qs.locked_players = qs.queue[:]
             log_action(f"Queue full - locked {len(qs.locked_players)} players")
 
+            # Assign match roles immediately so players can be pinged in team selection
+            # Get the next match number (will be used when Series is created)
+            from ingame import Series
+            next_match_number = Series.match_counter + 1
+            qs.pending_match_number = next_match_number
+            log_action(f"Assigned pending match number: {next_match_number}")
+
+            # Add active match roles to locked players immediately
+            await add_active_match_roles(interaction.guild, qs.locked_players, "MLG4v4", next_match_number)
+
             # Remove matched players from all other queues they might be in
             await remove_players_from_other_queues(interaction.guild, qs.locked_players, current_queue=qs)
 
@@ -1053,6 +1064,16 @@ class PingJoinView(View):
             qs.locked = True
             qs.locked_players = qs.queue[:]
             log_action(f"Queue full - locked {len(qs.locked_players)} players")
+
+            # Assign match roles immediately so players can be pinged in team selection
+            # Get the next match number (will be used when Series is created)
+            from ingame import Series
+            next_match_number = Series.match_counter + 1
+            qs.pending_match_number = next_match_number
+            log_action(f"Assigned pending match number: {next_match_number}")
+
+            # Add active match roles to locked players immediately
+            await add_active_match_roles(interaction.guild, qs.locked_players, "MLG4v4", next_match_number)
 
             # Remove matched players from all other queues they might be in
             await remove_players_from_other_queues(interaction.guild, qs.locked_players, current_queue=qs)
