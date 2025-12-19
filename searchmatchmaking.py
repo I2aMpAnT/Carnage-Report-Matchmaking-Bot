@@ -129,27 +129,28 @@ async def add_active_match_roles(guild: discord.Guild, player_ids: list, playlis
     """
     Add active matchmaking roles to players when they're locked into a match.
     - Removes SearchingMatchmaking role
-    - Adds ActiveMatchmaking role (creates if doesn't exist)
-    - Adds active{playlist}{match#} role (creates for this match)
+    - Adds Active{playlist} role (e.g., ActiveMLG4v4) - playlist-specific
+    - Adds Active{playlist}Match{#} role (e.g., ActiveMLG4v4Match1) - match-specific
     """
     # Clean playlist name for role (remove spaces)
     clean_playlist = playlist_name.replace(" ", "").replace("_", "")
+    playlist_role_name = f"Active{clean_playlist}"
     match_role_name = f"Active{clean_playlist}Match{match_number}"
 
-    # Get or create ActiveMatchmaking role
-    active_mm_role = discord.utils.get(guild.roles, name="ActiveMatchmaking")
-    if not active_mm_role:
+    # Get or create playlist-specific role (e.g., ActiveMLG4v4)
+    playlist_role = discord.utils.get(guild.roles, name=playlist_role_name)
+    if not playlist_role:
         try:
-            active_mm_role = await guild.create_role(
-                name="ActiveMatchmaking",
+            playlist_role = await guild.create_role(
+                name=playlist_role_name,
                 color=discord.Color.orange(),
-                reason="Auto-created for active match tracking"
+                reason=f"Auto-created for {playlist_name} active match tracking"
             )
-            log_action(f"Created ActiveMatchmaking role")
+            log_action(f"Created role: {playlist_role_name}")
         except Exception as e:
-            log_action(f"Failed to create ActiveMatchmaking role: {e}")
+            log_action(f"Failed to create {playlist_role_name} role: {e}")
 
-    # Create match-specific role
+    # Create match-specific role (e.g., ActiveMLG4v4Match1)
     match_role = discord.utils.get(guild.roles, name=match_role_name)
     if not match_role:
         try:
@@ -178,8 +179,8 @@ async def add_active_match_roles(guild: discord.Guild, player_ids: list, playlis
 
             # Add active roles
             roles_to_add = []
-            if active_mm_role:
-                roles_to_add.append(active_mm_role)
+            if playlist_role:
+                roles_to_add.append(playlist_role)
             if match_role:
                 roles_to_add.append(match_role)
 
@@ -188,21 +189,22 @@ async def add_active_match_roles(guild: discord.Guild, player_ids: list, playlis
         except Exception as e:
             log_action(f"Failed to update roles for {member.display_name}: {e}")
 
-    log_action(f"Added active match roles to {len(player_ids)} players: ActiveMatchmaking + {match_role_name}")
+    log_action(f"Added active match roles to {len(player_ids)} players: {playlist_role_name} + {match_role_name}")
 
 
 async def remove_active_match_roles(guild: discord.Guild, player_ids: list, playlist_name: str, match_number: int):
     """
     Remove active matchmaking roles from players when series ends or is cancelled.
-    - Removes ActiveMatchmaking role (only if no other active matches)
-    - Removes and deletes the active{playlist}{match#} role
+    - Removes Active{playlist} role (only if no other active matches in that playlist)
+    - Removes and deletes the Active{playlist}Match{#} role
     """
     # Clean playlist name for role
     clean_playlist = playlist_name.replace(" ", "").replace("_", "")
+    playlist_role_name = f"Active{clean_playlist}"
     match_role_name = f"Active{clean_playlist}Match{match_number}"
 
     # Get roles
-    active_mm_role = discord.utils.get(guild.roles, name="ActiveMatchmaking")
+    playlist_role = discord.utils.get(guild.roles, name=playlist_role_name)
     match_role = discord.utils.get(guild.roles, name=match_role_name)
 
     # Remove roles from players
@@ -216,28 +218,39 @@ async def remove_active_match_roles(guild: discord.Guild, player_ids: list, play
             if match_role and match_role in member.roles:
                 roles_to_remove.append(match_role)
 
-            # Check if player has any OTHER active match roles before removing ActiveMatchmaking
-            if active_mm_role and active_mm_role in member.roles:
+            # Check if player has any OTHER active match roles for this playlist before removing playlist role
+            if playlist_role and playlist_role in member.roles:
                 has_other_active = False
                 for role in member.roles:
-                    if role.name.startswith("Active") and role.name != "ActiveMatchmaking" and role.name != match_role_name:
+                    # Check for other match roles in this playlist (e.g., ActiveMLG4v4Match2)
+                    if role.name.startswith(f"Active{clean_playlist}Match") and role.name != match_role_name:
                         has_other_active = True
                         break
                 if not has_other_active:
-                    roles_to_remove.append(active_mm_role)
+                    roles_to_remove.append(playlist_role)
 
             if roles_to_remove:
                 await member.remove_roles(*roles_to_remove)
         except Exception as e:
             log_action(f"Failed to remove roles from {member.display_name}: {e}")
 
-    # Delete the match-specific role
+    # Delete both roles when match ends
     if match_role:
         try:
             await match_role.delete(reason=f"Match #{match_number} ended")
             log_action(f"Deleted role: {match_role_name}")
         except Exception as e:
             log_action(f"Failed to delete {match_role_name} role: {e}")
+
+    # Also delete the playlist role if no one else has it
+    if playlist_role:
+        # Check if any other members still have this role
+        if len(playlist_role.members) == 0:
+            try:
+                await playlist_role.delete(reason=f"No active {playlist_name} matches")
+                log_action(f"Deleted role: {playlist_role_name}")
+            except Exception as e:
+                log_action(f"Failed to delete {playlist_role_name} role: {e}")
 
     log_action(f"Removed active match roles from {len(player_ids)} players for {playlist_name} Match #{match_number}")
 
