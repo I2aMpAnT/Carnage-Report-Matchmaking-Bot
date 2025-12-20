@@ -1,7 +1,7 @@
 # statsdedi.py - Vultr VPS Management for Stats Dedi
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.2.0"
+MODULE_VERSION = "1.3.0"
 
 import discord
 from discord import app_commands
@@ -600,7 +600,7 @@ class StatsDediView(View):
             if main_ip:
                 try:
                     avg_time = get_average_spinup_time()
-                    avg_time_text = avg_time if avg_time else "~2 minutes"
+                    avg_time_text = avg_time if avg_time else "~10 minutes"
 
                     dm_embed = discord.Embed(
                         title=f"Stats Dedi Creating - {interaction.user.display_name}",
