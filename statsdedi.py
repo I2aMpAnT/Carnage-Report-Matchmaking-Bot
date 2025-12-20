@@ -1,7 +1,7 @@
 # statsdedi.py - Vultr VPS Management for Stats Dedi
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.2.0"
+MODULE_VERSION = "1.4.0"
 
 import discord
 from discord import app_commands
@@ -208,11 +208,15 @@ async def get_instance_bandwidth(instance_id: str) -> dict:
 
 async def wait_for_instance_ready(instance_id: str, user: discord.User, initial_ip: str, start_time: float):
     """Background task to wait for instance to be ready and DM user"""
-    max_attempts = 120  # 10 minutes max (5 second intervals)
+    # No max attempts - wait indefinitely until RUNNING state
+    # Send timeout warning DM at 150% of average spin-up time
 
     print(f"[DEDI] 🔄 Starting wait_for_instance_ready for {instance_id[:8]}... (user: {user.name})")
 
-    for attempt in range(max_attempts):
+    timeout_dm_sent = False
+    attempt = 0
+
+    while True:
         try:
             instance = await get_instance(instance_id)
             status = instance.get("status", "")
@@ -221,15 +225,45 @@ async def wait_for_instance_ready(instance_id: str, user: discord.User, initial_
             main_ip = instance.get("main_ip", initial_ip)
             label = instance.get("label", "Stats Dedi")
 
+            elapsed = time.time() - start_time
+
             # Log status for debugging - more frequent at start, then every 30 seconds
             if attempt < 6 or attempt % 6 == 0:
                 print(f"[DEDI] {instance_id[:8]}... attempt={attempt} status={status}, power={power_status}, server={server_status}, ip={main_ip}")
+
+            # Check if we should send timeout warning DM (at 150% of average)
+            if not timeout_dm_sent and spinup_times:
+                avg_seconds = sum(spinup_times) / len(spinup_times)
+                timeout_threshold = avg_seconds * 1.5
+
+                if elapsed >= timeout_threshold:
+                    # Send timeout warning DM but continue waiting
+                    try:
+                        avg_time = get_average_spinup_time()
+                        embed = discord.Embed(
+                            title="⏳ Stats Dedi Taking Longer Than Usual",
+                            description=f"Your Stats Dedi is taking longer than expected to start up.\n\n"
+                                        f"**Average spin-up time:** {avg_time}\n"
+                                        f"**Current elapsed time:** {int(elapsed // 60)}m {int(elapsed % 60)}s\n\n"
+                                        f"Still waiting for it to reach Running state...",
+                            color=discord.Color.orange()
+                        )
+                        embed.add_field(name="IP Address", value=f"`{main_ip}`", inline=True)
+                        embed.add_field(name="Status", value=f"{status} / {power_status}", inline=True)
+                        embed.set_footer(text="You'll receive another message when it's ready!")
+                        await user.send(embed=embed)
+                        print(f"[DEDI] ⏳ Timeout warning DM sent to {user.name} (elapsed: {int(elapsed)}s, threshold: {int(timeout_threshold)}s)")
+                        timeout_dm_sent = True
+                    except discord.Forbidden:
+                        print(f"[DEDI] ❌ Could not DM {user.name} - DMs disabled")
+                        timeout_dm_sent = True  # Don't retry
+                    except Exception as e:
+                        print(f"[DEDI] ❌ Error sending timeout DM: {e}")
 
             # Stopped status is temporary during spin-up - just log and continue waiting
             if power_status == "stopped":
                 # Only log occasionally to avoid spam
                 if attempt % 6 == 0:
-                    elapsed = time.time() - start_time
                     avg_time = get_average_spinup_time()
                     avg_msg = f" (avg: {avg_time})" if avg_time else ""
                     print(f"[DEDI] ⏳ Instance {instance_id[:8]}... is stopped (temporary) - waiting for running... ({int(elapsed)}s elapsed{avg_msg})")
@@ -237,8 +271,7 @@ async def wait_for_instance_ready(instance_id: str, user: discord.User, initial_
             # Check if ready - just need active and running
             if status == "active" and power_status == "running":
                 print(f"[DEDI] ✅ Instance {instance_id[:8]}... is now active and running!")
-                # Calculate spin-up time
-                elapsed = time.time() - start_time
+                # Calculate spin-up time and record it
                 spinup_times.append(elapsed)
 
                 # Remove from pending
@@ -278,24 +311,7 @@ async def wait_for_instance_ready(instance_id: str, user: discord.User, initial_
 
         # Sleep AFTER checking (not before)
         await asyncio.sleep(5)
-
-    # Timeout - remove from pending and notify user
-    if instance_id in pending_creates:
-        del pending_creates[instance_id]
-    print(f"[DEDI] ⏱️ TIMEOUT waiting for {instance_id[:8]}... after {max_attempts * 5} seconds")
-
-    # Send timeout DM
-    try:
-        embed = discord.Embed(
-            title="⏱️ Stats Dedi Timeout",
-            description=f"Your Stats Dedi took too long to start. It may still be setting up.\n\nUse `/statsdedi` to check its status.",
-            color=discord.Color.orange()
-        )
-        embed.add_field(name="IP Address", value=f"`{initial_ip}`", inline=True)
-        await user.send(embed=embed)
-        print(f"[DEDI] ⏱️ Timeout DM sent to {user.name}")
-    except:
-        pass
+        attempt += 1
 
 
 class ErrorRestartView(View):
@@ -600,7 +616,7 @@ class StatsDediView(View):
             if main_ip:
                 try:
                     avg_time = get_average_spinup_time()
-                    avg_time_text = avg_time if avg_time else "~2 minutes"
+                    avg_time_text = avg_time if avg_time else "~10 minutes"
 
                     dm_embed = discord.Embed(
                         title=f"Stats Dedi Creating - {interaction.user.display_name}",

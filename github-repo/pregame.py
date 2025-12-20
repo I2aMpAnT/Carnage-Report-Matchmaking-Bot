@@ -2,7 +2,7 @@
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 # Supports ALL playlists: MLG 4v4 (voting), Team Hardcore/Double Team (auto-balance), Head to Head (1v1)
 
-MODULE_VERSION = "1.6.4"
+MODULE_VERSION = "1.7.0"
 
 import discord
 from discord.ui import View, Button, Select
@@ -27,26 +27,51 @@ def log_action(message: str):
     queue_log(message)
 
 async def get_player_mmr(user_id: int) -> int:
-    """Get player MMR from STATSRANKS or guest data"""
+    """Get player MMR from STATSRANKS or guest data. Returns 500 for unranked players."""
     from searchmatchmaking import queue_state
-    
+
     # Check if this is a guest
     if user_id in queue_state.guests:
         mmr = queue_state.guests[user_id]["mmr"]
         log_action(f"get_player_mmr({user_id}) = {mmr} (guest)")
         return mmr
-    
+
     import STATSRANKS
     stats = STATSRANKS.get_player_stats(user_id, skip_github=True)
     if stats and 'mmr' in stats:
         mmr = stats['mmr']
         log_action(f"get_player_mmr({user_id}) = {mmr}")
         return mmr
-    log_action(f"get_player_mmr({user_id}) = 1500 (default)")
-    return 1500  # Default MMR
+    log_action(f"get_player_mmr({user_id}) = 500 (unranked default)")
+    return 500  # Default MMR for unranked players
+
+
+def get_player_rank(user_id: int) -> int:
+    """Get player rank (level) from STATSRANKS. Returns 1 for unranked players."""
+    import STATSRANKS
+    stats = STATSRANKS.get_player_stats(user_id, skip_github=True)
+    if stats and 'rank' in stats:
+        return stats['rank']
+    return 1  # Default rank for unranked players
+
+
+def get_rank_emoji(guild: discord.Guild, level: int) -> str:
+    """Get the custom rank emoji for a level"""
+    if guild:
+        emoji_name = str(level)
+        emoji = discord.utils.get(guild.emojis, name=emoji_name)
+        if emoji:
+            return str(emoji)
+        # Try underscore version for single digits
+        if level <= 9:
+            emoji = discord.utils.get(guild.emojis, name=f"{level}_")
+            if emoji:
+                return str(emoji)
+    return f"Lv{level}"
 
 async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, test_players: List[int] = None,
-                        playlist_state: 'PlaylistQueueState' = None, playlist_players: List[int] = None):
+                        playlist_state: 'PlaylistQueueState' = None, playlist_players: List[int] = None,
+                        mlg_queue_state=None):
     """Start pregame phase for any playlist
 
     Args:
@@ -55,6 +80,7 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
         test_players: List of player IDs for test mode (MLG 4v4 only)
         playlist_state: PlaylistQueueState object (for non-MLG playlists)
         playlist_players: List of player IDs (for non-MLG playlists)
+        mlg_queue_state: QueueState object for MLG 4v4 (if None, uses default queue_state)
     """
     import asyncio
 
@@ -178,44 +204,48 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
         return
 
     # Original MLG 4v4 flow
-    from searchmatchmaking import queue_state, get_queue_progress_image, QUEUE_CHANNEL_ID
+    from searchmatchmaking import queue_state as default_queue_state, get_queue_progress_image, QUEUE_CHANNEL_ID, QUEUE_CHANNEL_ID_2
+
+    # Use provided queue state or default
+    qs = mlg_queue_state if mlg_queue_state else default_queue_state
 
     log_action(f"Starting MLG 4v4 pregame phase (test_mode={test_mode})")
 
     # Reset ping cooldown so players can ping again for new matches
-    queue_state.last_ping_time = None
+    qs.last_ping_time = None
     log_action("Reset ping cooldown for new match")
 
-    # Use test players if provided, otherwise use queue
-    players = test_players if test_players else queue_state.queue[:]
+    # Use test players if provided, otherwise use locked_players (set by searchmatchmaking when queue fills)
+    players = test_players if test_players else qs.locked_players[:]
+
+    # Verify we have players
+    if not players:
+        log_action("ERROR: No players found for pregame! Check queue/locked_players.")
+        return
 
     # Lock these players into the match - they cannot leave
     if not test_mode:
-        queue_state.locked = True
-        queue_state.locked_players = players[:]
-        # Clear the queue so new players can queue for the next match
-        queue_state.queue.clear()
-        queue_state.queue_join_times.clear()
-        log_action(f"Queue locked with {len(players)} players, queue reset for next match")
+        qs.locked = True
+        # locked_players already set by searchmatchmaking.py when queue fills
+        log_action(f"Pregame starting with {len(players)} locked players")
 
     # Store test mode info
-    queue_state.test_mode = test_mode
+    qs.test_mode = test_mode
 
-    # Always use queue channel for pregame embed
-    queue_channel = guild.get_channel(QUEUE_CHANNEL_ID)
-    target_channel = queue_channel if queue_channel else channel
+    # Determine the correct queue channel
+    from searchmatchmaking import queue_state_2, update_queue_embed
+    if qs == queue_state_2:
+        queue_channel_id = QUEUE_CHANNEL_ID_2
+    else:
+        queue_channel_id = QUEUE_CHANNEL_ID
 
-    # Delete the old queue embed before posting pregame embed
-    try:
-        async for msg in target_channel.history(limit=20):
-            if msg.author.bot and msg.embeds:
-                title = msg.embeds[0].title or ""
-                if "MLG 4v4 Matchmaking" in title:
-                    await msg.delete()
-                    log_action("Deleted queue embed - pregame starting")
-                    break
-    except Exception as e:
-        log_action(f"Failed to delete queue embed: {e}")
+    # Get queue channel for updating
+    queue_channel = guild.get_channel(queue_channel_id)
+
+    # Update the queue embed to show it's ready for new players
+    if queue_channel:
+        await update_queue_embed(queue_channel, qs)
+        log_action("Updated queue embed - ready for new players")
 
     # Get the next match number for naming
     from ingame import Series
@@ -226,6 +256,30 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
         next_num = Series.match_counter + 1
         match_label = f"Match {next_num}"
 
+    # Create series text channel early - will be renamed with MMRs when teams are set
+    text_category_id = 1403916181554860112  # Matchmaking category
+    text_category = guild.get_channel(text_category_id)
+
+    # Determine series label for channel name
+    from ingame import Series as SeriesClass
+    if test_mode:
+        series_num = SeriesClass.test_counter + 1
+        series_label = f"test-{series_num}"
+    else:
+        series_num = SeriesClass.match_counter + 1
+        series_label = f"series-{series_num}"
+
+    series_text_channel = await guild.create_text_channel(
+        name=f"{series_label}-team-selection",
+        category=text_category,
+        topic=f"Team selection and match channel - {match_label}",
+        position=998  # Position at bottom of category, just above voice channels
+    )
+    log_action(f"Created Series Text Channel: {series_text_channel.id}")
+
+    # Store the series text channel ID for later use
+    qs.series_text_channel_id = series_text_channel.id
+
     pregame_vc = await guild.create_voice_channel(
         name=f"Pregame Lobby - {match_label}",
         category=category,
@@ -234,7 +288,10 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
     log_action(f"Created Pregame Lobby VC: {pregame_vc.id}")
 
     # Store the pregame VC ID for cleanup later
-    queue_state.pregame_vc_id = pregame_vc.id
+    qs.pregame_vc_id = pregame_vc.id
+
+    # Use series text channel for all team selection
+    target_channel = series_text_channel
 
     # Move players to pregame lobby
     # In TEST MODE: Only move the 2 testers, not the random fillers
@@ -243,7 +300,7 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
     players_not_in_voice = []
 
     # Get testers list for test mode
-    testers = getattr(queue_state, 'testers', []) if test_mode else []
+    testers = getattr(qs, 'testers', []) if test_mode else []
 
     for user_id in players:
         member = guild.get_member(user_id)
@@ -309,7 +366,7 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
     # Ping players in channel
     pings = " ".join([f"<@{uid}>" for uid in players])
     pregame_message = await target_channel.send(content=pings, embed=embed)
-    queue_state.pregame_message = pregame_message
+    qs.pregame_message = pregame_message
 
     # DM players not in voice to let them know to join
     for uid in players_not_in_voice:
@@ -332,7 +389,8 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
     # Start task to wait for all players and then show team selection
     asyncio.create_task(wait_for_players_and_show_selection(
         target_channel, pregame_message, players, pregame_vc.id,
-        test_mode=test_mode, testers=testers, match_label=match_label
+        test_mode=test_mode, testers=testers, match_label=match_label,
+        mlg_queue_state=qs
     ))
 
 
@@ -343,11 +401,15 @@ async def wait_for_players_and_show_selection(
     pregame_vc_id: int,
     test_mode: bool = False,
     testers: List[int] = None,
-    match_label: str = "Match"
+    match_label: str = "Match",
+    mlg_queue_state=None
 ):
     """Wait for all players to join pregame VC, then show team selection"""
     import asyncio
-    from searchmatchmaking import queue_state, get_queue_progress_image
+    from searchmatchmaking import queue_state as default_queue_state, get_queue_progress_image
+
+    # Use provided queue state or default
+    qs = mlg_queue_state if mlg_queue_state else default_queue_state
 
     guild = channel.guild
     testers = testers or []
@@ -361,7 +423,7 @@ async def wait_for_players_and_show_selection(
 
     while True:
         # Check if pregame was cancelled
-        if not hasattr(queue_state, 'pregame_vc_id') or queue_state.pregame_vc_id != pregame_vc_id:
+        if not hasattr(qs, 'pregame_vc_id') or qs.pregame_vc_id != pregame_vc_id:
             return  # Pregame was cancelled
 
         pregame_vc = guild.get_channel(pregame_vc_id)
@@ -460,11 +522,12 @@ async def show_team_selection(
     match_label: str
 ):
     """Show team selection buttons once all players are in voice"""
+    import asyncio
     from searchmatchmaking import queue_state, get_queue_progress_image
 
     embed = discord.Embed(
         title=f"Pregame Lobby - {match_label}",
-        description="✅ **All players are in voice!**\n\nSelect your preferred team selection method:",
+        description="✅ **All players are in voice!**\n\nSelect your preferred team selection method:\n\n⏱️ **60 seconds** remaining - defaults to Balanced if no majority",
         color=discord.Color.green()
     )
     embed.set_image(url=get_queue_progress_image(8))
@@ -477,6 +540,7 @@ async def show_team_selection(
 
     view = TeamSelectionView(players, test_mode=test_mode, testers=testers, pregame_vc_id=pregame_vc_id, match_label=match_label)
     view.pregame_message = pregame_message
+    view.channel = channel  # Store channel reference for timeout handler
     queue_state.pregame_message = pregame_message
 
     try:
@@ -486,6 +550,112 @@ async def show_team_selection(
         new_message = await channel.send(embed=embed, view=view)
         view.pregame_message = new_message
         queue_state.pregame_message = new_message
+
+    # Start team selection timeout task
+    asyncio.create_task(team_selection_timeout(view, channel, players, test_mode, testers, pregame_vc_id, match_label))
+
+
+async def team_selection_timeout(
+    view: 'TeamSelectionView',
+    channel: discord.TextChannel,
+    players: List[int],
+    test_mode: bool,
+    testers: List[int],
+    pregame_vc_id: int,
+    match_label: str
+):
+    """Handle 60-second timeout for team selection - auto-selects based on votes or balanced"""
+    import asyncio
+    from searchmatchmaking import queue_state, get_queue_progress_image
+
+    TIMEOUT_SECONDS = 60
+
+    for seconds_left in range(TIMEOUT_SECONDS, -1, -1):
+        # Check if view was already resolved (method was chosen)
+        if getattr(view, 'resolved', False):
+            log_action(f"Team selection resolved before timeout")
+            return
+
+        # Update embed with countdown every 10 seconds (or at key moments)
+        if seconds_left in [60, 50, 40, 30, 20, 10, 5, 4, 3, 2, 1, 0]:
+            embed = discord.Embed(
+                title=f"Pregame Lobby - {match_label}",
+                description=f"✅ **All players are in voice!**\n\nSelect your preferred team selection method:\n\n⏱️ **{seconds_left} seconds** remaining - defaults to Balanced if no majority",
+                color=discord.Color.green() if seconds_left > 10 else discord.Color.orange()
+            )
+            embed.set_image(url=get_queue_progress_image(8))
+
+            player_count = f"{len(players)}/8 players"
+            if test_mode:
+                player_count += " (TEST MODE)"
+            player_list = "\n".join([f"<@{uid}>" for uid in players])
+            embed.add_field(name=f"Players ({player_count})", value=player_list, inline=False)
+
+            # Show votes if any
+            if view.votes:
+                vote_counts = {}
+                for vote in view.votes.values():
+                    vote_counts[vote] = vote_counts.get(vote, 0) + 1
+                option_labels = {"balanced": "Balanced (MMR)", "captains": "Captains Pick", "players_pick": "Players Pick"}
+                vote_summary = []
+                for option in ["balanced", "captains", "players_pick"]:
+                    count = vote_counts.get(option, 0)
+                    if count > 0:
+                        label = option_labels.get(option, option)
+                        vote_summary.append(f"**{label}**: {count}")
+                if vote_summary:
+                    embed.add_field(name="Current Votes", value="\n".join(vote_summary), inline=False)
+
+            try:
+                await view.pregame_message.edit(embed=embed, view=view)
+            except:
+                pass
+
+        if seconds_left > 0:
+            await asyncio.sleep(1)
+
+    # Check one more time if resolved while we were updating
+    if getattr(view, 'resolved', False):
+        return
+
+    # Time's up! Determine winner based on votes
+    winning_method = "balanced"  # Default
+
+    if view.votes:
+        vote_counts = {}
+        for vote in view.votes.values():
+            vote_counts[vote] = vote_counts.get(vote, 0) + 1
+
+        # Find the option with most votes
+        max_votes = 0
+        max_options = []
+        for option, count in vote_counts.items():
+            if count > max_votes:
+                max_votes = count
+                max_options = [option]
+            elif count == max_votes:
+                max_options.append(option)
+
+        # If there's a tie, prefer balanced
+        if len(max_options) == 1:
+            winning_method = max_options[0]
+        elif "balanced" in max_options:
+            winning_method = "balanced"
+        else:
+            winning_method = max_options[0]  # Just pick first
+
+    log_action(f"Team selection timeout - auto-selecting: {winning_method}")
+
+    # Mark as resolved to prevent further votes
+    view.resolved = True
+
+    # Execute the winning method
+    if winning_method == "balanced":
+        await view.create_balanced_teams_from_timeout(channel)
+    elif winning_method == "captains":
+        await view.start_captains_draft_from_timeout(channel)
+    elif winning_method == "players_pick":
+        await view.start_players_pick_from_timeout(channel)
 
 
 async def handle_pregame_timeout(
@@ -499,7 +669,7 @@ async def handle_pregame_timeout(
     match_label: str
 ):
     """Handle timeout - cancel match and return players to postgame lobby if not all players showed up"""
-    from searchmatchmaking import queue_state, create_queue_embed
+    from searchmatchmaking import queue_state, create_queue_embed, QUEUE_CHANNEL_ID
 
     guild = channel.guild
     pregame_vc = guild.get_channel(pregame_vc_id)
@@ -508,7 +678,7 @@ async def handle_pregame_timeout(
     POSTGAME_CARNAGE_REPORT_ID = 1424845826362048643
     postgame_vc = guild.get_channel(POSTGAME_CARNAGE_REPORT_ID)
 
-    # Move all players currently in the pregame VC to postgame lobby
+    # Move all members from pregame VC to postgame (including spectators)
     if pregame_vc and postgame_vc:
         for member in list(pregame_vc.members):
             try:
@@ -516,6 +686,43 @@ async def handle_pregame_timeout(
                 log_action(f"Moved {member.name} to Postgame Carnage Report (no-show cancellation)")
             except Exception as e:
                 log_action(f"Failed to move {member.name} to postgame: {e}")
+
+    # Also move members from red/blue team VCs if they exist (including spectators/listeners)
+    series = queue_state.current_series if hasattr(queue_state, 'current_series') else None
+    if series and postgame_vc:
+        # Red team VC
+        red_vc_id = getattr(series, 'red_vc_id', None)
+        if red_vc_id:
+            red_vc = guild.get_channel(red_vc_id)
+            if red_vc:
+                for member in list(red_vc.members):
+                    try:
+                        await member.move_to(postgame_vc)
+                        log_action(f"Moved {member.name} from Red VC to Postgame (cancellation)")
+                    except Exception as e:
+                        log_action(f"Failed to move {member.name} from Red VC: {e}")
+                try:
+                    await red_vc.delete(reason="Match cancelled")
+                    log_action(f"Deleted Red team VC for {match_label}")
+                except Exception as e:
+                    log_action(f"Failed to delete Red VC: {e}")
+
+        # Blue team VC
+        blue_vc_id = getattr(series, 'blue_vc_id', None)
+        if blue_vc_id:
+            blue_vc = guild.get_channel(blue_vc_id)
+            if blue_vc:
+                for member in list(blue_vc.members):
+                    try:
+                        await member.move_to(postgame_vc)
+                        log_action(f"Moved {member.name} from Blue VC to Postgame (cancellation)")
+                    except Exception as e:
+                        log_action(f"Failed to move {member.name} from Blue VC: {e}")
+                try:
+                    await blue_vc.delete(reason="Match cancelled")
+                    log_action(f"Deleted Blue team VC for {match_label}")
+                except Exception as e:
+                    log_action(f"Failed to delete Blue VC: {e}")
 
     # Delete the pregame VC
     if pregame_vc:
@@ -538,26 +745,54 @@ async def handle_pregame_timeout(
     embed.add_field(name="⚠️ No-Shows", value=no_show_mentions, inline=False)
     embed.add_field(name="✅ Players Who Showed Up", value=showed_mentions, inline=False)
 
-    # Delete the old pregame message and post cancellation
-    try:
-        await pregame_message.delete()
-    except:
-        pass
+    # Post cancellation to queue channel (not the series channel we're about to delete)
+    queue_channel = guild.get_channel(QUEUE_CHANNEL_ID)
+    if queue_channel:
+        all_player_pings = " ".join([f"<@{uid}>" for uid in players])
+        await queue_channel.send(content=all_player_pings, embed=embed)
 
-    # Ping all players so they get notified
-    all_player_pings = " ".join([f"<@{uid}>" for uid in players])
-    await channel.send(content=all_player_pings, embed=embed)
     log_action(f"{match_label} cancelled due to no-shows: {[guild.get_member(uid).display_name if guild.get_member(uid) else str(uid) for uid in no_show_players]}")
+
+    # Delete the series text channel
+    series_channel_id = getattr(queue_state, 'series_text_channel_id', None)
+    if series_channel_id:
+        series_channel = guild.get_channel(series_channel_id)
+        if series_channel:
+            try:
+                await series_channel.delete(reason="Match cancelled - not all players showed up")
+                log_action(f"Deleted series text channel for {match_label}")
+            except Exception as e:
+                log_action(f"Failed to delete series text channel: {e}")
+
+    # Remove active match roles from all players and recycle match number
+    pending_match = getattr(queue_state, 'pending_match_number', None)
+    playlist_name = getattr(queue_state, 'playlist_name', 'MLG4v4')
+    if pending_match and not test_mode:
+        try:
+            from searchmatchmaking import remove_active_match_roles
+            await remove_active_match_roles(guild, players, playlist_name, pending_match)
+            log_action(f"Removed match roles for cancelled match #{pending_match}")
+
+            # Recycle the match number - decrement counter so next match reuses this number
+            from ingame import Series
+            if Series.match_counter >= pending_match:
+                Series.match_counter = pending_match - 1
+                log_action(f"Recycled match number - counter reset to {Series.match_counter}")
+        except Exception as e:
+            log_action(f"Failed to remove match roles: {e}")
 
     # Reset queue state
     queue_state.locked = False
     queue_state.locked_players.clear()
     queue_state.pregame_vc_id = None
     queue_state.pregame_message = None
+    queue_state.series_text_channel_id = None
+    queue_state.pending_match_number = None  # Clear the pending match number
     queue_state.test_mode = False
 
-    # Recreate the queue embed
-    await create_queue_embed(channel)
+    # Recreate the queue embed in the queue channel
+    if queue_channel:
+        await create_queue_embed(queue_channel)
 
 
 async def check_no_shows(channel: discord.TextChannel, view, no_show_players: List[int], pregame_vc_id: int, timeout_seconds: int):
@@ -648,6 +883,8 @@ class TeamSelectionView(View):
         self.pregame_message = None  # Will be set after sending
         self.pregame_vc_id = pregame_vc_id
         self.match_label = match_label
+        self.resolved = False  # Set to True when a method is selected
+        self.channel = None  # Will be set after sending
     
     @discord.ui.button(label="Balanced (MMR)", style=discord.ButtonStyle.primary, custom_id="balanced")
     async def balanced(self, interaction: discord.Interaction, button: Button):
@@ -665,12 +902,9 @@ class TeamSelectionView(View):
         """Update the embed to show current votes"""
         from searchmatchmaking import get_queue_progress_image
 
-        # Calculate majority threshold
-        majority_needed = (len(self.players) // 2) + 1  # 5 for 8 players
-
         embed = discord.Embed(
             title=f"Pregame Lobby - {self.match_label}",
-            description=f"Select your preferred team selection method:\n**{majority_needed} votes needed** for majority!",
+            description=f"Select your preferred team selection method:",
             color=discord.Color.gold()
         )
 
@@ -683,30 +917,29 @@ class TeamSelectionView(View):
         player_list = "\n".join([f"<@{uid}>" for uid in self.players])
         embed.add_field(name=f"Players ({player_count})", value=player_list, inline=False)
 
-        # Show votes with counts
+        # Show votes with counts - ALL votes count toward majority (players + staff + admins)
         if self.votes:
-            # Count votes per option
+            # Count ALL votes per option
             vote_counts = {}
             for vote in self.votes.values():
                 vote_counts[vote] = vote_counts.get(vote, 0) + 1
 
-            # Format vote summary
+            # Format vote summary (just show counts, threshold logged internally)
             option_labels = {"balanced": "Balanced (MMR)", "captains": "Captains Pick", "players_pick": "Players Pick"}
             vote_summary = []
             for option in ["balanced", "captains", "players_pick"]:
                 count = vote_counts.get(option, 0)
                 if count > 0:
                     label = option_labels.get(option, option)
-                    vote_summary.append(f"**{label}**: {count}/{majority_needed}")
+                    vote_summary.append(f"**{label}**: {count}")
 
             # Individual votes
             vote_text = "\n".join([f"<@{uid}>: {vote}" for uid, vote in self.votes.items()])
 
             if self.test_mode and votes_mismatch:
-                embed.add_field(name=f"⚠️ Votes Don't Match ({len(self.votes)}/{len(self.testers)})", value=vote_text + "\n\n*Change your vote to match!*", inline=False)
+                embed.add_field(name=f"⚠️ Votes Don't Match", value=vote_text + "\n\n*Change your vote to match!*", inline=False)
             else:
-                embed.add_field(name=f"Vote Counts ({len(self.votes)} votes)", value="\n".join(vote_summary) if vote_summary else "No votes yet", inline=False)
-                embed.add_field(name="Individual Votes", value=vote_text, inline=False)
+                embed.add_field(name=f"Votes", value="\n".join(vote_summary) if vote_summary else "No votes yet", inline=False)
 
         try:
             await self.pregame_message.edit(embed=embed, view=self)
@@ -716,6 +949,11 @@ class TeamSelectionView(View):
     async def handle_vote(self, interaction: discord.Interaction, method: str):
         """Handle team selection vote - requires majority (5+ of 8) OR 2 staff OR 2 admin"""
         from searchmatchmaking import queue_state
+
+        # Check if already resolved (timeout or majority reached)
+        if self.resolved:
+            await interaction.response.send_message("❌ Team selection has already been decided!", ephemeral=True)
+            return
 
         # Define roles
         ADMIN_ROLES = ["Overlord"]
@@ -808,7 +1046,8 @@ class TeamSelectionView(View):
                         log_action(f"Team selection decided by 2 staff: {option}")
                         break
 
-            # Check player majority (5+ of 8)
+            # Check majority (5+ votes) - count ALL votes (players + staff + admins)
+            # So 4 players + 1 staff = 5 votes = majority
             if not winning_method:
                 vote_counts = {}
                 for vote in self.votes.values():
@@ -818,7 +1057,7 @@ class TeamSelectionView(View):
                 for option, count in vote_counts.items():
                     if count >= majority_needed:
                         winning_method = option
-                        log_action(f"Team selection decided by majority: {option}")
+                        log_action(f"Team selection decided by majority: {option} ({count}/{majority_needed} votes)")
                         break
 
             if not winning_method:
@@ -828,6 +1067,9 @@ class TeamSelectionView(View):
 
             # Found winner - use the winning method
             method = winning_method
+
+        # Mark as resolved to stop the timeout task
+        self.resolved = True
 
         # Execute the selected method - edit existing embed instead of posting new ones
         if method == "balanced":
@@ -961,17 +1203,12 @@ class TeamSelectionView(View):
         captains = random.sample(self.players, 2)
         remaining = [p for p in self.players if p not in captains]
 
-        embed = discord.Embed(
-            title=f"Captains Draft - {self.match_label}",
-            description="Captains will pick their teams!",
-            color=discord.Color.purple()
-        )
+        # Create view and initialize buttons with MMR
+        view = CaptainDraftView(captains, remaining, test_mode=self.test_mode, match_label=self.match_label, guild=interaction.guild)
+        await view.initialize_buttons()
 
-        embed.add_field(name=f"<:redteam:{RED_TEAM_EMOJI_ID}> Captain 1 (Red)", value=f"<@{captains[0]}>", inline=True)
-        embed.add_field(name=f"<:blueteam:{BLUE_TEAM_EMOJI_ID}> Captain 2 (Blue)", value=f"<@{captains[1]}>", inline=True)
-        embed.add_field(name="Available Players", value="\n".join([f"<@{uid}>" for uid in remaining]), inline=False)
-
-        view = CaptainDraftView(captains, remaining, test_mode=self.test_mode, match_label=self.match_label)
+        # Build initial embed (MMR shown in buttons only)
+        embed = view.build_draft_embed()
 
         # Edit the existing pregame message instead of posting new one
         if self.pregame_message:
@@ -1012,6 +1249,166 @@ class TeamSelectionView(View):
         msg = await interaction.followup.send(embed=embed, view=view)
         view.pick_message = msg
 
+    # Timeout handler methods (called without interaction when timer expires)
+    async def create_balanced_teams_from_timeout(self, channel: discord.TextChannel):
+        """Create balanced teams when timeout expires - called without interaction"""
+        from searchmatchmaking import queue_state
+        from itertools import combinations
+
+        # Get all MMRs
+        player_mmrs = {}
+        for user_id in self.players:
+            mmr = await get_player_mmr(user_id)
+            player_mmrs[user_id] = mmr
+
+        # Get guest mapping
+        guest_to_host = {}
+        if hasattr(queue_state, 'guests'):
+            for guest_id, guest_info in queue_state.guests.items():
+                if guest_id in self.players:
+                    guest_to_host[guest_id] = guest_info['host_id']
+
+        # Find hosts that are in this match
+        hosts_in_match = set(guest_to_host.values()) & set(self.players)
+        host_guest_pairs = {host: [] for host in hosts_in_match}
+        for guest_id, host_id in guest_to_host.items():
+            if host_id in hosts_in_match:
+                host_guest_pairs[host_id].append(guest_id)
+
+        # Create "units" - either individual players or host+guests as a unit
+        units = []
+        players_in_units = set()
+        for host_id, guests in host_guest_pairs.items():
+            unit = [host_id] + guests
+            units.append(unit)
+            players_in_units.update(unit)
+
+        for player_id in self.players:
+            if player_id not in players_in_units:
+                units.append([player_id])
+
+        def unit_mmr(unit):
+            return sum(player_mmrs.get(p, 1500) for p in unit)
+
+        def team_mmr(team_units):
+            return sum(unit_mmr(u) for u in team_units)
+
+        def team_size(team_units):
+            return sum(len(u) for u in team_units)
+
+        # Find balanced teams
+        best_diff = float('inf')
+        best_red = None
+        best_blue = None
+
+        for i in range(1, len(units)):
+            for red_units in combinations(units, i):
+                red_size = team_size(red_units)
+                if red_size != 4:
+                    continue
+                blue_units = [u for u in units if u not in red_units]
+                blue_size = team_size(blue_units)
+                if blue_size != 4:
+                    continue
+                diff = abs(team_mmr(red_units) - team_mmr(blue_units))
+                if diff < best_diff:
+                    best_diff = diff
+                    best_red = red_units
+                    best_blue = blue_units
+
+        if best_red is None or best_blue is None:
+            embed = discord.Embed(
+                title="❌ Balanced Teams Error",
+                description="Could not create balanced 4v4 teams. Defaulting to Players Pick.",
+                color=discord.Color.red()
+            )
+            if self.pregame_message:
+                await self.pregame_message.edit(embed=embed, view=None)
+            await self.start_players_pick_from_timeout(channel)
+            return
+
+        red_team = [p for unit in best_red for p in unit]
+        blue_team = [p for unit in best_blue for p in unit]
+
+        log_action(f"Timeout balanced teams: Red={[player_mmrs[p] for p in red_team]}, Blue={[player_mmrs[p] for p in blue_team]}")
+
+        # Show confirmation with reject option
+        await show_balanced_teams_confirmation(
+            channel, red_team, blue_team, player_mmrs, self.players,
+            self.test_mode, self.testers, self.pregame_vc_id, self.match_label,
+            pregame_message=self.pregame_message
+        )
+
+    async def start_captains_draft_from_timeout(self, channel: discord.TextChannel):
+        """Start captains draft when timeout expires - called without interaction"""
+        from searchmatchmaking import queue_state
+
+        # Get MMRs for sorting
+        player_mmrs = {}
+        for user_id in self.players:
+            mmr = await get_player_mmr(user_id)
+            player_mmrs[user_id] = mmr
+
+        sorted_players = sorted(self.players, key=lambda x: player_mmrs.get(x, 1500), reverse=True)
+
+        # Top 2 MMR are captains
+        captain1_id = sorted_players[0]
+        captain2_id = sorted_players[1]
+        available_players = sorted_players[2:]
+
+        member1 = channel.guild.get_member(captain1_id)
+        member2 = channel.guild.get_member(captain2_id)
+        captain1_name = member1.display_name if member1 else f"Player {captain1_id}"
+        captain2_name = member2.display_name if member2 else f"Player {captain2_id}"
+
+        embed = discord.Embed(
+            title=f"Captains Draft - {self.match_label}",
+            description=f"**Captains selected by highest MMR!**\n\n🔴 **Red Captain:** {captain1_name} ({player_mmrs.get(captain1_id, 1500)} MMR)\n🔵 **Blue Captain:** {captain2_name} ({player_mmrs.get(captain2_id, 1500)} MMR)",
+            color=discord.Color.gold()
+        )
+
+        view = CaptainDraftView(
+            captain1_id, captain2_id, available_players,
+            captain1_name, captain2_name,
+            test_mode=self.test_mode, testers=self.testers,
+            match_label=self.match_label
+        )
+
+        if self.pregame_message:
+            try:
+                await self.pregame_message.edit(embed=embed, view=view)
+                view.draft_message = self.pregame_message
+                return
+            except:
+                pass
+
+        msg = await channel.send(embed=embed, view=view)
+        view.draft_message = msg
+
+    async def start_players_pick_from_timeout(self, channel: discord.TextChannel):
+        """Start players pick when timeout expires - called without interaction"""
+        embed = discord.Embed(
+            title=f"Players Pick Teams - {self.match_label}",
+            description="Click a button to join a team!\n\nTeams must be **4v4** to proceed.",
+            color=discord.Color.green()
+        )
+
+        embed.add_field(name=f"<:redteam:{RED_TEAM_EMOJI_ID}> Red Team (0/4)", value="*No players yet*", inline=True)
+        embed.add_field(name=f"<:blueteam:{BLUE_TEAM_EMOJI_ID}> Blue Team (0/4)", value="*No players yet*", inline=True)
+
+        view = PlayersPickView(self.players, test_mode=self.test_mode, match_label=self.match_label)
+
+        if self.pregame_message:
+            try:
+                await self.pregame_message.edit(embed=embed, view=view)
+                view.pick_message = self.pregame_message
+                return
+            except:
+                pass
+
+        msg = await channel.send(embed=embed, view=view)
+        view.pick_message = msg
+
 
 async def show_balanced_teams_confirmation(
     channel: discord.TextChannel,
@@ -1025,7 +1422,7 @@ async def show_balanced_teams_confirmation(
     match_label: str,
     pregame_message: discord.Message = None
 ):
-    """Show balanced teams with 30-second confirmation timer.
+    """Show balanced teams with 15-second confirmation timer.
     If majority doesn't reject, teams proceed automatically.
     Edits existing pregame_message instead of creating new one."""
     import asyncio
@@ -1037,12 +1434,18 @@ async def show_balanced_teams_confirmation(
     view = BalancedTeamsRejectView(all_players, test_mode, testers)
     view.confirmation_message = pregame_message  # Use existing message
 
+    # Calculate average MMRs for each team
+    red_mmrs = [player_mmrs.get(uid, 1500) for uid in red_team]
+    blue_mmrs = [player_mmrs.get(uid, 1500) for uid in blue_team]
+    red_avg_mmr = int(sum(red_mmrs) / len(red_mmrs)) if red_mmrs else 1500
+    blue_avg_mmr = int(sum(blue_mmrs) / len(blue_mmrs)) if blue_mmrs else 1500
+
     # Build team display (just player names, no MMR)
     red_mentions = "\n".join([f"<@{uid}>" for uid in red_team])
     blue_mentions = "\n".join([f"<@{uid}>" for uid in blue_team])
 
-    # 30-second countdown
-    for seconds_left in range(30, -1, -1):
+    # 15-second countdown
+    for seconds_left in range(15, -1, -1):
         embed = discord.Embed(
             title=f"Balanced Teams - {match_label}",
             description=f"Teams will be locked in **{seconds_left}** seconds...\n\nVote **Reject** if you want to re-pick teams.",
@@ -1050,21 +1453,20 @@ async def show_balanced_teams_confirmation(
         )
 
         embed.add_field(
-            name=f"<:redteam:{RED_TEAM_EMOJI_ID}> Red Team Voice",
+            name=f"<:redteam:{RED_TEAM_EMOJI_ID}> Red Team (Avg: {red_avg_mmr})",
             value=red_mentions,
             inline=True
         )
         embed.add_field(
-            name=f"<:blueteam:{BLUE_TEAM_EMOJI_ID}> Blue Team Voice",
+            name=f"<:blueteam:{BLUE_TEAM_EMOJI_ID}> Blue Team (Avg: {blue_avg_mmr})",
             value=blue_mentions,
             inline=True
         )
 
         # Show reject votes
         reject_count = len(view.reject_votes)
-        majority_needed = (len(all_players) // 2) + 1  # 5 for 8 players
         embed.add_field(
-            name=f"Reject Votes ({reject_count}/{majority_needed} needed)",
+            name=f"Reject Votes ({reject_count})",
             value=", ".join([f"<@{uid}>" for uid in view.reject_votes]) if view.reject_votes else "None",
             inline=False
         )
@@ -1135,7 +1537,7 @@ async def show_team_selection_after_reject(
 
 
 class BalancedTeamsRejectView(View):
-    """View for rejecting balanced teams within 10 seconds"""
+    """View for rejecting balanced teams within 15 seconds"""
     def __init__(self, players: List[int], test_mode: bool = False, testers: List[int] = None):
         super().__init__(timeout=None)
         self.players = players
@@ -1182,58 +1584,250 @@ class BalancedTeamsRejectView(View):
                 self.rejected = True
 
 
+class PickConfirmationView(View):
+    """View with Yes/No buttons to confirm player pick during captain draft"""
+    def __init__(self, draft_view: 'CaptainDraftView', selected_id: int, picker_id: int):
+        super().__init__(timeout=60)  # 60 second timeout
+        self.draft_view = draft_view
+        self.selected_id = selected_id
+        self.picker_id = picker_id
+
+        # Get player name for button labels
+        member = draft_view.guild.get_member(selected_id) if draft_view.guild else None
+        player_name = member.display_name if member else f"Player {selected_id}"
+
+        # Green Yes button
+        yes_button = Button(
+            label=f"✅ Yes, pick {player_name}",
+            style=discord.ButtonStyle.success,
+            custom_id=f"confirm_pick_{selected_id}"
+        )
+        yes_button.callback = self.confirm_callback
+        self.add_item(yes_button)
+
+        # Red No button
+        no_button = Button(
+            label="❌ No, go back",
+            style=discord.ButtonStyle.danger,
+            custom_id=f"cancel_pick_{selected_id}"
+        )
+        no_button.callback = self.cancel_callback
+        self.add_item(no_button)
+
+    async def confirm_callback(self, interaction: discord.Interaction):
+        """Handle confirmation - proceed with the pick"""
+        if interaction.user.id != self.picker_id:
+            await interaction.response.send_message("❌ Only the captain who selected can confirm!", ephemeral=True)
+            return
+        await self.draft_view.confirm_pick(interaction, self.selected_id, self.picker_id)
+
+    async def cancel_callback(self, interaction: discord.Interaction):
+        """Handle cancellation - go back to draft view"""
+        if interaction.user.id != self.picker_id:
+            await interaction.response.send_message("❌ Only the captain who selected can cancel!", ephemeral=True)
+            return
+        await self.draft_view.cancel_pick(interaction)
+
+
 class CaptainDraftView(View):
-    def __init__(self, captains: List[int], remaining: List[int], test_mode: bool = False, match_label: str = "Match"):
+    def __init__(self, captains: List[int], remaining: List[int], test_mode: bool = False, match_label: str = "Match", guild: discord.Guild = None):
         super().__init__(timeout=None)
         self.captain1 = captains[0]
         self.captain2 = captains[1]
         self.remaining = remaining
         self.red_team = [self.captain1]
         self.blue_team = [self.captain2]
-        self.current_picker = self.captain1
         self.test_mode = test_mode
         self.match_label = match_label
         self.draft_message = None  # Will be set after sending/editing
+        self.guild = guild
+        self.player_mmrs = {}  # Cache MMR values
+        self.player_ranks = {}  # Cache rank values
+        self.pick_history = []  # Track picks for undo: [(player_id, team), ...]
 
-        # Add player selection dropdown
-        self.update_dropdown()
-    
-    def update_dropdown(self):
-        """Update player selection dropdown"""
+    async def initialize_buttons(self):
+        """Initialize buttons with player names, ranks, and MMR - must be called after __init__"""
+        # Fetch MMR and rank for captains (already on teams)
+        self.player_mmrs[self.captain1] = await get_player_mmr(self.captain1)
+        self.player_mmrs[self.captain2] = await get_player_mmr(self.captain2)
+        self.player_ranks[self.captain1] = get_player_rank(self.captain1)
+        self.player_ranks[self.captain2] = get_player_rank(self.captain2)
+        # Fetch MMR and rank for all remaining players
+        for uid in self.remaining:
+            self.player_mmrs[uid] = await get_player_mmr(uid)
+            self.player_ranks[uid] = get_player_rank(uid)
+        self.update_buttons()
+
+    def update_buttons(self):
+        """Update player selection buttons - show all players with team colors and rank emojis"""
         self.clear_items()
-        
-        if not self.remaining:
-            # Draft complete
-            return
-        
-        options = [
-            discord.SelectOption(label=f"Player {i+1}", value=str(uid))
-            for i, uid in enumerate(self.remaining)
-        ]
-        
-        select = Select(
-            placeholder=f"Captain <@{self.current_picker}> - Pick a player",
-            options=options,
-            custom_id="pick_player"
+
+        # Row 0: Captains (always shown with team colors)
+        # Red captain - format: {rank_emoji} - {name} - {MMR} MMR (C)
+        c1_member = self.guild.get_member(self.captain1) if self.guild else None
+        c1_name = c1_member.display_name if c1_member else f"Captain"
+        if len(c1_name) > 10:
+            c1_name = c1_name[:7] + "..."
+        c1_mmr = self.player_mmrs.get(self.captain1, 500)
+        c1_rank = self.player_ranks.get(self.captain1, 1)
+        c1_rank_emoji = get_rank_emoji(self.guild, c1_rank)
+        captain1_btn = Button(
+            label=f"🔴 {c1_rank_emoji} {c1_name} - {c1_mmr} MMR (C)",
+            style=discord.ButtonStyle.danger,
+            custom_id=f"captain_{self.captain1}",
+            disabled=True,
+            row=0
         )
-        select.callback = self.pick_player
-        self.add_item(select)
-    
-    async def pick_player(self, interaction: discord.Interaction):
-        """Handle player pick"""
-        if interaction.user.id != self.current_picker:
-            await interaction.response.send_message("❌ Not your turn!", ephemeral=True)
+        self.add_item(captain1_btn)
+
+        # Blue captain
+        c2_member = self.guild.get_member(self.captain2) if self.guild else None
+        c2_name = c2_member.display_name if c2_member else f"Captain"
+        if len(c2_name) > 10:
+            c2_name = c2_name[:7] + "..."
+        c2_mmr = self.player_mmrs.get(self.captain2, 500)
+        c2_rank = self.player_ranks.get(self.captain2, 1)
+        c2_rank_emoji = get_rank_emoji(self.guild, c2_rank)
+        captain2_btn = Button(
+            label=f"🔵 {c2_rank_emoji} {c2_name} - {c2_mmr} MMR (C)",
+            style=discord.ButtonStyle.primary,
+            custom_id=f"captain_{self.captain2}",
+            disabled=True,
+            row=0
+        )
+        self.add_item(captain2_btn)
+
+        # Build button list for other players: picked players first, then available
+        button_order = []
+        # Add red team picks (excluding captain)
+        for uid in self.red_team:
+            if uid != self.captain1:
+                button_order.append((uid, 'RED'))
+        # Add blue team picks (excluding captain)
+        for uid in self.blue_team:
+            if uid != self.captain2:
+                button_order.append((uid, 'BLUE'))
+        # Add remaining (available) sorted by MMR (highest to lowest)
+        sorted_remaining = sorted(self.remaining, key=lambda uid: self.player_mmrs.get(uid, 500), reverse=True)
+        for uid in sorted_remaining:
+            button_order.append((uid, None))
+
+        # Create buttons for each player (rows 1-2 for up to 6 players)
+        for i, (uid, team) in enumerate(button_order):
+            member = self.guild.get_member(uid) if self.guild else None
+            player_name = member.display_name if member else f"Player {uid}"
+            if len(player_name) > 10:
+                player_name = player_name[:7] + "..."
+
+            mmr = self.player_mmrs.get(uid, 500)
+            rank = self.player_ranks.get(uid, 1)
+            rank_emoji = get_rank_emoji(self.guild, rank)
+            row = 1 + (i // 3)  # Start at row 1 (row 0 is captains)
+
+            if team == 'RED':
+                # Picked for red team - red button, disabled
+                button = Button(
+                    label=f"🔴 {rank_emoji} {player_name} - {mmr} MMR",
+                    style=discord.ButtonStyle.danger,
+                    custom_id=f"picked_{uid}",
+                    disabled=True,
+                    row=row
+                )
+            elif team == 'BLUE':
+                # Picked for blue team - blue button, disabled
+                button = Button(
+                    label=f"🔵 {rank_emoji} {player_name} - {mmr} MMR",
+                    style=discord.ButtonStyle.primary,
+                    custom_id=f"picked_{uid}",
+                    disabled=True,
+                    row=row
+                )
+            else:
+                # Available - grey button, clickable by either captain
+                button = Button(
+                    label=f"{rank_emoji} {player_name} - {mmr} MMR",
+                    style=discord.ButtonStyle.secondary,
+                    custom_id=f"pick_{uid}",
+                    row=row
+                )
+                button.callback = self.make_pick_callback(uid)
+
+            self.add_item(button)
+
+        # Row 3: Undo Last Pick button (only show if there are picks to undo)
+        if hasattr(self, 'pick_history') and self.pick_history:
+            undo_btn = Button(
+                label="↩️ Undo Last Pick",
+                style=discord.ButtonStyle.secondary,
+                custom_id="undo_pick",
+                row=3
+            )
+            undo_btn.callback = self.undo_last_pick
+            self.add_item(undo_btn)
+
+    def make_pick_callback(self, player_id: int):
+        """Create a callback for picking a specific player"""
+        async def callback(interaction: discord.Interaction):
+            await self.show_pick_confirmation(interaction, player_id)
+        return callback
+
+    async def show_pick_confirmation(self, interaction: discord.Interaction, selected_id: int):
+        """Show confirmation buttons before picking a player - either captain can pick"""
+        picker_id = interaction.user.id
+
+        # Only captains can pick
+        if picker_id != self.captain1 and picker_id != self.captain2:
+            await interaction.response.send_message("❌ Only captains can pick players!", ephemeral=True)
             return
 
-        selected_id = int(interaction.values[0])
+        # Check if captain's team is already full (4 players)
+        if picker_id == self.captain1 and len(self.red_team) >= 4:
+            await interaction.response.send_message("❌ Your team is already full!", ephemeral=True)
+            return
+        if picker_id == self.captain2 and len(self.blue_team) >= 4:
+            await interaction.response.send_message("❌ Your team is already full!", ephemeral=True)
+            return
 
-        # Add to current team
-        if self.current_picker == self.captain1:
+        # Get player name and rank for confirmation message
+        member = self.guild.get_member(selected_id) if self.guild else None
+        player_name = member.display_name if member else f"Player {selected_id}"
+        mmr = self.player_mmrs.get(selected_id, 500)
+        rank = self.player_ranks.get(selected_id, 1)
+        rank_emoji = get_rank_emoji(self.guild, rank)
+
+        # Determine which team they'll join based on who's picking
+        team_name = "Red" if picker_id == self.captain1 else "Blue"
+        team_emoji = "🔴" if team_name == "Red" else "🔵"
+
+        # Build confirmation embed
+        embed = discord.Embed(
+            title=f"Confirm Pick - {self.match_label}",
+            description=f"**<@{picker_id}>**, are you sure you want to pick:\n\n"
+                       f"**{team_emoji} {rank_emoji} {player_name}** ({mmr} MMR)\n\n"
+                       f"This player will join **{team_name} Team**.",
+            color=discord.Color.gold()
+        )
+
+        # Show current team status
+        red_text = "\n".join([f"<@{uid}>" for uid in self.red_team]) or "*Captain only*"
+        blue_text = "\n".join([f"<@{uid}>" for uid in self.blue_team]) or "*Captain only*"
+        embed.add_field(name=f"🔴 Red Team ({len(self.red_team)}/4)", value=red_text, inline=True)
+        embed.add_field(name=f"🔵 Blue Team ({len(self.blue_team)}/4)", value=blue_text, inline=True)
+
+        # Create confirmation view - pass the picker who clicked
+        confirm_view = PickConfirmationView(self, selected_id, picker_id)
+
+        await interaction.response.edit_message(embed=embed, view=confirm_view)
+
+    async def confirm_pick(self, interaction: discord.Interaction, selected_id: int, picker_id: int):
+        """Actually execute the pick after confirmation"""
+        # Add to the picking captain's team
+        if picker_id == self.captain1:
             self.red_team.append(selected_id)
-            self.current_picker = self.captain2
+            self.pick_history.append((selected_id, 'RED'))
         else:
             self.blue_team.append(selected_id)
-            self.current_picker = self.captain1
+            self.pick_history.append((selected_id, 'BLUE'))
 
         self.remaining.remove(selected_id)
 
@@ -1248,13 +1842,44 @@ class CaptainDraftView(View):
                 pass
             await finalize_teams(interaction.channel, self.red_team, self.blue_team, test_mode=self.test_mode)
         else:
-            # Update dropdown and embed with current teams
-            self.update_dropdown()
+            # Update buttons and embed with current teams
+            self.update_buttons()
             embed = self.build_draft_embed()
             await interaction.response.edit_message(embed=embed, view=self)
 
+    async def cancel_pick(self, interaction: discord.Interaction):
+        """Cancel the pick and return to normal view"""
+        self.update_buttons()
+        embed = self.build_draft_embed()
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    async def undo_last_pick(self, interaction: discord.Interaction):
+        """Undo the last pick - only captains can undo"""
+        if interaction.user.id != self.captain1 and interaction.user.id != self.captain2:
+            await interaction.response.send_message("❌ Only captains can undo picks!", ephemeral=True)
+            return
+
+        if not self.pick_history:
+            await interaction.response.send_message("❌ No picks to undo!", ephemeral=True)
+            return
+
+        # Pop the last pick
+        player_id, team = self.pick_history.pop()
+
+        # Remove from team and add back to remaining
+        if team == 'RED':
+            self.red_team.remove(player_id)
+        else:
+            self.blue_team.remove(player_id)
+        self.remaining.append(player_id)
+
+        # Update buttons and embed
+        self.update_buttons()
+        embed = self.build_draft_embed()
+        await interaction.response.edit_message(embed=embed, view=self)
+
     def build_draft_embed(self, complete: bool = False) -> discord.Embed:
-        """Build the captain draft embed showing current team status"""
+        """Build the captain draft embed showing current team status (MMR shown in buttons only)"""
         if complete:
             embed = discord.Embed(
                 title=f"Captains Draft - {self.match_label}",
@@ -1264,11 +1889,11 @@ class CaptainDraftView(View):
         else:
             embed = discord.Embed(
                 title=f"Captains Draft - {self.match_label}",
-                description=f"**<@{self.current_picker}>** is picking...",
+                description=f"🔴 **<@{self.captain1}>** and 🔵 **<@{self.captain2}>** - pick your players!",
                 color=discord.Color.purple()
             )
 
-        # Red team
+        # Red team - just names/mentions
         red_text = "\n".join([f"<@{uid}>" for uid in self.red_team])
         embed.add_field(
             name=f"<:redteam:{RED_TEAM_EMOJI_ID}> Red Team ({len(self.red_team)}/4)",
@@ -1276,7 +1901,7 @@ class CaptainDraftView(View):
             inline=True
         )
 
-        # Blue team
+        # Blue team - just names/mentions
         blue_text = "\n".join([f"<@{uid}>" for uid in self.blue_team])
         embed.add_field(
             name=f"<:blueteam:{BLUE_TEAM_EMOJI_ID}> Blue Team ({len(self.blue_team)}/4)",
@@ -1284,10 +1909,13 @@ class CaptainDraftView(View):
             inline=True
         )
 
-        # Available players
+        # Available players section removed - MMR shown in buttons
         if self.remaining:
-            remaining_text = "\n".join([f"<@{uid}>" for uid in self.remaining])
-            embed.add_field(name="Available Players", value=remaining_text, inline=False)
+            embed.add_field(
+                name="Available Players",
+                value="*Click a button below to pick*",
+                inline=False
+            )
 
         return embed
 
@@ -1490,43 +2118,65 @@ async def finalize_teams(channel: discord.TextChannel, red_team: List[int], blue
     from ingame import Series, show_series_embed
     from searchmatchmaking import queue_state
 
-    temp_series = Series(red_team, blue_team, test_mode, testers=testers)
+    # Use pending match number if roles were already assigned when queue filled
+    pending_match = getattr(queue_state, 'pending_match_number', None)
+    playlist_name = getattr(queue_state, 'playlist_name', 'MLG4v4')
+    temp_series = Series(red_team, blue_team, test_mode, testers=testers, pending_match_number=pending_match, playlist_name=playlist_name)
+    # Clear the pending match number since it's been used
+    queue_state.pending_match_number = None
     series_label = temp_series.series_number  # "Series 1" or "Test 1"
 
-    # Create series text channel - format: "Series # - 🔴avgmmr vs 🔵avgmmr"
-    # Use a text channel category (Matchmaking category)
-    text_category_id = 1403855141857337501  # Matchmaking category
-    text_category = guild.get_channel(text_category_id)
+    # Get the existing series text channel (created in start_pregame) and rename it with MMRs
+    series_text_channel = None
+    if hasattr(queue_state, 'series_text_channel_id') and queue_state.series_text_channel_id:
+        series_text_channel = guild.get_channel(queue_state.series_text_channel_id)
 
-    series_text_channel_name = f"{series_label} - 🔴{red_avg_mmr} vs 🔵{blue_avg_mmr}"
-    series_text_channel = await guild.create_text_channel(
-        name=series_text_channel_name,
-        category=text_category,
-        topic=f"Series channel for {series_label} - Auto-deleted when series ends"
-    )
+    if series_text_channel:
+        # Rename existing channel with MMRs
+        series_text_channel_name = f"{series_label}-🔴{red_avg_mmr}-vs-🔵{blue_avg_mmr}"
+        try:
+            await series_text_channel.edit(
+                name=series_text_channel_name,
+                topic=f"Series channel for {series_label} - Auto-deleted when series ends"
+            )
+            log_action(f"Renamed series text channel to: {series_text_channel_name}")
+        except Exception as e:
+            log_action(f"Failed to rename series text channel: {e}")
+    else:
+        # Fallback: create new channel if none exists (shouldn't happen normally)
+        text_category_id = 1403916181554860112  # Matchmaking category
+        text_category = guild.get_channel(text_category_id)
+        series_text_channel_name = f"{series_label}-🔴{red_avg_mmr}-vs-🔵{blue_avg_mmr}"
+        series_text_channel = await guild.create_text_channel(
+            name=series_text_channel_name,
+            category=text_category,
+            topic=f"Series channel for {series_label} - Auto-deleted when series ends",
+            position=998  # Position at bottom of category, just above voice channels
+        )
+        log_action(f"Created series text channel (fallback): {series_text_channel.name}")
+
     temp_series.text_channel_id = series_text_channel.id
-    log_action(f"Created series text channel: {series_text_channel.name} (ID: {series_text_channel.id})")
-    
-    # Get the Voice Channels category (not the Matchmaking category)
-    voice_category_id = 1403916181554860112
-    category = guild.get_channel(voice_category_id)
-    
+
+    # Create Red/Blue voice channels in Matchmaking category (below text channel)
+    text_category_id = 1403916181554860112  # Matchmaking category
+    mm_category = guild.get_channel(text_category_id)
+
     # Create Red Team voice channel with team emoji and series number (no "Red" text)
     red_vc_name = f"🔴 {series_label}"
     red_vc = await guild.create_voice_channel(
         name=red_vc_name,
-        category=category,
+        category=mm_category,
         user_limit=None,
-        position=999  # Position at bottom
+        position=999  # Position at bottom (below text channel)
     )
 
     # Create Blue Team voice channel with team emoji and series number (no "Blue" text)
     blue_vc_name = f"🔵 {series_label}"
     blue_vc = await guild.create_voice_channel(
         name=blue_vc_name,
-        category=category,
+        category=mm_category,
         user_limit=None,
-        position=999  # Position at bottom
+        position=999  # Position at bottom (below text channel)
     )
 
     # Move players from pregame (or any voice channel) to their team channels
@@ -1598,29 +2248,19 @@ async def finalize_teams(channel: discord.TextChannel, red_team: List[int], blue
             except:
                 pass
         queue_state.pregame_vc_id = None
-    
+
+    # Clear the series text channel ID from queue state (now owned by the series)
+    queue_state.series_text_channel_id = None
+
     # Assign the series we created earlier and set VC IDs
     queue_state.current_series = temp_series
     queue_state.current_series.red_vc_id = red_vc.id
     queue_state.current_series.blue_vc_id = blue_vc.id
     
-    # Remove SearchingMatchmaking role from all players (only for real matches)
+    # NOTE: Active match roles are now added EARLIER (when queue fills) so players
+    # can be pinged during team selection. See searchmatchmaking.py queue lock code.
+
     if not test_mode:
-        try:
-            searching_role = discord.utils.get(guild.roles, name="SearchingMatchmaking")
-            if searching_role:
-                all_players = red_team + blue_team
-                for user_id in all_players:
-                    member = guild.get_member(user_id)
-                    if member:
-                        try:
-                            await member.remove_roles(searching_role)
-                        except:
-                            pass
-                log_action("Removed SearchingMatchmaking role from all players")
-        except Exception as e:
-            log_action(f"Failed to remove SearchingMatchmaking roles: {e}")
-        
         # Clear queue since match is starting (only for real matches)
         queue_state.queue.clear()
         queue_state.queue_join_times.clear()
@@ -1854,6 +2494,13 @@ async def proceed_with_playlist_teams(
     match.map_name = map_name
     match.gametype = gametype
     ps.current_match = match
+
+    # Add active matchmaking roles to all players
+    try:
+        from searchmatchmaking import add_active_match_roles
+        await add_active_match_roles(guild, players, ps.name, match_number)
+    except Exception as e:
+        log_action(f"Failed to add active match roles: {e}")
 
     # Delete pregame message
     try:
@@ -2251,7 +2898,7 @@ class PlaylistPlayersPickView(View):
         category = guild.get_channel(voice_category_id)
 
         # Text channel category (Matchmaking)
-        text_category_id = 1403855141857337501
+        text_category_id = 1403916181554860112
         text_category = guild.get_channel(text_category_id)
 
         # Randomly assign team colors (team1/team2 -> red/blue)
@@ -2272,6 +2919,13 @@ class PlaylistPlayersPickView(View):
         match = PlaylistMatch(ps, self.players, red_team, blue_team)
         match.match_number = self.match_number  # Use projected number from pregame start
         ps.current_match = match
+
+        # Add active matchmaking roles to all players
+        try:
+            from searchmatchmaking import add_active_match_roles
+            await add_active_match_roles(guild, self.players, ps.name, self.match_number)
+        except Exception as e:
+            log_action(f"Failed to add active match roles: {e}")
 
         # Create text channel for this match: "Team {captain1} vs Team {captain2}"
         text_channel_name = f"Team {red_captain_name} vs Team {blue_captain_name}"

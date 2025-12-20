@@ -11,7 +11,7 @@ from typing import List, Dict, Optional, Tuple
 
 # File paths for different playlists
 WEBSITE_DATA_PATH = "/home/carnagereport/CarnageReport.com"
-MLG_4V4_HISTORY = "matchhistory.json"  # Local bot file for MLG 4v4
+MLG_4V4_HISTORY = "MLG4v4.json"  # Local bot file for MLG 4v4
 POSTED_SERIES_FILE = "posted_series.json"  # Track which series have been posted
 
 def log_action(message: str):

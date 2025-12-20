@@ -38,7 +38,7 @@ JSON_FILES = {
     "team_hardcore.json": "team_hardcore.json",
     "double_team.json": "double_team.json",
     "head_to_head.json": "head_to_head.json",
-    "testmatchhistory.json": "testmatchhistory.json",
+    "testMLG4v4.json": "testMLG4v4.json",
     # Stats and config (MMR.json excluded - local is always most recent)
     "gamestats.json": "gamestats.json",
     "queue_config.json": "queue_config.json",
@@ -235,8 +235,8 @@ def update_matchhistory_on_github():
     return push_file_to_github("MLG4v4.json", "MLG4v4.json")
 
 def update_testmatchhistory_on_github():
-    """Push testmatchhistory.json to GitHub"""
-    return push_file_to_github("testmatchhistory.json", "testmatchhistory.json")
+    """Push testMLG4v4.json to GitHub (obsolete - kept for compatibility)"""
+    return push_file_to_github("testMLG4v4.json", "testMLG4v4.json")
 
 def update_mmr_on_github():
     """Push MMR.json to GitHub"""
