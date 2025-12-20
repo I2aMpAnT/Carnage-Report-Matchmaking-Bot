@@ -535,10 +535,10 @@ async def end_series(series_view_or_channel, channel: discord.TextChannel = None
     # Move to postgame and delete VCs
     await cleanup_after_series(series, channel.guild)
 
-    # Clear state
+    # Clear state (but NOT the queue - players waiting should stay in queue)
     from searchmatchmaking import queue_state, update_queue_embed
     queue_state.current_series = None
-    queue_state.queue.clear()
+    # queue_state.queue.clear()  # REMOVED - don't clear queue, players are waiting!
     queue_state.test_mode = False
     queue_state.test_team = None
     queue_state.testers = []
