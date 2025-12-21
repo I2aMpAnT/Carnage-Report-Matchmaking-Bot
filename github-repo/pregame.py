@@ -576,40 +576,39 @@ async def team_selection_timeout(
             log_action(f"Team selection resolved before timeout")
             return
 
-        # Update embed with countdown every 10 seconds (or at key moments)
-        if seconds_left in [60, 50, 40, 30, 20, 10, 5, 4, 3, 2, 1, 0]:
-            embed = discord.Embed(
-                title=f"Pregame Lobby - {match_label}",
-                description=f"✅ **All players are in voice!**\n\nSelect your preferred team selection method:\n\n⏱️ **{seconds_left} seconds** remaining - defaults to Balanced if no majority",
-                color=discord.Color.green() if seconds_left > 10 else discord.Color.orange()
-            )
-            embed.set_image(url=get_queue_progress_image(8))
+        # Update embed with countdown every second
+        embed = discord.Embed(
+            title=f"Pregame Lobby - {match_label}",
+            description=f"✅ **All players are in voice!**\n\nSelect your preferred team selection method:\n\n⏱️ **{seconds_left} seconds** remaining - defaults to Balanced if no majority",
+            color=discord.Color.green() if seconds_left > 10 else discord.Color.orange()
+        )
+        embed.set_image(url=get_queue_progress_image(8))
 
-            player_count = f"{len(players)}/8 players"
-            if test_mode:
-                player_count += " (TEST MODE)"
-            player_list = "\n".join([f"<@{uid}>" for uid in players])
-            embed.add_field(name=f"Players ({player_count})", value=player_list, inline=False)
+        player_count = f"{len(players)}/8 players"
+        if test_mode:
+            player_count += " (TEST MODE)"
+        player_list = "\n".join([f"<@{uid}>" for uid in players])
+        embed.add_field(name=f"Players ({player_count})", value=player_list, inline=False)
 
-            # Show votes if any
-            if view.votes:
-                vote_counts = {}
-                for vote in view.votes.values():
-                    vote_counts[vote] = vote_counts.get(vote, 0) + 1
-                option_labels = {"balanced": "Balanced (MMR)", "captains": "Captains Pick", "players_pick": "Players Pick"}
-                vote_summary = []
-                for option in ["balanced", "captains", "players_pick"]:
-                    count = vote_counts.get(option, 0)
-                    if count > 0:
-                        label = option_labels.get(option, option)
-                        vote_summary.append(f"**{label}**: {count}")
-                if vote_summary:
-                    embed.add_field(name="Current Votes", value="\n".join(vote_summary), inline=False)
+        # Show votes if any
+        if view.votes:
+            vote_counts = {}
+            for vote in view.votes.values():
+                vote_counts[vote] = vote_counts.get(vote, 0) + 1
+            option_labels = {"balanced": "Balanced (MMR)", "captains": "Captains Pick", "players_pick": "Players Pick"}
+            vote_summary = []
+            for option in ["balanced", "captains", "players_pick"]:
+                count = vote_counts.get(option, 0)
+                if count > 0:
+                    label = option_labels.get(option, option)
+                    vote_summary.append(f"**{label}**: {count}")
+            if vote_summary:
+                embed.add_field(name="Current Votes", value="\n".join(vote_summary), inline=False)
 
-            try:
-                await view.pregame_message.edit(embed=embed, view=view)
-            except:
-                pass
+        try:
+            await view.pregame_message.edit(embed=embed, view=view)
+        except:
+            pass
 
         if seconds_left > 0:
             await asyncio.sleep(1)
@@ -1343,7 +1342,7 @@ class TeamSelectionView(View):
         """Start captains draft when timeout expires - called without interaction"""
         from searchmatchmaking import queue_state
 
-        # Get MMRs for sorting
+        # Get MMRs for sorting - top 2 become captains
         player_mmrs = {}
         for user_id in self.players:
             mmr = await get_player_mmr(user_id)
@@ -1352,27 +1351,15 @@ class TeamSelectionView(View):
         sorted_players = sorted(self.players, key=lambda x: player_mmrs.get(x, 1500), reverse=True)
 
         # Top 2 MMR are captains
-        captain1_id = sorted_players[0]
-        captain2_id = sorted_players[1]
-        available_players = sorted_players[2:]
+        captains = sorted_players[:2]
+        remaining = sorted_players[2:]
 
-        member1 = channel.guild.get_member(captain1_id)
-        member2 = channel.guild.get_member(captain2_id)
-        captain1_name = member1.display_name if member1 else f"Player {captain1_id}"
-        captain2_name = member2.display_name if member2 else f"Player {captain2_id}"
+        # Create view and initialize buttons with MMR (same as regular start_captains_draft)
+        view = CaptainDraftView(captains, remaining, test_mode=self.test_mode, match_label=self.match_label, guild=channel.guild)
+        await view.initialize_buttons()
 
-        embed = discord.Embed(
-            title=f"Captains Draft - {self.match_label}",
-            description=f"**Captains selected by highest MMR!**\n\n🔴 **Red Captain:** {captain1_name} ({player_mmrs.get(captain1_id, 1500)} MMR)\n🔵 **Blue Captain:** {captain2_name} ({player_mmrs.get(captain2_id, 1500)} MMR)",
-            color=discord.Color.gold()
-        )
-
-        view = CaptainDraftView(
-            captain1_id, captain2_id, available_players,
-            captain1_name, captain2_name,
-            test_mode=self.test_mode, testers=self.testers,
-            match_label=self.match_label
-        )
+        # Build initial embed
+        embed = view.build_draft_embed()
 
         if self.pregame_message:
             try:
