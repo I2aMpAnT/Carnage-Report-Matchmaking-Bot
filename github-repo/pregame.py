@@ -1195,32 +1195,40 @@ class TeamSelectionView(View):
         )
 
     async def start_captains_draft(self, interaction: discord.Interaction):
-        """Start captain draft - edits existing pregame embed"""
-        from searchmatchmaking import queue_state
+        """Start captain selection method vote - players vote on how captains are selected"""
+        from searchmatchmaking import queue_state, get_queue_progress_image
 
-        # Pick 2 random captains
-        captains = random.sample(self.players, 2)
-        remaining = [p for p in self.players if p not in captains]
+        # Show captain method selection view
+        view = CaptainMethodView(
+            self.players, test_mode=self.test_mode, testers=self.testers,
+            match_label=self.match_label, pregame_message=self.pregame_message, guild=interaction.guild
+        )
 
-        # Create view and initialize buttons with MMR
-        view = CaptainDraftView(captains, remaining, test_mode=self.test_mode, match_label=self.match_label, guild=interaction.guild)
-        await view.initialize_buttons()
+        embed = discord.Embed(
+            title=f"Captain Selection Method - {self.match_label}",
+            description=f"**How should captains be selected?**\n\n"
+                        f"🏆 **Highest MMR** - Top 2 MMR players are captains\n"
+                        f"📉 **Lowest MMR** - Bottom 2 MMR players are captains\n"
+                        f"🗳️ **Players Pick** - Vote for who should be captains\n\n"
+                        f"⏱️ **30 seconds** to vote - defaults to Highest MMR",
+            color=discord.Color.gold()
+        )
+        embed.set_image(url=get_queue_progress_image(8))
 
-        # Build initial embed (MMR shown in buttons only)
-        embed = view.build_draft_embed()
-
-        # Edit the existing pregame message instead of posting new one
+        # Edit the existing pregame message
         if self.pregame_message:
             try:
                 await self.pregame_message.edit(embed=embed, view=view)
-                view.draft_message = self.pregame_message
+                # Start timeout countdown
+                asyncio.create_task(captain_method_timeout(view, interaction.channel))
                 return
             except:
                 pass
 
         # Fallback: send new message if edit fails
         msg = await interaction.followup.send(embed=embed, view=view)
-        view.draft_message = msg
+        view.pregame_message = msg
+        asyncio.create_task(captain_method_timeout(view, interaction.channel))
 
     async def start_players_pick(self, interaction: discord.Interaction):
         """Start players pick teams - edits existing pregame embed"""
@@ -1339,38 +1347,37 @@ class TeamSelectionView(View):
         )
 
     async def start_captains_draft_from_timeout(self, channel: discord.TextChannel):
-        """Start captains draft when timeout expires - called without interaction"""
-        from searchmatchmaking import queue_state
+        """Start captain selection method vote when timeout expires - called without interaction"""
+        from searchmatchmaking import queue_state, get_queue_progress_image
 
-        # Get MMRs for sorting - top 2 become captains
-        player_mmrs = {}
-        for user_id in self.players:
-            mmr = await get_player_mmr(user_id)
-            player_mmrs[user_id] = mmr
+        # Show captain method selection view
+        view = CaptainMethodView(
+            self.players, test_mode=self.test_mode, testers=self.testers,
+            match_label=self.match_label, pregame_message=self.pregame_message, guild=channel.guild
+        )
 
-        sorted_players = sorted(self.players, key=lambda x: player_mmrs.get(x, 1500), reverse=True)
-
-        # Top 2 MMR are captains
-        captains = sorted_players[:2]
-        remaining = sorted_players[2:]
-
-        # Create view and initialize buttons with MMR (same as regular start_captains_draft)
-        view = CaptainDraftView(captains, remaining, test_mode=self.test_mode, match_label=self.match_label, guild=channel.guild)
-        await view.initialize_buttons()
-
-        # Build initial embed
-        embed = view.build_draft_embed()
+        embed = discord.Embed(
+            title=f"Captain Selection Method - {self.match_label}",
+            description=f"**How should captains be selected?**\n\n"
+                        f"🏆 **Highest MMR** - Top 2 MMR players are captains\n"
+                        f"📉 **Lowest MMR** - Bottom 2 MMR players are captains\n"
+                        f"🗳️ **Players Pick** - Vote for who should be captains\n\n"
+                        f"⏱️ **30 seconds** to vote - defaults to Highest MMR",
+            color=discord.Color.gold()
+        )
+        embed.set_image(url=get_queue_progress_image(8))
 
         if self.pregame_message:
             try:
                 await self.pregame_message.edit(embed=embed, view=view)
-                view.draft_message = self.pregame_message
+                asyncio.create_task(captain_method_timeout(view, channel))
                 return
             except:
                 pass
 
         msg = await channel.send(embed=embed, view=view)
-        view.draft_message = msg
+        view.pregame_message = msg
+        asyncio.create_task(captain_method_timeout(view, channel))
 
     async def start_players_pick_from_timeout(self, channel: discord.TextChannel):
         """Start players pick when timeout expires - called without interaction"""
@@ -1614,6 +1621,400 @@ class PickConfirmationView(View):
             await interaction.response.send_message("❌ Only the captain who selected can cancel!", ephemeral=True)
             return
         await self.draft_view.cancel_pick(interaction)
+
+
+class CaptainMethodView(View):
+    """View for selecting how captains should be chosen"""
+
+    def __init__(self, players: List[int], test_mode: bool = False, testers: List[int] = None,
+                 match_label: str = "Match", pregame_message: discord.Message = None, guild: discord.Guild = None):
+        super().__init__(timeout=None)
+        self.players = players
+        self.test_mode = test_mode
+        self.testers = testers or []
+        self.match_label = match_label
+        self.pregame_message = pregame_message
+        self.guild = guild
+        self.votes = {}  # user_id -> "highest_mmr", "lowest_mmr", or "players_pick"
+        self.resolved = False
+
+    @discord.ui.button(label="Highest MMR", style=discord.ButtonStyle.primary, custom_id="captain_highest_mmr", row=0)
+    async def highest_mmr_btn(self, interaction: discord.Interaction, button: Button):
+        await self.handle_vote(interaction, "highest_mmr")
+
+    @discord.ui.button(label="Lowest MMR", style=discord.ButtonStyle.secondary, custom_id="captain_lowest_mmr", row=0)
+    async def lowest_mmr_btn(self, interaction: discord.Interaction, button: Button):
+        await self.handle_vote(interaction, "lowest_mmr")
+
+    @discord.ui.button(label="Players Pick", style=discord.ButtonStyle.success, custom_id="captain_players_pick", row=0)
+    async def players_pick_btn(self, interaction: discord.Interaction, button: Button):
+        await self.handle_vote(interaction, "players_pick")
+
+    async def handle_vote(self, interaction: discord.Interaction, choice: str):
+        """Handle a vote for captain selection method"""
+        if self.resolved:
+            await interaction.response.send_message("❌ Captain selection method already chosen!", ephemeral=True)
+            return
+
+        # Only players in the match can vote
+        if interaction.user.id not in self.players:
+            await interaction.response.send_message("❌ Only players in this match can vote!", ephemeral=True)
+            return
+
+        await interaction.response.defer()
+
+        # Record vote
+        old_vote = self.votes.get(interaction.user.id)
+        self.votes[interaction.user.id] = choice
+
+        option_labels = {"highest_mmr": "Highest MMR", "lowest_mmr": "Lowest MMR", "players_pick": "Players Pick"}
+        if old_vote:
+            log_action(f"{interaction.user.display_name} changed vote from {option_labels.get(old_vote)} to {option_labels.get(choice)}")
+        else:
+            log_action(f"{interaction.user.display_name} voted for {option_labels.get(choice)} captain selection")
+
+        # Check for majority (5+ votes)
+        vote_counts = {}
+        for vote in self.votes.values():
+            vote_counts[vote] = vote_counts.get(vote, 0) + 1
+
+        for option, count in vote_counts.items():
+            if count >= 5:
+                self.resolved = True
+                log_action(f"Captain selection method majority reached: {option_labels.get(option)}")
+                await self.execute_method(option, interaction.channel)
+                return
+
+
+async def captain_method_timeout(view: CaptainMethodView, channel: discord.TextChannel):
+    """Handle 30-second timeout for captain method selection"""
+    from searchmatchmaking import get_queue_progress_image
+
+    TIMEOUT_SECONDS = 30
+
+    for seconds_left in range(TIMEOUT_SECONDS, -1, -1):
+        if getattr(view, 'resolved', False):
+            return
+
+        # Update embed every second
+        embed = discord.Embed(
+            title=f"Captain Selection Method - {view.match_label}",
+            description=f"**How should captains be selected?**\n\n"
+                        f"🏆 **Highest MMR** - Top 2 MMR players are captains\n"
+                        f"📉 **Lowest MMR** - Bottom 2 MMR players are captains\n"
+                        f"🗳️ **Players Pick** - Vote for who should be captains\n\n"
+                        f"⏱️ **{seconds_left} seconds** remaining - defaults to Highest MMR",
+            color=discord.Color.gold() if seconds_left > 10 else discord.Color.orange()
+        )
+        embed.set_image(url=get_queue_progress_image(8))
+
+        # Show votes
+        if view.votes:
+            vote_counts = {}
+            for vote in view.votes.values():
+                vote_counts[vote] = vote_counts.get(vote, 0) + 1
+            option_labels = {"highest_mmr": "Highest MMR", "lowest_mmr": "Lowest MMR", "players_pick": "Players Pick"}
+            vote_summary = []
+            for option in ["highest_mmr", "lowest_mmr", "players_pick"]:
+                count = vote_counts.get(option, 0)
+                if count > 0:
+                    label = option_labels.get(option, option)
+                    vote_summary.append(f"**{label}**: {count}")
+            if vote_summary:
+                embed.add_field(name="Current Votes", value="\n".join(vote_summary), inline=False)
+
+        try:
+            await view.pregame_message.edit(embed=embed, view=view)
+        except:
+            pass
+
+        if seconds_left > 0:
+            await asyncio.sleep(1)
+
+    if getattr(view, 'resolved', False):
+        return
+
+    # Time's up - determine winner
+    winning_method = "highest_mmr"  # Default
+
+    if view.votes:
+        vote_counts = {}
+        for vote in view.votes.values():
+            vote_counts[vote] = vote_counts.get(vote, 0) + 1
+
+        max_votes = 0
+        max_options = []
+        for option, count in vote_counts.items():
+            if count > max_votes:
+                max_votes = count
+                max_options = [option]
+            elif count == max_votes:
+                max_options.append(option)
+
+        if len(max_options) == 1:
+            winning_method = max_options[0]
+        elif "highest_mmr" in max_options:
+            winning_method = "highest_mmr"
+        else:
+            winning_method = max_options[0]
+
+    log_action(f"Captain method timeout - auto-selecting: {winning_method}")
+    view.resolved = True
+    await view.execute_method(winning_method, channel)
+
+
+class PlayersCaptainVoteView(View):
+    """View for players to vote on who should be captains - each player gets 2 votes"""
+
+    def __init__(self, players: List[int], test_mode: bool = False, testers: List[int] = None,
+                 match_label: str = "Match", pregame_message: discord.Message = None, guild: discord.Guild = None):
+        super().__init__(timeout=None)
+        self.players = players
+        self.test_mode = test_mode
+        self.testers = testers or []
+        self.match_label = match_label
+        self.pregame_message = pregame_message
+        self.guild = guild
+        self.votes = {}  # user_id -> [voted_player_id, voted_player_id] (max 2)
+        self.resolved = False
+        self.player_mmrs = {}
+        self.player_ranks = {}
+
+    async def initialize_buttons(self):
+        """Initialize player buttons with names and MMR"""
+        self.clear_items()
+
+        # Fetch MMR for all players
+        for uid in self.players:
+            self.player_mmrs[uid] = await get_player_mmr(uid)
+            self.player_ranks[uid] = get_player_rank(uid)
+
+        # Sort by MMR for display
+        sorted_players = sorted(self.players, key=lambda x: self.player_mmrs.get(x, 1500), reverse=True)
+
+        # Create a button for each player
+        for i, uid in enumerate(sorted_players):
+            member = self.guild.get_member(uid) if self.guild else None
+            name = member.display_name if member else f"Player"
+            if len(name) > 12:
+                name = name[:11] + "…"
+
+            mmr = self.player_mmrs.get(uid, 1500)
+            rank = self.player_ranks.get(uid)
+            rank_emoji = get_rank_emoji(rank) if rank else ""
+
+            # Count votes for this player
+            vote_count = sum(1 for votes in self.votes.values() for v in votes if v == uid)
+
+            btn = Button(
+                label=f"{rank_emoji} {name} ({mmr}) [{vote_count}]",
+                style=discord.ButtonStyle.secondary,
+                custom_id=f"captain_vote_{uid}",
+                row=i // 4  # 4 buttons per row
+            )
+            btn.callback = self.make_vote_callback(uid)
+            self.add_item(btn)
+
+    def make_vote_callback(self, player_id: int):
+        async def callback(interaction: discord.Interaction):
+            await self.handle_vote(interaction, player_id)
+        return callback
+
+    async def handle_vote(self, interaction: discord.Interaction, voted_for: int):
+        """Handle a vote for a captain candidate"""
+        if self.resolved:
+            await interaction.response.send_message("❌ Captains already selected!", ephemeral=True)
+            return
+
+        if interaction.user.id not in self.players:
+            await interaction.response.send_message("❌ Only players in this match can vote!", ephemeral=True)
+            return
+
+        await interaction.response.defer()
+
+        user_votes = self.votes.get(interaction.user.id, [])
+
+        # Check if already voted for this player
+        if voted_for in user_votes:
+            # Remove vote
+            user_votes.remove(voted_for)
+            self.votes[interaction.user.id] = user_votes
+            log_action(f"{interaction.user.display_name} removed captain vote for player {voted_for}")
+        elif len(user_votes) >= 2:
+            # Already used both votes
+            await interaction.followup.send("❌ You've already used both your votes! Remove a vote first.", ephemeral=True)
+            return
+        else:
+            # Add vote
+            user_votes.append(voted_for)
+            self.votes[interaction.user.id] = user_votes
+            log_action(f"{interaction.user.display_name} voted for player {voted_for} as captain ({len(user_votes)}/2 votes used)")
+
+        # Refresh buttons to show updated vote counts
+        await self.initialize_buttons()
+
+        # Update embed
+        await self.update_embed()
+
+    async def update_embed(self):
+        """Update the embed with current vote counts"""
+        from searchmatchmaking import get_queue_progress_image
+
+        # Count total votes for each player
+        vote_totals = {}
+        for uid in self.players:
+            vote_totals[uid] = sum(1 for votes in self.votes.values() for v in votes if v == uid)
+
+        # Sort by votes
+        sorted_by_votes = sorted(self.players, key=lambda x: vote_totals.get(x, 0), reverse=True)
+
+        # Build vote summary
+        vote_lines = []
+        for uid in sorted_by_votes:
+            member = self.guild.get_member(uid) if self.guild else None
+            name = member.display_name if member else f"Player {uid}"
+            count = vote_totals.get(uid, 0)
+            if count > 0:
+                vote_lines.append(f"**{name}**: {count} vote{'s' if count != 1 else ''}")
+
+        embed = discord.Embed(
+            title=f"Vote for Captains - {self.match_label}",
+            description="**Each player gets 2 votes!**\n\nClick on players to vote for them as captains.\nTop 2 vote-getters become captains.",
+            color=discord.Color.blue()
+        )
+        embed.set_image(url=get_queue_progress_image(8))
+
+        if vote_lines:
+            embed.add_field(name="Current Votes", value="\n".join(vote_lines), inline=False)
+
+        # Show who has voted
+        voters = [f"<@{uid}>" for uid in self.votes.keys() if self.votes[uid]]
+        if voters:
+            embed.add_field(name=f"Voted ({len(voters)}/8)", value=", ".join(voters), inline=False)
+
+        try:
+            await self.pregame_message.edit(embed=embed, view=self)
+        except:
+            pass
+
+
+async def players_captain_vote_timeout(view: PlayersCaptainVoteView, channel: discord.TextChannel):
+    """Handle 30-second timeout for players captain voting"""
+    from searchmatchmaking import get_queue_progress_image
+
+    TIMEOUT_SECONDS = 30
+
+    for seconds_left in range(TIMEOUT_SECONDS, -1, -1):
+        if getattr(view, 'resolved', False):
+            return
+
+        # Count votes
+        vote_totals = {}
+        for uid in view.players:
+            vote_totals[uid] = sum(1 for votes in view.votes.values() for v in votes if v == uid)
+
+        sorted_by_votes = sorted(view.players, key=lambda x: vote_totals.get(x, 0), reverse=True)
+
+        vote_lines = []
+        for uid in sorted_by_votes:
+            member = view.guild.get_member(uid) if view.guild else None
+            name = member.display_name if member else f"Player {uid}"
+            count = vote_totals.get(uid, 0)
+            if count > 0:
+                vote_lines.append(f"**{name}**: {count} vote{'s' if count != 1 else ''}")
+
+        embed = discord.Embed(
+            title=f"Vote for Captains - {view.match_label}",
+            description=f"**Each player gets 2 votes!**\n\nClick on players to vote for them as captains.\n\n"
+                        f"⏱️ **{seconds_left} seconds** remaining",
+            color=discord.Color.blue() if seconds_left > 10 else discord.Color.orange()
+        )
+        embed.set_image(url=get_queue_progress_image(8))
+
+        if vote_lines:
+            embed.add_field(name="Current Votes", value="\n".join(vote_lines), inline=False)
+
+        voters = [f"<@{uid}>" for uid in view.votes.keys() if view.votes[uid]]
+        if voters:
+            embed.add_field(name=f"Voted ({len(voters)}/8)", value=", ".join(voters), inline=False)
+
+        try:
+            await view.pregame_message.edit(embed=embed, view=view)
+        except:
+            pass
+
+        if seconds_left > 0:
+            await asyncio.sleep(1)
+
+    if getattr(view, 'resolved', False):
+        return
+
+    # Time's up - select top 2 vote-getters as captains
+    view.resolved = True
+
+    vote_totals = {}
+    for uid in view.players:
+        vote_totals[uid] = sum(1 for votes in view.votes.values() for v in votes if v == uid)
+
+    # Sort by votes, then by MMR as tiebreaker
+    sorted_players = sorted(view.players, key=lambda x: (vote_totals.get(x, 0), view.player_mmrs.get(x, 1500)), reverse=True)
+
+    captains = sorted_players[:2]
+    remaining = sorted_players[2:]
+
+    log_action(f"Players captain vote complete - captains selected by vote")
+
+    # Start the actual captain draft
+    draft_view = CaptainDraftView(captains, remaining, test_mode=view.test_mode, match_label=view.match_label, guild=view.guild)
+    await draft_view.initialize_buttons()
+    embed = draft_view.build_draft_embed()
+
+    try:
+        await view.pregame_message.edit(embed=embed, view=draft_view)
+        draft_view.draft_message = view.pregame_message
+    except Exception as e:
+        log_action(f"Error starting captain draft after vote: {e}")
+
+
+# Add execute_method to CaptainMethodView
+CaptainMethodView.execute_method = lambda self, method, channel: _execute_captain_method(self, method, channel)
+
+
+async def _execute_captain_method(view: CaptainMethodView, method: str, channel: discord.TextChannel):
+    """Execute the selected captain method"""
+    if method == "players_pick":
+        # Show players pick view
+        pick_view = PlayersCaptainVoteView(
+            view.players, test_mode=view.test_mode, testers=view.testers,
+            match_label=view.match_label, pregame_message=view.pregame_message, guild=view.guild
+        )
+        await pick_view.initialize_buttons()
+        await pick_view.update_embed()
+        asyncio.create_task(players_captain_vote_timeout(pick_view, channel))
+    else:
+        # Get MMRs
+        player_mmrs = {}
+        for uid in view.players:
+            player_mmrs[uid] = await get_player_mmr(uid)
+
+        if method == "highest_mmr":
+            sorted_players = sorted(view.players, key=lambda x: player_mmrs.get(x, 1500), reverse=True)
+        else:  # lowest_mmr
+            sorted_players = sorted(view.players, key=lambda x: player_mmrs.get(x, 1500))
+
+        captains = sorted_players[:2]
+        remaining = [p for p in view.players if p not in captains]
+
+        # Start captain draft
+        draft_view = CaptainDraftView(captains, remaining, test_mode=view.test_mode, match_label=view.match_label, guild=view.guild)
+        await draft_view.initialize_buttons()
+        embed = draft_view.build_draft_embed()
+
+        try:
+            await view.pregame_message.edit(embed=embed, view=draft_view)
+            draft_view.draft_message = view.pregame_message
+        except Exception as e:
+            log_action(f"Error starting captain draft: {e}")
 
 
 class CaptainDraftView(View):
