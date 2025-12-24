@@ -904,11 +904,12 @@ class QueueView(View):
 
         # Create embed with progress image (no title, simple description)
         current_count = len(qs.queue)
+        needed = MAX_QUEUE_SIZE - current_count
 
         # Use different name for restricted queue
         queue_title = "MLG 4v4 (Restricted)" if qs == queue_state_2 else "MLG 4v4"
         content_embed = discord.Embed(
-            description=f"**{queue_title}** - We have **{current_count}/{MAX_QUEUE_SIZE}** players searching!",
+            description=f"We have **{current_count}** players searching for a match in **{queue_title}**, looking for **{needed}** more for a match!",
             color=discord.Color.green()
         )
         progress_image = get_queue_progress_image(current_count)
