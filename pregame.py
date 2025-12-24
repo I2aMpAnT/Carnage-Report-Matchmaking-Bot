@@ -85,7 +85,7 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
     import asyncio
 
     guild = channel.guild
-    voice_category_id = 1403916181554860112  # Voice Channels category
+    voice_category_id = 1428535768007180308  # Active Matches voice category
     category = guild.get_channel(voice_category_id)
 
     # Determine if this is a playlist match or MLG 4v4
@@ -283,7 +283,8 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
     pregame_vc = await guild.create_voice_channel(
         name=f"Pregame Lobby - {match_label}",
         category=category,
-        user_limit=10
+        user_limit=10,
+        position=1
     )
     log_action(f"Created Pregame Lobby VC: {pregame_vc.id}")
 
@@ -2554,26 +2555,26 @@ async def finalize_teams(channel: discord.TextChannel, red_team: List[int], blue
 
     temp_series.text_channel_id = series_text_channel.id
 
-    # Create Red/Blue voice channels in Matchmaking category (below text channel)
-    text_category_id = 1403916181554860112  # Matchmaking category
-    mm_category = guild.get_channel(text_category_id)
+    # Create Red/Blue voice channels in Active Matches category
+    voice_category_id = 1428535768007180308  # Active Matches voice category
+    voice_category = guild.get_channel(voice_category_id)
 
     # Create Red Team voice channel with team emoji and series number (no "Red" text)
     red_vc_name = f"🔴 {series_label}"
     red_vc = await guild.create_voice_channel(
         name=red_vc_name,
-        category=mm_category,
+        category=voice_category,
         user_limit=None,
-        position=999  # Position at bottom (below text channel)
+        position=1
     )
 
     # Create Blue Team voice channel with team emoji and series number (no "Blue" text)
     blue_vc_name = f"🔵 {series_label}"
     blue_vc = await guild.create_voice_channel(
         name=blue_vc_name,
-        category=mm_category,
+        category=voice_category,
         user_limit=None,
-        position=999  # Position at bottom (below text channel)
+        position=1
     )
 
     # Move players from pregame (or any voice channel) to their team channels
@@ -3292,7 +3293,7 @@ class PlaylistPlayersPickView(View):
 
         guild = interaction.guild
         ps = self.playlist_state
-        voice_category_id = 1403916181554860112
+        voice_category_id = 1428535768007180308  # Active Matches voice category
         category = guild.get_channel(voice_category_id)
 
         # Text channel category (Matchmaking)
@@ -3339,13 +3340,15 @@ class PlaylistPlayersPickView(View):
         red_vc = await guild.create_voice_channel(
             name=f"🔴 - Team {red_captain_name}",
             category=category,
-            user_limit=self.team_size + 2
+            user_limit=self.team_size + 2,
+            position=1
         )
 
         blue_vc = await guild.create_voice_channel(
             name=f"🔵 - Team {blue_captain_name}",
             category=category,
-            user_limit=self.team_size + 2
+            user_limit=self.team_size + 2,
+            position=1
         )
 
         match.team1_vc_id = red_vc.id
