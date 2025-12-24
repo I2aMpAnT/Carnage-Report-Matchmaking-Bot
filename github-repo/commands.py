@@ -371,8 +371,9 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
     @has_staff_role()
     async def reset_queue(interaction: discord.Interaction):
         """Reset queue"""
-        from searchmatchmaking import queue_state, update_queue_embed, delete_ping_message
+        from searchmatchmaking import queue_state, queue_state_2, update_queue_embed, delete_ping_message, QUEUE_CHANNEL_ID_2
 
+        # Clear main MLG 4v4 queue
         queue_state.queue.clear()
         queue_state.queue_join_times.clear()
         queue_state.pregame_timer_task = None
@@ -384,7 +385,19 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         queue_state.test_mode = False
         queue_state.testers = []
 
-        log_action(f"Admin {interaction.user.name} reset the queue")
+        # Clear restricted MLG 4v4 queue (queue_state_2)
+        queue_state_2.queue.clear()
+        queue_state_2.queue_join_times.clear()
+        queue_state_2.pregame_timer_task = None
+        queue_state_2.pregame_timer_end = None
+        queue_state_2.recent_action = None
+        queue_state_2.current_series = None
+        queue_state_2.locked = False
+        queue_state_2.locked_players = []
+        queue_state_2.test_mode = False
+        queue_state_2.testers = []
+
+        log_action(f"Admin {interaction.user.name} reset the queue (both main and restricted)")
 
         # Delete ping message since queue is empty
         await delete_ping_message()
@@ -396,12 +409,19 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         except:
             pass
 
+        # Update main queue embed
         channel = interaction.guild.get_channel(QUEUE_CHANNEL_ID)
         if channel:
             await update_queue_embed(channel)
 
+        # Update restricted queue embed
+        if QUEUE_CHANNEL_ID_2:
+            channel2 = interaction.guild.get_channel(QUEUE_CHANNEL_ID_2)
+            if channel2:
+                await update_queue_embed(channel2, queue_state_2)
+
         # Send confirmation (not defer - that would leave "thinking")
-        await interaction.response.send_message("✅ Queue reset!", ephemeral=True)
+        await interaction.response.send_message("✅ Queue reset! (Both main and restricted)", ephemeral=True)
     
     @bot.tree.command(name="cancelmatch", description="[STAFF] Cancel a match by number (completed games stay recorded)")
     @has_staff_role()
