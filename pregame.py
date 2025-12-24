@@ -130,7 +130,8 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
         pregame_vc = await guild.create_voice_channel(
             name=f"{playlist_name} Pregame Lobby",
             category=category,
-            user_limit=max_players + 2
+            user_limit=max_players + 2,
+            position=1
         )
         log_action(f"Created {playlist_name} Pregame Lobby VC: {pregame_vc.id}")
 
@@ -2856,7 +2857,7 @@ async def proceed_with_playlist_teams(
 
     guild = channel.guild
     ps = playlist_state
-    voice_category_id = 1403916181554860112
+    voice_category_id = 1428535768007180308  # Active Matches voice category
     category = guild.get_channel(voice_category_id)
 
     # Select map/gametype
@@ -2933,12 +2934,14 @@ async def proceed_with_playlist_teams(
         team1_vc = await guild.create_voice_channel(
             name=f"Red {match_label} - {team1_avg} MMR",
             category=category,
-            user_limit=ps.team_size + 2
+            user_limit=ps.team_size + 2,
+            position=1
         )
         team2_vc = await guild.create_voice_channel(
             name=f"Blue {match_label} - {team2_avg} MMR",
             category=category,
-            user_limit=ps.team_size + 2
+            user_limit=ps.team_size + 2,
+            position=1
         )
 
         match.team1_vc_id = team1_vc.id
