@@ -3,34 +3,54 @@ state_manager.py - Matchmaking State Persistence
 Saves and restores queue/match state across bot restarts
 """
 
-MODULE_VERSION = "1.1.0"
+MODULE_VERSION = "1.3.0"
 
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 STATE_FILE = 'matchmakingstate.json'
 
+# EST timezone
+EST = timezone(timedelta(hours=-5))
+
 def log_state(message: str):
-    """Log state manager actions"""
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    """Log state manager actions (EST timezone)"""
+    timestamp = datetime.now(EST).strftime('%Y-%m-%d %H:%M:%S EST')
     print(f"[STATE] [{timestamp}] {message}")
 
 def save_state():
     """Save current matchmaking state to JSON"""
-    from searchmatchmaking import queue_state
-    
+    from searchmatchmaking import queue_state, queue_state_2
+
     state = {
         "saved_at": datetime.now().isoformat(),
+        # Main queue (queue_state)
         "queue": queue_state.queue,
         "queue_join_times": {
-            str(uid): time.isoformat() 
+            str(uid): time.isoformat()
             for uid, time in queue_state.queue_join_times.items()
+        },
+        "last_activity_times": {
+            str(uid): time.isoformat()
+            for uid, time in queue_state.last_activity_times.items()
         },
         "test_mode": queue_state.test_mode,
         "test_team": queue_state.test_team,
-        "current_series": None
+        "current_series": None,
+        # Restricted queue (queue_state_2)
+        "queue_2": queue_state_2.queue,
+        "queue_2_join_times": {
+            str(uid): time.isoformat()
+            for uid, time in queue_state_2.queue_join_times.items()
+        },
+        "queue_2_last_activity_times": {
+            str(uid): time.isoformat()
+            for uid, time in queue_state_2.last_activity_times.items()
+        },
+        "queue_2_test_mode": queue_state_2.test_mode,
+        "queue_2_current_series": None
     }
     
     # Save series state if active
@@ -40,13 +60,20 @@ def save_state():
             "red_team": series.red_team,
             "blue_team": series.blue_team,
             "games": series.games,
+            "game_stats": getattr(series, 'game_stats', {}),
             "current_game": series.current_game,
             "test_mode": series.test_mode,
+            "testers": getattr(series, 'testers', []),
             "match_number": series.match_number,
             "series_number": series.series_number,
             "red_vc_id": series.red_vc_id,
             "blue_vc_id": series.blue_vc_id,
+            "text_channel_id": getattr(series, 'text_channel_id', None),
             "swap_history": getattr(series, 'swap_history', []),
+            "start_time": series.start_time.isoformat() if hasattr(series, 'start_time') and series.start_time else None,
+            "end_time": series.end_time.isoformat() if hasattr(series, 'end_time') and series.end_time else None,
+            "results_channel_id": getattr(series, 'results_channel_id', None),
+            "results_message_id": series.results_message.id if hasattr(series, 'results_message') and series.results_message else None,
             "series_message_id": series.series_message.id if series.series_message else None,
             "series_message_channel_id": series.series_message.channel.id if series.series_message else None,
             "general_message_id": series.general_message.id if hasattr(series, 'general_message') and series.general_message else None
@@ -56,11 +83,37 @@ def save_state():
         from ingame import Series
         state["match_counter"] = Series.match_counter
         state["test_counter"] = Series.test_counter
-    
+
+    # Save series state for restricted queue if active
+    if queue_state_2.current_series:
+        series = queue_state_2.current_series
+        state["queue_2_current_series"] = {
+            "red_team": series.red_team,
+            "blue_team": series.blue_team,
+            "games": series.games,
+            "game_stats": getattr(series, 'game_stats', {}),
+            "current_game": series.current_game,
+            "test_mode": series.test_mode,
+            "testers": getattr(series, 'testers', []),
+            "match_number": series.match_number,
+            "series_number": series.series_number,
+            "red_vc_id": series.red_vc_id,
+            "blue_vc_id": series.blue_vc_id,
+            "text_channel_id": getattr(series, 'text_channel_id', None),
+            "swap_history": getattr(series, 'swap_history', []),
+            "start_time": series.start_time.isoformat() if hasattr(series, 'start_time') and series.start_time else None,
+            "end_time": series.end_time.isoformat() if hasattr(series, 'end_time') and series.end_time else None,
+            "results_channel_id": getattr(series, 'results_channel_id', None),
+            "results_message_id": series.results_message.id if hasattr(series, 'results_message') and series.results_message else None,
+            "series_message_id": series.series_message.id if series.series_message else None,
+            "series_message_channel_id": series.series_message.channel.id if series.series_message else None,
+            "general_message_id": series.general_message.id if hasattr(series, 'general_message') and series.general_message else None
+        }
+
     try:
         with open(STATE_FILE, 'w') as f:
             json.dump(state, f, indent=2)
-        log_state(f"State saved - Queue: {len(queue_state.queue)}, Series: {'Active' if queue_state.current_series else 'None'}")
+        log_state(f"State saved - Main Queue: {len(queue_state.queue)}, Restricted Queue: {len(queue_state_2.queue)}, Series: {'Active' if queue_state.current_series else 'None'}")
     except Exception as e:
         log_state(f"Failed to save state: {e}")
 
@@ -81,25 +134,46 @@ def load_state() -> Optional[dict]:
 
 async def restore_state(bot) -> bool:
     """Restore matchmaking state after bot restart"""
-    from searchmatchmaking import queue_state
+    from searchmatchmaking import queue_state, queue_state_2
     from ingame import Series, SeriesView, update_general_chat_embed, GENERAL_CHANNEL_ID
-    
+
     state = load_state()
     if not state:
         return False
-    
+
     try:
-        # Restore queue
+        # Restore main queue (queue_state)
         queue_state.queue = state.get("queue", [])
         queue_state.test_mode = state.get("test_mode", False)
         queue_state.test_team = state.get("test_team")
-        
+
         # Restore join times
         queue_join_times = state.get("queue_join_times", {})
         for uid_str, time_str in queue_join_times.items():
             queue_state.queue_join_times[int(uid_str)] = datetime.fromisoformat(time_str)
-        
-        log_state(f"Restored queue: {len(queue_state.queue)} players")
+
+        # Restore activity times (for inactivity check)
+        last_activity_times = state.get("last_activity_times", {})
+        for uid_str, time_str in last_activity_times.items():
+            queue_state.last_activity_times[int(uid_str)] = datetime.fromisoformat(time_str)
+
+        log_state(f"Restored main queue: {len(queue_state.queue)} players")
+
+        # Restore restricted queue (queue_state_2)
+        queue_state_2.queue = state.get("queue_2", [])
+        queue_state_2.test_mode = state.get("queue_2_test_mode", False)
+
+        # Restore join times for restricted queue
+        queue_2_join_times = state.get("queue_2_join_times", {})
+        for uid_str, time_str in queue_2_join_times.items():
+            queue_state_2.queue_join_times[int(uid_str)] = datetime.fromisoformat(time_str)
+
+        # Restore activity times for restricted queue
+        queue_2_activity_times = state.get("queue_2_last_activity_times", {})
+        for uid_str, time_str in queue_2_activity_times.items():
+            queue_state_2.last_activity_times[int(uid_str)] = datetime.fromisoformat(time_str)
+
+        log_state(f"Restored restricted queue: {len(queue_state_2.queue)} players")
         
         # Restore series if active
         series_data = state.get("current_series")
@@ -113,17 +187,34 @@ async def restore_state(bot) -> bool:
             series.red_team = series_data["red_team"]
             series.blue_team = series_data["blue_team"]
             series.games = series_data["games"]
+            # Restore game_stats with integer keys (JSON converts them to strings)
+            raw_game_stats = series_data.get("game_stats", {})
+            series.game_stats = {int(k): v for k, v in raw_game_stats.items()}
             series.current_game = series_data["current_game"]
             series.test_mode = series_data["test_mode"]
+            series.testers = series_data.get("testers", [])
             series.match_number = series_data["match_number"]
             series.series_number = series_data["series_number"]
             series.red_vc_id = series_data["red_vc_id"]
             series.blue_vc_id = series_data["blue_vc_id"]
+            series.text_channel_id = series_data.get("text_channel_id")
             series.swap_history = series_data.get("swap_history", [])
             series.votes = {}
             series.end_series_votes = set()
             series.series_message = None
             series.general_message = None
+            series.results_message = None
+            series.results_channel_id = series_data.get("results_channel_id")
+
+            # Restore time attributes (critical for /endmatch)
+            start_time_str = series_data.get("start_time")
+            if start_time_str:
+                series.start_time = datetime.fromisoformat(start_time_str)
+            else:
+                series.start_time = datetime.now()  # Fallback for old state files
+
+            end_time_str = series_data.get("end_time")
+            series.end_time = datetime.fromisoformat(end_time_str) if end_time_str else None
             
             queue_state.current_series = series
             

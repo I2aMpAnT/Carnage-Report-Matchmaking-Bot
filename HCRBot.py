@@ -287,12 +287,13 @@ async def on_ready():
             if restored:
                 print('✅ State restored successfully!')
                 log_action("Restored saved matchmaking state after restart")
-                
-                # Update queue embed with restored state
+
+                # Update main queue embed with restored state
                 if channel:
-                    from searchmatchmaking import update_queue_embed, queue_state
+                    from searchmatchmaking import update_queue_embed, queue_state, queue_state_2
                     await update_queue_embed(channel)
-                    
+                    print(f'✅ Restored main queue: {len(queue_state.queue)} players')
+
                     # If series was active, recreate the series embed
                     if queue_state.current_series:
                         from ingame import SeriesView
@@ -300,6 +301,20 @@ async def on_ready():
                         view = SeriesView(series)
                         await view.update_series_embed(channel)
                         print(f'✅ Restored active series: {series.series_number}')
+
+                # Update restricted queue embed with restored state
+                if channel2:
+                    from searchmatchmaking import update_queue_embed, queue_state_2
+                    await update_queue_embed(channel2, queue_state_2)
+                    print(f'✅ Restored restricted queue: {len(queue_state_2.queue)} players')
+
+                    # If series was active on restricted queue, recreate the series embed
+                    if queue_state_2.current_series:
+                        from ingame import SeriesView
+                        series = queue_state_2.current_series
+                        view = SeriesView(series)
+                        await view.update_series_embed(channel2)
+                        print(f'✅ Restored restricted queue series: {series.series_number}')
             else:
                 print('⚠️ State restoration failed')
     except Exception as e:
