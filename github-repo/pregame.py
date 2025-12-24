@@ -2476,16 +2476,26 @@ class PlayersPickView(View):
 async def finalize_teams(channel: discord.TextChannel, red_team: List[int], blue_team: List[int], test_mode: bool = False, testers: List[int] = None):
     """Finalize teams, create voice channels with MMR, and start series"""
     log_action(f"Finalizing teams - Red: {red_team}, Blue: {blue_team}, Test: {test_mode}")
-    
-    from searchmatchmaking import queue_state
-    queue_state.test_mode = test_mode
-    
+
+    from searchmatchmaking import queue_state, queue_state_2
+
+    # Determine which queue state this match came from (check both)
+    qs = queue_state  # Default
+    if hasattr(queue_state_2, 'series_text_channel_id') and queue_state_2.series_text_channel_id:
+        # Match came from restricted queue
+        qs = queue_state_2
+    elif hasattr(queue_state_2, 'pregame_vc_id') and queue_state_2.pregame_vc_id:
+        # Match came from restricted queue
+        qs = queue_state_2
+
+    qs.test_mode = test_mode
+
     # Use testers from parameter or from queue_state
-    if testers is None and hasattr(queue_state, 'testers'):
-        testers = queue_state.testers
-    
+    if testers is None and hasattr(qs, 'testers'):
+        testers = qs.testers
+
     guild = channel.guild
-    
+
     # Calculate average MMR for each team
     red_mmrs = []
     blue_mmrs = []
@@ -2497,27 +2507,26 @@ async def finalize_teams(channel: discord.TextChannel, red_team: List[int], blue
         mmr = await get_player_mmr(user_id)
         blue_mmrs.append(mmr)
         log_action(f"Blue team player {user_id} MMR: {mmr}")
-    
+
     red_avg_mmr = int(sum(red_mmrs) / len(red_mmrs)) if red_mmrs else 1500
     blue_avg_mmr = int(sum(blue_mmrs) / len(blue_mmrs)) if blue_mmrs else 1500
     log_action(f"Team averages - Red: {red_avg_mmr}, Blue: {blue_avg_mmr}")
 
     # Create series first to get the series number
     from ingame import Series, show_series_embed
-    from searchmatchmaking import queue_state
 
     # Use pending match number if roles were already assigned when queue filled
-    pending_match = getattr(queue_state, 'pending_match_number', None)
-    playlist_name = getattr(queue_state, 'playlist_name', 'MLG4v4')
+    pending_match = getattr(qs, 'pending_match_number', None)
+    playlist_name = getattr(qs, 'playlist_name', 'MLG4v4')
     temp_series = Series(red_team, blue_team, test_mode, testers=testers, pending_match_number=pending_match, playlist_name=playlist_name)
     # Clear the pending match number since it's been used
-    queue_state.pending_match_number = None
+    qs.pending_match_number = None
     series_label = temp_series.series_number  # "Series 1" or "Test 1"
 
     # Get the existing series text channel (created in start_pregame) and rename it with MMRs
     series_text_channel = None
-    if hasattr(queue_state, 'series_text_channel_id') and queue_state.series_text_channel_id:
-        series_text_channel = guild.get_channel(queue_state.series_text_channel_id)
+    if hasattr(qs, 'series_text_channel_id') and qs.series_text_channel_id:
+        series_text_channel = guild.get_channel(qs.series_text_channel_id)
 
     if series_text_channel:
         # Rename existing channel with MMRs
@@ -2627,37 +2636,38 @@ async def finalize_teams(channel: discord.TextChannel, red_team: List[int], blue
                 players_not_moved.append(user_id)
     
     # NOW delete the pregame VC (after players have been moved)
-    if hasattr(queue_state, 'pregame_vc_id') and queue_state.pregame_vc_id:
-        pregame_vc = guild.get_channel(queue_state.pregame_vc_id)
+    if hasattr(qs, 'pregame_vc_id') and qs.pregame_vc_id:
+        pregame_vc = guild.get_channel(qs.pregame_vc_id)
         if pregame_vc:
             try:
                 await pregame_vc.delete()
                 log_action("Deleted Pregame Lobby VC")
             except:
                 pass
-        queue_state.pregame_vc_id = None
+        qs.pregame_vc_id = None
 
     # Clear the series text channel ID from queue state (now owned by the series)
-    queue_state.series_text_channel_id = None
+    qs.series_text_channel_id = None
 
     # Assign the series we created earlier and set VC IDs
-    queue_state.current_series = temp_series
-    queue_state.current_series.red_vc_id = red_vc.id
-    queue_state.current_series.blue_vc_id = blue_vc.id
-    
+    qs.current_series = temp_series
+    qs.current_series.red_vc_id = red_vc.id
+    qs.current_series.blue_vc_id = blue_vc.id
+
     # NOTE: Active match roles are now added EARLIER (when queue fills) so players
     # can be pinged during team selection. See searchmatchmaking.py queue lock code.
 
     if not test_mode:
         # Clear queue since match is starting (only for real matches)
-        queue_state.queue.clear()
-        queue_state.queue_join_times.clear()
+        qs.queue.clear()
+        qs.queue_join_times.clear()
 
         # Update queue embed to show it's empty and ready for new players
-        from searchmatchmaking import update_queue_embed, QUEUE_CHANNEL_ID
-        queue_channel = guild.get_channel(QUEUE_CHANNEL_ID)
+        from searchmatchmaking import update_queue_embed, QUEUE_CHANNEL_ID, QUEUE_CHANNEL_ID_2
+        queue_channel_id = QUEUE_CHANNEL_ID_2 if qs == queue_state_2 else QUEUE_CHANNEL_ID
+        queue_channel = guild.get_channel(queue_channel_id)
         if queue_channel:
-            await update_queue_embed(queue_channel)
+            await update_queue_embed(queue_channel, qs)
             log_action("Updated queue embed after match started")
 
     await show_series_embed(channel)
