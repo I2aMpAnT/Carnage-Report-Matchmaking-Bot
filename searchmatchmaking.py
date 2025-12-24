@@ -1201,7 +1201,7 @@ async def create_queue_embed(channel: discord.TextChannel, qs=None):
     async for message in channel.history(limit=50):
         if message.author.bot and message.embeds:
             for emb in message.embeds:
-                if emb.title and "Matchmaking" in emb.title:
+                if emb.title and ("Matchmaking" in emb.title or "Chill Lobby" in emb.title):
                     queue_message = message
                     is_at_bottom = (message_count == 0)
                     break
@@ -1345,7 +1345,7 @@ async def update_queue_embed(channel: discord.TextChannel, qs=None):
     async for message in channel.history(limit=50):
         if message.author.bot and message.embeds:
             for emb in message.embeds:
-                if emb.title and "Matchmaking" in emb.title:
+                if emb.title and ("Matchmaking" in emb.title or "Chill Lobby" in emb.title):
                     queue_message = message
                     # If this isn't the first message we found, it's not at the bottom
                     is_at_bottom = (message_count == 0)
