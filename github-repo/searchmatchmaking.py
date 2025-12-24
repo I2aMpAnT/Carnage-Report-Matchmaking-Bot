@@ -102,7 +102,7 @@ async def remove_players_from_other_queues(guild: discord.Guild, player_ids: lis
                 del other_qs.queue_join_times[user_id]
             if user_id in other_qs.last_activity_times:
                 del other_qs.last_activity_times[user_id]
-            removed_from.append(f"MLG 4v4 {'(Restricted)' if other_qs == queue_state_2 else ''}")
+            removed_from.append("Halo 2 Chill Lobby" if other_qs == queue_state_2 else "MLG 4v4")
 
     # Remove from playlist queues
     try:
@@ -426,7 +426,7 @@ async def remove_inactive_user(guild: discord.Guild, user_id: int, qs=None, reas
         'reason': reason  # e.g., "AFK" for inactivity kicks
     }
 
-    queue_name = "MLG 4v4 (Restricted)" if qs == queue_state_2 else "MLG 4v4"
+    queue_name = "Halo 2 Chill Lobby" if qs == queue_state_2 else "MLG 4v4"
     log_action(f"{display_name} removed from {queue_name} ({reason}) after {time_in_queue} ({len(qs.queue)}/{MAX_QUEUE_SIZE})")
 
     # Remove SearchingMatchmaking role
@@ -618,7 +618,7 @@ class QueueView(View):
         if interaction.channel.id == QUEUE_CHANNEL_ID_2 and QUEUE_2_BANNED_ROLE:
             if QUEUE_2_BANNED_ROLE in user_roles:
                 await interaction.response.send_message(
-                    f"❌ **You cannot join from this queue.**\n\nPlayers with the {QUEUE_2_BANNED_ROLE} role must use the other MLG 4v4 queue.",
+                    "❌ **You cannot join this queue.**\n\nPlease use the main MLG 4v4 queue instead.",
                     ephemeral=True
                 )
                 return
@@ -709,7 +709,7 @@ class QueueView(View):
         if qs.recent_action and qs.recent_action.get('user_id') == user_id:
             qs.recent_action = None
 
-        queue_name = "MLG 4v4 (Restricted)" if qs == queue_state_2 else "MLG 4v4"
+        queue_name = "Halo 2 Chill Lobby" if qs == queue_state_2 else "MLG 4v4"
         mmr_display = player_stats['mmr'] if has_mmr else "PENDING (500)"
         log_action(f"{interaction.user.display_name} joined {queue_name} ({len(qs.queue)}/{MAX_QUEUE_SIZE}) - MMR: {mmr_display}")
         
@@ -817,7 +817,7 @@ class QueueView(View):
             'time_in_queue': time_in_queue
         }
 
-        queue_name = "MLG 4v4 (Restricted)" if qs == queue_state_2 else "MLG 4v4"
+        queue_name = "Halo 2 Chill Lobby" if qs == queue_state_2 else "MLG 4v4"
         log_action(f"{interaction.user.display_name} left {queue_name} after {time_in_queue} ({len(qs.queue)}/{MAX_QUEUE_SIZE})")
 
         # Clean up any pending inactivity confirmation
@@ -907,7 +907,7 @@ class QueueView(View):
         needed = MAX_QUEUE_SIZE - current_count
 
         # Use different name for restricted queue
-        queue_title = "MLG 4v4 (Restricted)" if qs == queue_state_2 else "MLG 4v4"
+        queue_title = "Halo 2 Chill Lobby" if qs == queue_state_2 else "MLG 4v4"
         content_embed = discord.Embed(
             description=f"We have **{current_count}** players searching for a match in **{queue_title}**, looking for **{needed}** more for a match!",
             color=discord.Color.green()
@@ -930,7 +930,7 @@ class QueueView(View):
         # Send embed
         qs.ping_message = await general_channel.send(embed=content_embed, view=view)
 
-        queue_name = "MLG 4v4 (Restricted)" if qs == queue_state_2 else "MLG 4v4"
+        queue_name = "Halo 2 Chill Lobby" if qs == queue_state_2 else "MLG 4v4"
         log_action(f"{interaction.user.display_name} pinged general chat for {queue_name} ({current_count}/{MAX_QUEUE_SIZE})")
 
 
@@ -958,11 +958,11 @@ class PingJoinView(View):
             )
             return
 
-        # Check if user has banned role for restricted queue
+        # Check if user has banned role for this queue
         if self.is_restricted and QUEUE_2_BANNED_ROLE:
             if QUEUE_2_BANNED_ROLE in user_roles:
                 await interaction.response.send_message(
-                    f"❌ **You cannot join this queue.**\n\nPlayers with the {QUEUE_2_BANNED_ROLE} role must use the other MLG 4v4 queue.",
+                    "❌ **You cannot join this queue.**\n\nPlease use the main MLG 4v4 queue instead.",
                     ephemeral=True
                 )
                 return
@@ -1046,7 +1046,7 @@ class PingJoinView(View):
         if qs.recent_action and qs.recent_action.get('user_id') == user_id:
             qs.recent_action = None
 
-        queue_name = "MLG 4v4 (Restricted)" if qs == queue_state_2 else "MLG 4v4"
+        queue_name = "Halo 2 Chill Lobby" if qs == queue_state_2 else "MLG 4v4"
         log_action(f"{interaction.user.display_name} joined {queue_name} from ping ({len(qs.queue)}/{MAX_QUEUE_SIZE}) - MMR: {player_stats['mmr']}")
 
         # Add SearchingMatchmaking role
@@ -1176,10 +1176,8 @@ async def create_queue_embed(channel: discord.TextChannel, qs=None):
 
     # Determine title based on queue type
     is_restricted = (qs == queue_state_2)
-    title = "MLG 4v4 Matchmaking (Restricted)" if is_restricted else "MLG 4v4 Matchmaking"
+    title = "Halo 2 Chill Lobby" if is_restricted else "MLG 4v4 Matchmaking"
     description = "*Classic 4v4 with team selection vote*"
-    if is_restricted:
-        description += f"\n\n⚠️ *Players with the {QUEUE_2_BANNED_ROLE} role cannot join this queue.*"
 
     embed = discord.Embed(
         title=title,
@@ -1219,7 +1217,7 @@ async def create_queue_embed(channel: discord.TextChannel, qs=None):
                 # Start auto-update task if not already running
                 if qs.auto_update_task is None or qs.auto_update_task.done():
                     qs.auto_update_task = asyncio.create_task(auto_update_queue_times(qs))
-                    queue_name = "MLG 4v4 (Restricted)" if is_restricted else "MLG 4v4"
+                    queue_name = "Halo 2 Chill Lobby" if is_restricted else "MLG 4v4"
                     log_action(f"Started {queue_name} queue auto-update task")
                 return
             except:
@@ -1236,7 +1234,7 @@ async def create_queue_embed(channel: discord.TextChannel, qs=None):
     # Start auto-update task if not already running
     if qs.auto_update_task is None or qs.auto_update_task.done():
         qs.auto_update_task = asyncio.create_task(auto_update_queue_times(qs))
-        queue_name = "MLG 4v4 (Restricted)" if is_restricted else "MLG 4v4"
+        queue_name = "Halo 2 Chill Lobby" if is_restricted else "MLG 4v4"
         log_action(f"Started {queue_name} queue auto-update task")
 
 async def update_queue_embed(channel: discord.TextChannel, qs=None):
@@ -1299,10 +1297,7 @@ async def update_queue_embed(channel: discord.TextChannel, qs=None):
     # Build description
     desc = "*Classic 4v4 with team selection vote*"
 
-    if is_restricted:
-        desc += f"\n\n⚠️ *Players with the {QUEUE_2_BANNED_ROLE} role cannot join this queue.*"
-
-    title = "MLG 4v4 Matchmaking (Restricted)" if is_restricted else "MLG 4v4 Matchmaking"
+    title = "Halo 2 Chill Lobby" if is_restricted else "MLG 4v4 Matchmaking"
     embed = discord.Embed(
         title=title,
         description=desc,
