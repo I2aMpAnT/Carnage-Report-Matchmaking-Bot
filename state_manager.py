@@ -39,7 +39,7 @@ def save_state():
         "test_mode": queue_state.test_mode,
         "test_team": queue_state.test_team,
         "current_series": None,
-        # Restricted queue (queue_state_2)
+        # Queue 2 (queue_state_2)
         "queue_2": queue_state_2.queue,
         "queue_2_join_times": {
             str(uid): time.isoformat()
@@ -84,7 +84,7 @@ def save_state():
         state["match_counter"] = Series.match_counter
         state["test_counter"] = Series.test_counter
 
-    # Save series state for restricted queue if active
+    # Save series state for queue 2 if active
     if queue_state_2.current_series:
         series = queue_state_2.current_series
         state["queue_2_current_series"] = {
@@ -113,7 +113,7 @@ def save_state():
     try:
         with open(STATE_FILE, 'w') as f:
             json.dump(state, f, indent=2)
-        log_state(f"State saved - Main Queue: {len(queue_state.queue)}, Restricted Queue: {len(queue_state_2.queue)}, Series: {'Active' if queue_state.current_series else 'None'}")
+        log_state(f"State saved - Queue 1: {len(queue_state.queue)}, Queue 2: {len(queue_state_2.queue)}, Series: {'Active' if queue_state.current_series else 'None'}")
     except Exception as e:
         log_state(f"Failed to save state: {e}")
 
@@ -157,23 +157,23 @@ async def restore_state(bot) -> bool:
         for uid_str, time_str in last_activity_times.items():
             queue_state.last_activity_times[int(uid_str)] = datetime.fromisoformat(time_str)
 
-        log_state(f"Restored main queue: {len(queue_state.queue)} players")
+        log_state(f"Restored queue 1: {len(queue_state.queue)} players")
 
-        # Restore restricted queue (queue_state_2)
+        # Restore queue 2 (queue_state_2)
         queue_state_2.queue = state.get("queue_2", [])
         queue_state_2.test_mode = state.get("queue_2_test_mode", False)
 
-        # Restore join times for restricted queue
+        # Restore join times for queue 2
         queue_2_join_times = state.get("queue_2_join_times", {})
         for uid_str, time_str in queue_2_join_times.items():
             queue_state_2.queue_join_times[int(uid_str)] = datetime.fromisoformat(time_str)
 
-        # Restore activity times for restricted queue
+        # Restore activity times for queue 2
         queue_2_activity_times = state.get("queue_2_last_activity_times", {})
         for uid_str, time_str in queue_2_activity_times.items():
             queue_state_2.last_activity_times[int(uid_str)] = datetime.fromisoformat(time_str)
 
-        log_state(f"Restored restricted queue: {len(queue_state_2.queue)} players")
+        log_state(f"Restored queue 2: {len(queue_state_2.queue)} players")
         
         # Restore series if active
         series_data = state.get("current_series")
