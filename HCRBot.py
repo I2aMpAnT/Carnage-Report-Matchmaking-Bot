@@ -302,19 +302,19 @@ async def on_ready():
                         await view.update_series_embed(channel)
                         print(f'✅ Restored active series: {series.series_number}')
 
-                # Update restricted queue embed with restored state
+                # Update queue 2 embed with restored state
                 if channel2:
                     from searchmatchmaking import update_queue_embed, queue_state_2
                     await update_queue_embed(channel2, queue_state_2)
-                    print(f'✅ Restored restricted queue: {len(queue_state_2.queue)} players')
+                    print(f'✅ Restored queue 2: {len(queue_state_2.queue)} players')
 
-                    # If series was active on restricted queue, recreate the series embed
+                    # If series was active on queue 2, recreate the series embed
                     if queue_state_2.current_series:
                         from ingame import SeriesView
                         series = queue_state_2.current_series
                         view = SeriesView(series)
                         await view.update_series_embed(channel2)
-                        print(f'✅ Restored restricted queue series: {series.series_number}')
+                        print(f'✅ Restored queue 2 series: {series.series_number}')
             else:
                 print('⚠️ State restoration failed')
     except Exception as e:
