@@ -2,7 +2,7 @@
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 # Supports ALL playlists: MLG 4v4 (voting), Team Hardcore/Double Team (auto-balance), Head to Head (1v1)
 
-MODULE_VERSION = "1.7.0"
+MODULE_VERSION = "1.8.0"
 
 import discord
 from discord.ui import View, Button, Select
@@ -1658,8 +1658,16 @@ class CaptainMethodView(View):
             await interaction.response.send_message("❌ Captain selection method already chosen!", ephemeral=True)
             return
 
-        # Only players in the match can vote
-        if interaction.user.id not in self.players:
+        # Check if user is a player OR has staff role
+        is_player = interaction.user.id in self.players
+        is_staff = False
+        if hasattr(interaction.user, 'roles'):
+            from commands import STAFF_ROLES
+            user_roles = [role.name.lower() for role in interaction.user.roles]
+            staff_roles_lower = [r.lower() for r in STAFF_ROLES]
+            is_staff = any(role in staff_roles_lower for role in user_roles)
+
+        if not is_player and not is_staff:
             await interaction.response.send_message("❌ Only players in this match can vote!", ephemeral=True)
             return
 
@@ -1693,6 +1701,7 @@ async def captain_method_timeout(view: CaptainMethodView, channel: discord.TextC
     from searchmatchmaking import get_queue_progress_image
 
     TIMEOUT_SECONDS = 30
+    log_action(f"[COUNTDOWN] Starting captain method timeout for {view.match_label}")
 
     for seconds_left in range(TIMEOUT_SECONDS, -1, -1):
         if getattr(view, 'resolved', False):
@@ -1726,9 +1735,12 @@ async def captain_method_timeout(view: CaptainMethodView, channel: discord.TextC
                 embed.add_field(name="Current Votes", value="\n".join(vote_summary), inline=False)
 
         try:
-            await view.pregame_message.edit(embed=embed, view=view)
-        except:
-            pass
+            if view.pregame_message:
+                await view.pregame_message.edit(embed=embed, view=view)
+            else:
+                log_action(f"[COUNTDOWN] No pregame_message reference at {seconds_left}s")
+        except Exception as e:
+            log_action(f"[COUNTDOWN] Error updating embed at {seconds_left}s: {e}")
 
         if seconds_left > 0:
             await asyncio.sleep(1)
@@ -1828,7 +1840,16 @@ class PlayersCaptainVoteView(View):
             await interaction.response.send_message("❌ Captains already selected!", ephemeral=True)
             return
 
-        if interaction.user.id not in self.players:
+        # Check if user is a player OR has staff role
+        is_player = interaction.user.id in self.players
+        is_staff = False
+        if hasattr(interaction.user, 'roles'):
+            from commands import STAFF_ROLES
+            user_roles = [role.name.lower() for role in interaction.user.roles]
+            staff_roles_lower = [r.lower() for r in STAFF_ROLES]
+            is_staff = any(role in staff_roles_lower for role in user_roles)
+
+        if not is_player and not is_staff:
             await interaction.response.send_message("❌ Only players in this match can vote!", ephemeral=True)
             return
 
@@ -1905,6 +1926,7 @@ async def players_captain_vote_timeout(view: PlayersCaptainVoteView, channel: di
     from searchmatchmaking import get_queue_progress_image
 
     TIMEOUT_SECONDS = 30
+    log_action(f"[COUNTDOWN] Starting players captain vote timeout for {view.match_label}")
 
     for seconds_left in range(TIMEOUT_SECONDS, -1, -1):
         if getattr(view, 'resolved', False):
@@ -1941,9 +1963,12 @@ async def players_captain_vote_timeout(view: PlayersCaptainVoteView, channel: di
             embed.add_field(name=f"Voted ({len(voters)}/8)", value=", ".join(voters), inline=False)
 
         try:
-            await view.pregame_message.edit(embed=embed, view=view)
-        except:
-            pass
+            if view.pregame_message:
+                await view.pregame_message.edit(embed=embed, view=view)
+            else:
+                log_action(f"[COUNTDOWN] No pregame_message reference at {seconds_left}s (players pick)")
+        except Exception as e:
+            log_action(f"[COUNTDOWN] Error updating embed at {seconds_left}s (players pick): {e}")
 
         if seconds_left > 0:
             await asyncio.sleep(1)
