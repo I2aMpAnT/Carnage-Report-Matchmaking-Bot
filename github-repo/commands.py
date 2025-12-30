@@ -1,7 +1,7 @@
 # commands.py - All Bot Commands
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.5.0"
+MODULE_VERSION = "1.5.4"
 
 import discord
 from discord import app_commands
@@ -71,53 +71,57 @@ def find_optimal_teams(player_ids: list, player_mmrs: dict) -> tuple:
     return best_team1, best_team2, best_diff
 
 def has_admin_role():
-    """Check if user has admin role (Overlord only)"""
+    """Check if user has admin role (Overlord only, case-insensitive)"""
     async def predicate(interaction: discord.Interaction):
-        user_roles = [role.name for role in interaction.user.roles]
-        if any(role in ADMIN_ROLES for role in user_roles):
+        user_roles = [role.name.lower() for role in interaction.user.roles]
+        admin_roles_lower = [r.lower() for r in ADMIN_ROLES]
+        if any(role in admin_roles_lower for role in user_roles):
             return True
         await interaction.response.send_message("❌ You need Overlord role!", ephemeral=True)
         return False
     return app_commands.check(predicate)
 
 def has_staff_role():
-    """Check if user has staff role"""
+    """Check if user has staff role (case-insensitive)"""
     async def predicate(interaction: discord.Interaction):
-        user_roles = [role.name for role in interaction.user.roles]
-        if any(role in STAFF_ROLES for role in user_roles):
+        user_roles = [role.name.lower() for role in interaction.user.roles]
+        staff_roles_lower = [r.lower() for r in STAFF_ROLES]
+        if any(role in staff_roles_lower for role in user_roles):
             return True
         await interaction.response.send_message("❌ You need Overlord, Staff, or Server Support role!", ephemeral=True)
         return False
     return app_commands.check(predicate)
 
 def check_command_permission(command_name: str):
-    """Dynamic permission check based on COMMAND_PERMISSIONS overrides"""
+    """Dynamic permission check based on COMMAND_PERMISSIONS overrides (case-insensitive)"""
     async def predicate(interaction: discord.Interaction):
         global COMMAND_PERMISSIONS
-        
+
         # Reload permissions in case they changed
         load_command_permissions()
-        
-        user_roles = [role.name for role in interaction.user.roles]
+
+        user_roles = [role.name.lower() for role in interaction.user.roles]
         permission_level = COMMAND_PERMISSIONS.get(command_name, None)
-        
+
         # If no override, use default (allow - let the decorator handle it)
         if permission_level is None:
             return True
-        
+
         if permission_level == "all":
             return True
         elif permission_level == "staff":
-            if any(role in STAFF_ROLES for role in user_roles):
+            staff_roles_lower = [r.lower() for r in STAFF_ROLES]
+            if any(role in staff_roles_lower for role in user_roles):
                 return True
             await interaction.response.send_message("❌ You need Overlord, Staff, or Server Support role!", ephemeral=True)
             return False
         elif permission_level == "admin":
-            if any(role in ADMIN_ROLES for role in user_roles):
+            admin_roles_lower = [r.lower() for r in ADMIN_ROLES]
+            if any(role in admin_roles_lower for role in user_roles):
                 return True
             await interaction.response.send_message("❌ You need Overlord role!", ephemeral=True)
             return False
-        
+
         return True
     return app_commands.check(predicate)
 
@@ -136,13 +140,12 @@ async def get_player_mmr(user_id: int) -> int:
 
 def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: int, QUEUE_CHANNEL_ID: int):
     """Setup all bot commands"""
-    print("[COMMANDS] Starting setup_commands...")
-
+    
     # Make STAFF_ROLES accessible for modification
     global STAFF_ROLES
-
+    
     # ==== ADMIN COMMANDS ====
-
+    
     @bot.tree.command(name="addstaffrole", description="[ADMIN] Add a role to the staff roles list")
     @has_admin_role()
     @app_commands.describe(role="The role to add to staff roles")
@@ -209,7 +212,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         
         # List of valid commands
         valid_commands = [
-            "addplayer", "removeplayer", "resetqueue", "cancelmatch", "cancelcurrent",
+            "addplayer", "removeplayer", "resetqueue", "cancelmatch", "cancelcurrent", "restartmatch",
             "correctcurrent", "testmatchmaking", "swap", "ping", "silentping",
             "bannedroles", "requiredroles",
             "adminunlinkalias", "linkalias", "unlinkalias", "myalias",
@@ -471,7 +474,18 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                 except:
                     pass
             queue_state.pregame_vc_id = None
-            
+
+            # Delete series text channel (used for team selection)
+            if hasattr(queue_state, 'series_text_channel_id') and queue_state.series_text_channel_id:
+                series_text = interaction.guild.get_channel(queue_state.series_text_channel_id)
+                if series_text:
+                    try:
+                        await series_text.delete(reason="Match cancelled")
+                        log_action("Deleted Series Text Channel")
+                    except:
+                        pass
+                queue_state.series_text_channel_id = None
+
             # Delete pregame message
             if hasattr(queue_state, 'pregame_message') and queue_state.pregame_message:
                 try:
@@ -479,9 +493,29 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                 except:
                     pass
                 queue_state.pregame_message = None
-        
+
+            # Remove match roles if assigned during pregame (before series created)
+            pending_match = getattr(queue_state, 'pending_match_number', None)
+            playlist_name = getattr(queue_state, 'playlist_name', 'MLG4v4')
+            if pending_match and not test_mode and not has_series:
+                try:
+                    from searchmatchmaking import remove_active_match_roles
+                    locked_players = queue_state.locked_players if queue_state.locked_players else []
+                    if locked_players:
+                        await remove_active_match_roles(interaction.guild, locked_players, playlist_name, pending_match)
+                        log_action(f"Removed match roles for cancelled pregame match #{pending_match}")
+
+                        # Recycle the match number
+                        from ingame import Series
+                        if Series.match_counter >= pending_match:
+                            Series.match_counter = pending_match - 1
+                            log_action(f"Recycled match number - counter reset to {Series.match_counter}")
+                except Exception as e:
+                    log_action(f"Failed to remove pregame match roles: {e}")
+                queue_state.pending_match_number = None
+
         match_type = "Test" if test_mode else "Match #"
-        
+
         # Handle series cleanup
         if has_series:
             series = queue_state.current_series
@@ -535,6 +569,16 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                 except:
                     pass
 
+            # Remove active matchmaking roles from all players
+            if not test_mode:
+                try:
+                    from searchmatchmaking import remove_active_match_roles
+                    all_players = series.red_team + series.blue_team
+                    playlist_name = getattr(series, 'playlist_name', 'MLG4v4')
+                    await remove_active_match_roles(interaction.guild, all_players, playlist_name, series.match_number)
+                except Exception as e:
+                    log_action(f"Failed to remove active match roles: {e}")
+
         # Clear state
         queue_state.current_series = None
         queue_state.queue.clear()
@@ -542,6 +586,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         queue_state.testers = []
         queue_state.locked = False
         queue_state.locked_players = []
+        queue_state.pending_match_number = None
 
         # Clear saved state
         try:
@@ -555,7 +600,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             await update_queue_embed(channel)
 
         await interaction.followup.send(f"✅ {match_type}{match_number} has been cancelled!", ephemeral=True)
-    
+
     @bot.tree.command(name="cancelcurrent", description="[STAFF] Cancel the current active match (any type)")
     @has_staff_role()
     async def cancel_current(interaction: discord.Interaction):
@@ -583,7 +628,18 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                 except:
                     pass
             queue_state.pregame_vc_id = None
-            
+
+            # Delete series text channel (used for team selection)
+            if hasattr(queue_state, 'series_text_channel_id') and queue_state.series_text_channel_id:
+                series_text = interaction.guild.get_channel(queue_state.series_text_channel_id)
+                if series_text:
+                    try:
+                        await series_text.delete(reason="Match cancelled")
+                        log_action("Deleted Series Text Channel")
+                    except:
+                        pass
+                queue_state.series_text_channel_id = None
+
             # Delete pregame message
             if hasattr(queue_state, 'pregame_message') and queue_state.pregame_message:
                 try:
@@ -591,13 +647,33 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                 except:
                     pass
                 queue_state.pregame_message = None
-        
+
+            # Remove match roles if assigned during pregame (before series created)
+            pending_match = getattr(queue_state, 'pending_match_number', None)
+            playlist_name = getattr(queue_state, 'playlist_name', 'MLG4v4')
+            if pending_match and not has_series:
+                try:
+                    from searchmatchmaking import remove_active_match_roles
+                    locked_players = queue_state.locked_players if queue_state.locked_players else []
+                    if locked_players:
+                        await remove_active_match_roles(interaction.guild, locked_players, playlist_name, pending_match)
+                        log_action(f"Removed match roles for cancelled pregame match #{pending_match}")
+
+                        # Recycle the match number
+                        from ingame import Series
+                        if Series.match_counter >= pending_match:
+                            Series.match_counter = pending_match - 1
+                            log_action(f"Recycled match number - counter reset to {Series.match_counter}")
+                except Exception as e:
+                    log_action(f"Failed to remove pregame match roles: {e}")
+                queue_state.pending_match_number = None
+
         # Handle series cleanup
         if has_series:
             series = queue_state.current_series
             match_type = "Test" if series.test_mode else "Match #"
             match_num = series.match_number
-            
+
             if series.games:
                 log_action(f"Staff {interaction.user.name} cancelled {match_type}{match_num} - {len(series.games)} games played")
                 save_match_history(series, 'CANCELLED')
@@ -647,6 +723,16 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                 except:
                     pass
 
+            # Remove active matchmaking roles from all players
+            if not series.test_mode:
+                try:
+                    from searchmatchmaking import remove_active_match_roles
+                    all_players = series.red_team + series.blue_team
+                    playlist_name = getattr(series, 'playlist_name', 'MLG4v4')
+                    await remove_active_match_roles(interaction.guild, all_players, playlist_name, series.match_number)
+                except Exception as e:
+                    log_action(f"Failed to remove active match roles: {e}")
+
         # Clear all state
         queue_state.current_series = None
         queue_state.queue.clear()
@@ -654,6 +740,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         queue_state.testers = []
         queue_state.locked = False
         queue_state.locked_players = []
+        queue_state.pending_match_number = None
 
         # Clear saved state
         try:
@@ -671,6 +758,124 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             await interaction.followup.send(f"✅ Match cancelled!", ephemeral=True)
         else:
             await interaction.followup.send(f"✅ Pregame cancelled!", ephemeral=True)
+
+    @bot.tree.command(name="restartmatch", description="[STAFF] Restart match back to pregame/team selection")
+    @has_staff_role()
+    async def restart_match(interaction: discord.Interaction):
+        """Restart current match back to pregame lobby phase"""
+        from searchmatchmaking import queue_state, queue_state_2, update_queue_embed, QUEUE_CHANNEL_ID_2
+        from pregame import start_pregame
+
+        # Check both queue states for active series
+        qs = None
+        if queue_state.current_series:
+            qs = queue_state
+        elif queue_state_2.current_series:
+            qs = queue_state_2
+
+        if not qs or not qs.current_series:
+            await interaction.response.send_message("❌ No active match to restart!", ephemeral=True)
+            return
+
+        series = qs.current_series
+        test_mode = series.test_mode
+        match_number = series.match_number
+
+        # Get all players from the match
+        all_players = series.red_team + series.blue_team
+
+        await interaction.response.defer()
+
+        log_action(f"Admin {interaction.user.name} restarting match #{match_number} to pregame")
+
+        # Delete team VCs
+        if series.red_vc_id:
+            red_vc = interaction.guild.get_channel(series.red_vc_id)
+            if red_vc:
+                try:
+                    await red_vc.delete(reason="Match restarting")
+                    log_action("Deleted Red Team VC for restart")
+                except:
+                    pass
+
+        if series.blue_vc_id:
+            blue_vc = interaction.guild.get_channel(series.blue_vc_id)
+            if blue_vc:
+                try:
+                    await blue_vc.delete(reason="Match restarting")
+                    log_action("Deleted Blue Team VC for restart")
+                except:
+                    pass
+
+        # Delete general chat embed
+        try:
+            from ingame import delete_general_chat_embed
+            await delete_general_chat_embed(interaction.guild, series)
+        except:
+            pass
+
+        # Delete series message if exists
+        if series.series_message:
+            try:
+                await series.series_message.delete()
+            except:
+                pass
+
+        # Delete series text channel if exists (will be recreated)
+        if hasattr(qs, 'series_text_channel_id') and qs.series_text_channel_id:
+            series_text = interaction.guild.get_channel(qs.series_text_channel_id)
+            if series_text:
+                try:
+                    await series_text.delete(reason="Match restarting")
+                    log_action("Deleted Series Text Channel for restart")
+                except:
+                    pass
+            qs.series_text_channel_id = None
+
+        # Delete pregame message if exists
+        if hasattr(qs, 'pregame_message') and qs.pregame_message:
+            try:
+                await qs.pregame_message.delete()
+            except:
+                pass
+            qs.pregame_message = None
+
+        # Delete pregame VC if exists
+        if hasattr(qs, 'pregame_vc_id') and qs.pregame_vc_id:
+            pregame_vc = interaction.guild.get_channel(qs.pregame_vc_id)
+            if pregame_vc:
+                try:
+                    await pregame_vc.delete(reason="Match restarting")
+                except:
+                    pass
+            qs.pregame_vc_id = None
+
+        # Reset series state but keep the match number
+        qs.current_series = None
+        qs.locked = False
+        qs.locked_players = all_players[:]  # Keep the same players
+        qs.pending_match_number = match_number  # Reuse same match number
+        qs.test_mode = test_mode
+        if test_mode:
+            qs.testers = all_players[:]
+
+        # Get the appropriate queue channel
+        if qs == queue_state:
+            channel = interaction.guild.get_channel(QUEUE_CHANNEL_ID)
+        else:
+            channel = interaction.guild.get_channel(QUEUE_CHANNEL_ID_2)
+
+        if channel:
+            await update_queue_embed(channel, qs)
+
+        # Start pregame again with the same players
+        if test_mode:
+            await start_pregame(channel or interaction.channel, test_mode=True, test_players=all_players, mlg_queue_state=qs)
+        else:
+            await start_pregame(channel or interaction.channel, mlg_queue_state=qs)
+
+        match_type = "Test" if test_mode else "Match #"
+        await interaction.followup.send(f"✅ {match_type}{match_number} restarted to pregame lobby!", ephemeral=True)
 
     @bot.tree.command(name="endmatch", description="[ADMIN] End an active match (properly records results)")
     @has_admin_role()
@@ -828,24 +1033,44 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                 with open(history_file, 'r') as f:
                     history = json.load(f)
 
-                # Find match by match number
+                # Get matches list from history object
+                matches = history.get("matches", [])
+                if not matches:
+                    await interaction.followup.send(f"❌ No matches found in {playlist_name} history!", ephemeral=True)
+                    return
+
+                # Find match by match_id (not match_number)
                 found_idx = None
                 found_match = None
-                for i, match in enumerate(history):
-                    if match.get('match_number') == match_number:
+                for i, match in enumerate(matches):
+                    if match.get('match_id') == match_number:
                         found_idx = i
                         found_match = match
                         break
 
                 if found_idx is None:
-                    await interaction.followup.send(f"❌ Match #{match_number} not found in {playlist_name} history!", ephemeral=True)
+                    available = [m.get('match_id') for m in matches if m.get('match_id')]
+                    if available:
+                        await interaction.followup.send(
+                            f"❌ Match #{match_number} not found in {playlist_name} history!\n"
+                            f"Available match IDs: {', '.join(map(str, sorted(available)))}",
+                            ephemeral=True
+                        )
+                    else:
+                        await interaction.followup.send(f"❌ Match #{match_number} not found in {playlist_name} history!", ephemeral=True)
                     return
 
-                result = found_match.get('result', 'Unknown')
-                timestamp = found_match.get('timestamp', 'Unknown')
+                result = found_match.get('winner', 'Unknown')
+                timestamp = found_match.get('end_time', found_match.get('timestamp', 'Unknown'))
 
-                # Delete the match
-                history.pop(found_idx)
+                # Delete the match from matches list
+                matches.pop(found_idx)
+                history["matches"] = matches
+
+                # Update total count
+                if "total_ranked_matches" in history and history["total_ranked_matches"] > 0:
+                    history["total_ranked_matches"] -= 1
+
                 with open(history_file, 'w') as f:
                     json.dump(history, f, indent=2)
 
@@ -1298,6 +1523,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         # Public Commands
         commands_list.append("**📊 STATS & INFO**")
         commands_list.append("`/playerstats` - View player stats and MMR")
+        commands_list.append("`/checkmmr` - Check MMR rankings around a player")
         commands_list.append("`/leaderboard` - View MMR leaderboard")
         commands_list.append("`/verifystats` - Verify your stats are correct")
         commands_list.append("`/help` - Show this help message")
@@ -1333,6 +1559,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
 
             commands_list.append("**⚙️ STAFF - MATCH** `[STAFF]`")
             commands_list.append("`/cancelmatch` - Cancel the current match")
+            commands_list.append("`/restartmatch` - Restart match to pregame")
             commands_list.append("`/correctcurrent` - Correct current match stats")
             commands_list.append("`/setgamestats` - Manually set game stats")
             commands_list.append("`/adminarrange` - Arrange teams manually")
@@ -1375,6 +1602,10 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             commands_list.append("`/liststaffroles` - List staff roles")
             commands_list.append("`/rolerulechange` - Change command permissions")
             commands_list.append("`/listrolerules` - List permission overrides")
+            commands_list.append("`/dotcomrefresh` - Pull latest data from GitHub")
+            commands_list.append("`/backfillgamedata` - Backfill historical match embeds")
+            commands_list.append("`/postprs` - Post merged PRs to dev channel")
+            commands_list.append("`/clearpostedprs` - Reset posted PRs list")
 
         # Create embed
         embed = discord.Embed(
@@ -2769,9 +3000,50 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
     async def restart_bot(interaction: discord.Interaction):
         """Restart the bot"""
         import sys
+        import subprocess
+        import os
 
         log_action(f"Bot restart initiated by {interaction.user.display_name}")
-        await interaction.response.send_message("🔄 Restarting bot...", ephemeral=True)
+        await interaction.response.send_message("🔄 Backing up MMR.json and restarting bot...", ephemeral=True)
+
+        # Backup MMR.json to git before restart
+        try:
+            mmr_file = "/home/user/Carnage-Report-Matchmaking-Bot/MMR.json"
+            if os.path.exists(mmr_file):
+                # Get current timestamp for commit message
+                from datetime import datetime, timezone, timedelta
+                EST = timezone(timedelta(hours=-5))
+                timestamp = datetime.now(EST).strftime('%Y-%m-%d %H:%M:%S EST')
+
+                # Git add, commit, and push
+                subprocess.run(
+                    ['git', 'add', 'MMR.json'],
+                    cwd='/home/user/Carnage-Report-Matchmaking-Bot',
+                    capture_output=True,
+                    timeout=30
+                )
+                commit_result = subprocess.run(
+                    ['git', 'commit', '-m', f'Auto-backup MMR.json before restart - {timestamp}'],
+                    cwd='/home/user/Carnage-Report-Matchmaking-Bot',
+                    capture_output=True,
+                    timeout=30
+                )
+                if commit_result.returncode == 0:
+                    push_result = subprocess.run(
+                        ['git', 'push'],
+                        cwd='/home/user/Carnage-Report-Matchmaking-Bot',
+                        capture_output=True,
+                        timeout=60
+                    )
+                    if push_result.returncode == 0:
+                        log_action("Successfully backed up MMR.json to git")
+                    else:
+                        log_action(f"Git push failed: {push_result.stderr.decode()}")
+                else:
+                    # No changes to commit is okay
+                    log_action("No MMR.json changes to commit")
+        except Exception as e:
+            log_action(f"Failed to backup MMR.json to git: {e}")
 
         # Give time for the message to be seen
         await asyncio.sleep(1)
@@ -2823,65 +3095,6 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         except Exception as e:
             await interaction.followup.send(f"❌ Error running script: {e}", ephemeral=True)
             log_action(f"populate_stats.py error: {e}")
-
-    @bot.tree.command(name='populatestatsrefresh', description='[ADMIN] Full reset - delete all stats JSONs and repopulate')
-    @has_admin_role()
-    async def populate_stats_refresh(interaction: discord.Interaction):
-        """Delete all stats JSONs and run populate_stats.py for a full reset"""
-        import subprocess
-        import os
-
-        await interaction.response.defer(ephemeral=True)
-        log_action(f"populate_stats REFRESH initiated by {interaction.user.display_name}")
-
-        # JSON files to delete for full reset
-        stats_files = [
-            '/home/carnagereport/CarnageReport.com/stats/ranks.json',
-            '/home/carnagereport/CarnageReport.com/stats/matches.json',
-            '/home/carnagereport/CarnageReport.com/stats/players.json',
-        ]
-
-        deleted_files = []
-        for filepath in stats_files:
-            if os.path.exists(filepath):
-                try:
-                    os.remove(filepath)
-                    deleted_files.append(os.path.basename(filepath))
-                    log_action(f"Deleted {filepath}")
-                except Exception as e:
-                    log_action(f"Failed to delete {filepath}: {e}")
-
-        status_msg = f"🗑️ Deleted: {', '.join(deleted_files) if deleted_files else 'No files found'}\n\n"
-
-        try:
-            # Run the populate_stats.py script
-            result = subprocess.run(
-                ['python3', '/home/carnagereport/CarnageReport.com/populate_stats.py'],
-                capture_output=True,
-                text=True,
-                timeout=300  # 5 minute timeout
-            )
-
-            if result.returncode == 0:
-                output = result.stdout[-1500:] if len(result.stdout) > 1500 else result.stdout
-                await interaction.followup.send(
-                    f"✅ **Full stats refresh completed!**\n\n{status_msg}```\n{output}\n```",
-                    ephemeral=True
-                )
-                log_action(f"populate_stats REFRESH completed successfully")
-            else:
-                error = result.stderr[-1500:] if len(result.stderr) > 1500 else result.stderr
-                await interaction.followup.send(
-                    f"❌ **populate_stats.py failed!**\n\n{status_msg}```\n{error}\n```",
-                    ephemeral=True
-                )
-                log_action(f"populate_stats REFRESH failed: {result.stderr[:500]}")
-        except subprocess.TimeoutExpired:
-            await interaction.followup.send(f"❌ Script timed out after 5 minutes!\n\n{status_msg}", ephemeral=True)
-            log_action("populate_stats REFRESH timed out")
-        except Exception as e:
-            await interaction.followup.send(f"❌ Error running script: {e}\n\n{status_msg}", ephemeral=True)
-            log_action(f"populate_stats REFRESH error: {e}")
 
     class BotLogsView(discord.ui.View):
         """Paginated view for bot logs"""
@@ -3777,6 +3990,82 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         )
         log_action(f"[MMR] {interaction.user.name} set {player.name}'s MMR to {value}")
 
+    @bot.tree.command(name="checkmmr", description="Check a player's current MMR and nearby rankings")
+    @app_commands.describe(
+        player="The player to check MMR for (optional, defaults to yourself)"
+    )
+    async def check_mmr(interaction: discord.Interaction, player: discord.User = None):
+        """Check a player's MMR value and show players ranked above/below"""
+        import STATSRANKS
+
+        # Default to the user who ran the command if no player specified
+        if player is None:
+            player = interaction.user
+
+        # Load MMR.json
+        mmr_data = STATSRANKS.load_json_file(STATSRANKS.MMR_FILE)
+        user_key = str(player.id)
+
+        # Check if player has MMR
+        if user_key not in mmr_data or "mmr" not in mmr_data[user_key]:
+            await interaction.response.send_message(
+                f"**{player.display_name}** does not have an MMR set yet.",
+                ephemeral=True
+            )
+            return
+
+        # Build sorted list of all players with MMR
+        players_list = []
+        for uid, data in mmr_data.items():
+            if "mmr" in data:
+                # Try to get display name from guild
+                member = interaction.guild.get_member(int(uid))
+                name = member.display_name if member else data.get("discord_name", f"User {uid}")
+
+                players_list.append({
+                    "id": uid,
+                    "name": name,
+                    "mmr": data["mmr"]
+                })
+
+        # Sort by MMR descending (highest first)
+        players_list.sort(key=lambda x: x["mmr"], reverse=True)
+
+        # Find target player's position
+        target_idx = None
+        for i, p in enumerate(players_list):
+            if p["id"] == user_key:
+                target_idx = i
+                break
+
+        if target_idx is None:
+            await interaction.response.send_message(
+                f"**{player.display_name}** not found in MMR rankings.",
+                ephemeral=True
+            )
+            return
+
+        # Up to 3 above and up to 3 below (no padding)
+        start_idx = max(0, target_idx - 3)
+        end_idx = min(len(players_list), target_idx + 4)
+
+        # Build response
+        lines = []
+        lines.append(f"**MMR Rankings around {player.display_name}**\n")
+
+        for i in range(start_idx, end_idx):
+            p = players_list[i]
+            position = i + 1
+
+            # Highlight the target player
+            if i == target_idx:
+                lines.append(f"**#{position} ➤ {p['name']} - {p['mmr']}**")
+            else:
+                lines.append(f"#{position}   {p['name']} - {p['mmr']}")
+
+        await interaction.response.send_message("\n".join(lines), ephemeral=True)
+        log_action(f"[MMR] {interaction.user.name} checked {player.name}'s MMR")
+
     @bot.tree.command(name="leaderboard", description="View the matchmaking leaderboard")
     async def leaderboard(interaction: discord.Interaction):
         """Show leaderboard - reads from ranks.json (website source of truth)"""
@@ -3842,7 +4131,6 @@ python3 populate_stats.py'''
         log_action(f"Admin {interaction.user.name} ran /populatestatsrefresh - {'success' if success else 'failed'}")
         await interaction.followup.send(response, ephemeral=True)
 
-    print("[COMMANDS] Registering dotcomrefresh command...")
     @bot.tree.command(name="dotcomrefresh", description="[ADMIN] Pull latest CarnageReport.com data from GitHub")
     @has_admin_role()
     async def dotcom_refresh(interaction: discord.Interaction):
@@ -3880,7 +4168,6 @@ python3 populate_stats.py'''
         log_action(f"Admin {interaction.user.name} ran /dotcomrefresh - {'success' if success else 'failed'}")
         await interaction.followup.send(response, ephemeral=True)
 
-    print("[COMMANDS] Registering backfillgamedata command...")
     @bot.tree.command(name="backfillgamedata", description="[ADMIN] Backfill historical series data into embeds for all playlists")
     @has_admin_role()
     async def backfill_game_data(interaction: discord.Interaction):
@@ -4073,5 +4360,366 @@ python3 populate_stats.py'''
             log_action(f"[VOICE] Failed to create RvB channels: {e}")
             await interaction.followup.send(f"❌ Failed to create channels: {e}", ephemeral=True)
 
-    print("[COMMANDS] setup_commands completed successfully!")
+    # Development channel for PR notifications
+    DEV_CHANNEL_ID = 1428871720793542756
+    POSTED_PRS_FILE = "posted_prs.json"
+
+    # GitHub accounts to track all repos from
+    GITHUB_ACCOUNTS = ["I2aMpAnT", "Roasted-Codes"]
+
+    def load_posted_prs():
+        """Load list of already posted PR URLs"""
+        try:
+            if os.path.exists(POSTED_PRS_FILE):
+                with open(POSTED_PRS_FILE, 'r') as f:
+                    return json.load(f)
+        except:
+            pass
+        return []
+
+    def save_posted_prs(posted: list):
+        """Save list of posted PR URLs"""
+        with open(POSTED_PRS_FILE, 'w') as f:
+            json.dump(posted, f, indent=2)
+
+    async def fetch_all_repos(username: str) -> list:
+        """Fetch all repos for a GitHub user"""
+        import aiohttp
+
+        github_token = os.getenv('GITHUB_TOKEN')
+        api_url = f"https://api.github.com/users/{username}/repos"
+
+        headers = {
+            "Accept": "application/vnd.github.v3+json",
+            "User-Agent": "CarnageReportBot"
+        }
+        if github_token:
+            headers["Authorization"] = f"token {github_token}"
+
+        params = {"per_page": 100, "type": "all"}
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(api_url, headers=headers, params=params, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                    if response.status == 200:
+                        repos = await response.json()
+                        return [repo["full_name"] for repo in repos]
+                    else:
+                        log_action(f"[GITHUB] Failed to fetch repos for {username}: {response.status}")
+                        return []
+        except Exception as e:
+            log_action(f"[GITHUB] Exception fetching repos: {e}")
+            return []
+
+    async def fetch_github_prs(repo: str, state: str = "all") -> list:
+        """Fetch PRs from a GitHub repo using aiohttp"""
+        import aiohttp
+
+        github_token = os.getenv('GITHUB_TOKEN')
+        api_url = f"https://api.github.com/repos/{repo}/pulls"
+
+        headers = {
+            "Accept": "application/vnd.github.v3+json",
+            "User-Agent": "CarnageReportBot"
+        }
+        if github_token:
+            headers["Authorization"] = f"token {github_token}"
+
+        params = {"state": state, "per_page": 100}
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(api_url, headers=headers, params=params, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                    if response.status == 200:
+                        return await response.json()
+                    else:
+                        log_action(f"[GITHUB] Failed to fetch PRs from {repo}: {response.status}")
+                        return []
+        except Exception as e:
+            log_action(f"[GITHUB] Exception fetching PRs from {repo}: {e}")
+            return []
+
+    def extract_pr_summary(body: str) -> str:
+        """Extract the summary section from PR body"""
+        if not body or not body.strip():
+            return "No description provided."
+
+        lines = body.split('\n')
+        summary_lines = []
+        in_summary = False
+
+        # First, look for ## Summary section
+        for line in lines:
+            if line.strip().lower().startswith('## summary'):
+                in_summary = True
+                continue
+            if in_summary and line.strip().startswith('## '):
+                break
+            if in_summary and line.strip():
+                cleaned = line.strip()
+                if cleaned.startswith('- '):
+                    cleaned = '• ' + cleaned[2:]
+                elif cleaned.startswith('* '):
+                    cleaned = '• ' + cleaned[2:]
+                summary_lines.append(cleaned)
+
+        if summary_lines:
+            return '\n'.join(summary_lines)
+
+        # No ## Summary found - look for any bullet points
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith('- ') or stripped.startswith('* '):
+                cleaned = '• ' + stripped[2:]
+                summary_lines.append(cleaned)
+
+        if summary_lines:
+            return '\n'.join(summary_lines)
+
+        # No bullets - just return first 200 chars
+        clean_body = body.strip()
+        if clean_body:
+            return clean_body[:200] + ('...' if len(clean_body) > 200 else '')
+
+        return "No description provided."
+
+    async def fetch_pr_commits(pr: dict) -> list:
+        """Fetch commit messages for a PR"""
+        import aiohttp
+
+        commits_url = pr.get("commits_url")
+        if not commits_url:
+            return []
+
+        github_token = os.getenv('GITHUB_TOKEN')
+        headers = {
+            "Accept": "application/vnd.github.v3+json",
+            "User-Agent": "CarnageReportBot"
+        }
+        if github_token:
+            headers["Authorization"] = f"token {github_token}"
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(commits_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as response:
+                    if response.status == 200:
+                        commits = await response.json()
+                        # Return commit messages
+                        return [c.get("commit", {}).get("message", "").split('\n')[0] for c in commits]
+        except:
+            pass
+        return []
+
+    async def create_pr_notification(pr: dict, repo: str) -> str:
+        """Create a clean text notification for a merged PR"""
+        repo_name = repo.split("/")[-1]
+
+        # Extract summary from PR body
+        summary = extract_pr_summary(pr.get("body", ""))
+
+        # If no description, try to get commit messages
+        if summary == "No description provided.":
+            commits = await fetch_pr_commits(pr)
+            if commits:
+                summary = '\n'.join([f'• {msg}' for msg in commits])
+
+        # Build message - clean and simple
+        message = (
+            f"**[{repo_name}]** Merged: #{pr['number']}\n"
+            f"**{pr['title']}**\n"
+            f"\n"
+            f"{summary}\n"
+            f"\n"
+            f"<{pr['html_url']}>"
+        )
+
+        return message
+
+    # Background task for automatic PR checking
+    from discord.ext import tasks
+
+    @tasks.loop(minutes=5)
+    async def check_new_prs():
+        """Automatically check for new merged PRs and post them"""
+        dev_channel = bot.get_channel(DEV_CHANNEL_ID)
+        if not dev_channel:
+            return
+
+        # Fetch all repos from all tracked accounts
+        all_repos = []
+        for account in GITHUB_ACCOUNTS:
+            repos = await fetch_all_repos(account)
+            all_repos.extend(repos)
+
+        if not all_repos:
+            return
+
+        posted_prs = load_posted_prs()
+        new_posts = 0
+
+        for repo in all_repos:
+            # Only fetch closed PRs (merged PRs are closed)
+            prs = await fetch_github_prs(repo, "closed")
+            for pr in prs:
+                # Skip if not merged (just closed without merge)
+                if not pr.get("merged_at"):
+                    continue
+
+                pr_url = pr["html_url"]
+
+                if pr_url in posted_prs:
+                    continue
+
+                # Post notification
+                message = await create_pr_notification(pr, repo)
+                try:
+                    await dev_channel.send(message)
+                    posted_prs.append(pr_url)
+                    save_posted_prs(posted_prs)  # Save immediately to prevent duplicates
+                    new_posts += 1
+                    await asyncio.sleep(1)  # Rate limit
+                except Exception as e:
+                    log_action(f"[GITHUB] Failed to post PR {pr_url}: {e}")
+
+        if new_posts > 0:
+            log_action(f"[GITHUB] Auto-posted {new_posts} merged PRs")
+
+    @check_new_prs.before_loop
+    async def before_check_prs():
+        """Wait for bot to be ready"""
+        await bot.wait_until_ready()
+
+    @bot.tree.command(name="postprs", description="[ADMIN] Post all historical merged PRs to development channel")
+    @has_admin_role()
+    async def post_prs(interaction: discord.Interaction):
+        """Post all historical merged PRs to development channel"""
+        await interaction.response.defer(ephemeral=True)
+
+        dev_channel = bot.get_channel(DEV_CHANNEL_ID)
+        if not dev_channel:
+            await interaction.followup.send(f"Could not find development channel (ID: {DEV_CHANNEL_ID})", ephemeral=True)
+            return
+
+        # Fetch all repos from all tracked accounts
+        all_repos = []
+        for account in GITHUB_ACCOUNTS:
+            repos = await fetch_all_repos(account)
+            all_repos.extend(repos)
+
+        if not all_repos:
+            await interaction.followup.send("Could not fetch repos from GitHub", ephemeral=True)
+            return
+
+        await interaction.followup.send(f"Fetching PRs from {len(all_repos)} repos across {len(GITHUB_ACCOUNTS)} accounts...", ephemeral=True)
+
+        posted_prs = load_posted_prs()
+        new_posts = 0
+        skipped = 0
+
+        all_prs = []
+        for repo in all_repos:
+            # Only fetch closed PRs (merged PRs are closed)
+            prs = await fetch_github_prs(repo, "closed")
+            for pr in prs:
+                # Only include merged PRs
+                if not pr.get("merged_at"):
+                    continue
+                pr["_repo"] = repo
+                all_prs.append(pr)
+
+        # Sort by merge date (oldest first)
+        all_prs.sort(key=lambda x: x.get("merged_at", ""), reverse=False)
+
+        for pr in all_prs:
+            pr_url = pr["html_url"]
+
+            if pr_url in posted_prs:
+                skipped += 1
+                continue
+
+            message = await create_pr_notification(pr, pr["_repo"])
+            try:
+                await dev_channel.send(message)
+                posted_prs.append(pr_url)
+                save_posted_prs(posted_prs)  # Save immediately to prevent duplicates
+                new_posts += 1
+                await asyncio.sleep(0.5)
+            except Exception as e:
+                log_action(f"[GITHUB] Failed to post PR {pr_url}: {e}")
+
+        save_posted_prs(posted_prs)
+
+        await interaction.followup.send(
+            f"**Merged PR Posting Complete**\n"
+            f"Posted: {new_posts} merged PRs\n"
+            f"Skipped: {skipped} (already posted)\n"
+            f"Channel: {dev_channel.mention}",
+            ephemeral=True
+        )
+        log_action(f"[GITHUB] {interaction.user.name} posted {new_posts} historical merged PRs")
+
+    @bot.tree.command(name="clearpostedprs", description="[ADMIN] Clear posted PRs list to allow reposting")
+    @has_admin_role()
+    async def clear_posted_prs(interaction: discord.Interaction):
+        """Clear the posted PRs tracking file"""
+        save_posted_prs([])
+        await interaction.response.send_message("Cleared posted PRs list. Run /postprs to repost all.", ephemeral=True)
+        log_action(f"[GITHUB] {interaction.user.name} cleared posted PRs list")
+
+    @bot.tree.command(name="deletemessages", description="[ADMIN] Delete all messages in a channel")
+    @app_commands.describe(channel_id="The ID of the channel to clear")
+    @has_admin_role()
+    async def delete_messages(interaction: discord.Interaction, channel_id: str):
+        """Delete all messages in a specified channel"""
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            # Parse channel ID
+            cid = int(channel_id.strip())
+            channel = interaction.guild.get_channel(cid)
+
+            if not channel:
+                await interaction.followup.send(f"❌ Channel with ID `{channel_id}` not found.", ephemeral=True)
+                return
+
+            if not isinstance(channel, discord.TextChannel):
+                await interaction.followup.send(f"❌ Channel must be a text channel.", ephemeral=True)
+                return
+
+            # Delete messages in batches
+            deleted_count = 0
+            await interaction.followup.send(f"🗑️ Deleting messages in {channel.mention}...", ephemeral=True)
+
+            while True:
+                # Fetch messages (up to 100 at a time)
+                messages = [msg async for msg in channel.history(limit=100)]
+                if not messages:
+                    break
+
+                # Delete messages
+                for msg in messages:
+                    try:
+                        await msg.delete()
+                        deleted_count += 1
+                    except discord.NotFound:
+                        pass  # Already deleted
+                    except discord.Forbidden:
+                        pass  # No permission
+                    except Exception:
+                        pass
+
+                await asyncio.sleep(1)  # Rate limit protection
+
+            log_action(f"{interaction.user.display_name} deleted {deleted_count} messages from #{channel.name}")
+            await interaction.followup.send(f"✅ Deleted **{deleted_count}** messages from {channel.mention}", ephemeral=True)
+
+        except ValueError:
+            await interaction.followup.send(f"❌ Invalid channel ID: `{channel_id}`", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+
+    # Start background task after all commands are registered
+    if not check_new_prs.is_running():
+        check_new_prs.start()
+
     return bot

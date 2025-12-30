@@ -212,7 +212,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         
         # List of valid commands
         valid_commands = [
-            "addplayer", "removeplayer", "resetqueue", "cancelmatch", "cancelcurrent",
+            "addplayer", "removeplayer", "resetqueue", "cancelmatch", "cancelcurrent", "restartmatch",
             "correctcurrent", "testmatchmaking", "swap", "ping", "silentping",
             "bannedroles", "requiredroles",
             "adminunlinkalias", "linkalias", "unlinkalias", "myalias",
@@ -758,6 +758,124 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             await interaction.followup.send(f"✅ Match cancelled!", ephemeral=True)
         else:
             await interaction.followup.send(f"✅ Pregame cancelled!", ephemeral=True)
+
+    @bot.tree.command(name="restartmatch", description="[STAFF] Restart match back to pregame/team selection")
+    @has_staff_role()
+    async def restart_match(interaction: discord.Interaction):
+        """Restart current match back to pregame lobby phase"""
+        from searchmatchmaking import queue_state, queue_state_2, update_queue_embed, QUEUE_CHANNEL_ID_2
+        from pregame import start_pregame
+
+        # Check both queue states for active series
+        qs = None
+        if queue_state.current_series:
+            qs = queue_state
+        elif queue_state_2.current_series:
+            qs = queue_state_2
+
+        if not qs or not qs.current_series:
+            await interaction.response.send_message("❌ No active match to restart!", ephemeral=True)
+            return
+
+        series = qs.current_series
+        test_mode = series.test_mode
+        match_number = series.match_number
+
+        # Get all players from the match
+        all_players = series.red_team + series.blue_team
+
+        await interaction.response.defer()
+
+        log_action(f"Admin {interaction.user.name} restarting match #{match_number} to pregame")
+
+        # Delete team VCs
+        if series.red_vc_id:
+            red_vc = interaction.guild.get_channel(series.red_vc_id)
+            if red_vc:
+                try:
+                    await red_vc.delete(reason="Match restarting")
+                    log_action("Deleted Red Team VC for restart")
+                except:
+                    pass
+
+        if series.blue_vc_id:
+            blue_vc = interaction.guild.get_channel(series.blue_vc_id)
+            if blue_vc:
+                try:
+                    await blue_vc.delete(reason="Match restarting")
+                    log_action("Deleted Blue Team VC for restart")
+                except:
+                    pass
+
+        # Delete general chat embed
+        try:
+            from ingame import delete_general_chat_embed
+            await delete_general_chat_embed(interaction.guild, series)
+        except:
+            pass
+
+        # Delete series message if exists
+        if series.series_message:
+            try:
+                await series.series_message.delete()
+            except:
+                pass
+
+        # Delete series text channel if exists (will be recreated)
+        if hasattr(qs, 'series_text_channel_id') and qs.series_text_channel_id:
+            series_text = interaction.guild.get_channel(qs.series_text_channel_id)
+            if series_text:
+                try:
+                    await series_text.delete(reason="Match restarting")
+                    log_action("Deleted Series Text Channel for restart")
+                except:
+                    pass
+            qs.series_text_channel_id = None
+
+        # Delete pregame message if exists
+        if hasattr(qs, 'pregame_message') and qs.pregame_message:
+            try:
+                await qs.pregame_message.delete()
+            except:
+                pass
+            qs.pregame_message = None
+
+        # Delete pregame VC if exists
+        if hasattr(qs, 'pregame_vc_id') and qs.pregame_vc_id:
+            pregame_vc = interaction.guild.get_channel(qs.pregame_vc_id)
+            if pregame_vc:
+                try:
+                    await pregame_vc.delete(reason="Match restarting")
+                except:
+                    pass
+            qs.pregame_vc_id = None
+
+        # Reset series state but keep the match number
+        qs.current_series = None
+        qs.locked = False
+        qs.locked_players = all_players[:]  # Keep the same players
+        qs.pending_match_number = match_number  # Reuse same match number
+        qs.test_mode = test_mode
+        if test_mode:
+            qs.testers = all_players[:]
+
+        # Get the appropriate queue channel
+        if qs == queue_state:
+            channel = interaction.guild.get_channel(QUEUE_CHANNEL_ID)
+        else:
+            channel = interaction.guild.get_channel(QUEUE_CHANNEL_ID_2)
+
+        if channel:
+            await update_queue_embed(channel, qs)
+
+        # Start pregame again with the same players
+        if test_mode:
+            await start_pregame(channel or interaction.channel, test_mode=True, test_players=all_players, mlg_queue_state=qs)
+        else:
+            await start_pregame(channel or interaction.channel, mlg_queue_state=qs)
+
+        match_type = "Test" if test_mode else "Match #"
+        await interaction.followup.send(f"✅ {match_type}{match_number} restarted to pregame lobby!", ephemeral=True)
 
     @bot.tree.command(name="endmatch", description="[ADMIN] End an active match (properly records results)")
     @has_admin_role()
@@ -1441,6 +1559,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
 
             commands_list.append("**⚙️ STAFF - MATCH** `[STAFF]`")
             commands_list.append("`/cancelmatch` - Cancel the current match")
+            commands_list.append("`/restartmatch` - Restart match to pregame")
             commands_list.append("`/correctcurrent` - Correct current match stats")
             commands_list.append("`/setgamestats` - Manually set game stats")
             commands_list.append("`/adminarrange` - Arrange teams manually")
