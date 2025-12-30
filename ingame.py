@@ -567,7 +567,9 @@ async def show_series_embed(channel: discord.TextChannel):
 
     # Ping the match role (separate from embed)
     match_number = series.match_number if hasattr(series, 'match_number') else 1
-    match_role_name = f"ActiveMLG4v4Match{match_number}"
+    playlist_name = getattr(series, 'playlist_name', 'MLG4v4')
+    clean_playlist = playlist_name.replace(" ", "").replace("_", "")
+    match_role_name = f"{clean_playlist}Match{match_number}"
     match_role = discord.utils.get(channel.guild.roles, name=match_role_name)
     if match_role:
         await target_channel.send(match_role.mention)
