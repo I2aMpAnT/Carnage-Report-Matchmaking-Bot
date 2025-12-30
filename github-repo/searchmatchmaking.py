@@ -1193,16 +1193,33 @@ async def create_queue_embed(channel: discord.TextChannel, qs=None):
 
     view = QueueView()
 
-    # Find existing queue message and check if it's at the bottom
-    queue_message = None
+    # Try to use cached message reference first (much faster than history search)
+    queue_message = getattr(qs, 'queue_message', None)
+
+    # Try to edit cached message directly (fastest path)
+    if queue_message:
+        try:
+            await queue_message.edit(embed=embed, view=view)
+            # Start auto-update task if not already running
+            if qs.auto_update_task is None or qs.auto_update_task.done():
+                qs.auto_update_task = asyncio.create_task(auto_update_queue_times(qs))
+                queue_name = "Halo 2 Chill Lobby" if is_restricted else "MLG 4v4"
+                log_action(f"Started {queue_name} queue auto-update task")
+            return  # Success - no need to search history
+        except:
+            # Message was deleted or invalid - clear cache
+            qs.queue_message = None
+            queue_message = None
+
+    # Only search history if cached edit failed
     is_at_bottom = True
     message_count = 0
-
     async for message in channel.history(limit=50):
         if message.author.bot and message.embeds:
             for emb in message.embeds:
                 if emb.title and ("Matchmaking" in emb.title or "Chill Lobby" in emb.title):
                     queue_message = message
+                    qs.queue_message = message  # Cache for future use
                     is_at_bottom = (message_count == 0)
                     break
         if queue_message:
@@ -1225,11 +1242,13 @@ async def create_queue_embed(channel: discord.TextChannel, qs=None):
         # Not at bottom - delete and repost
         try:
             await queue_message.delete()
+            qs.queue_message = None
         except:
             pass
 
     # Post new message at bottom
-    await channel.send(embed=embed, view=view)
+    new_message = await channel.send(embed=embed, view=view)
+    qs.queue_message = new_message  # Cache the new message
 
     # Start auto-update task if not already running
     if qs.auto_update_task is None or qs.auto_update_task.done():
@@ -1337,17 +1356,28 @@ async def update_queue_embed(channel: discord.TextChannel, qs=None):
 
     view = QueueView()
 
-    # Find existing queue message and check if it's at the bottom
-    queue_message = None
+    # Try to use cached message reference first (much faster than history search)
+    queue_message = getattr(qs, 'queue_message', None)
+
+    # Try to edit cached message directly (fastest path)
+    if queue_message:
+        try:
+            await queue_message.edit(embed=embed, view=view)
+            return  # Success - no need to search history
+        except:
+            # Message was deleted or invalid - clear cache
+            qs.queue_message = None
+            queue_message = None
+
+    # Only search history if cached edit failed
     is_at_bottom = True
     message_count = 0
-
     async for message in channel.history(limit=50):
         if message.author.bot and message.embeds:
             for emb in message.embeds:
                 if emb.title and ("Matchmaking" in emb.title or "Chill Lobby" in emb.title):
                     queue_message = message
-                    # If this isn't the first message we found, it's not at the bottom
+                    qs.queue_message = message  # Cache for future use
                     is_at_bottom = (message_count == 0)
                     break
         if queue_message:
@@ -1365,8 +1395,10 @@ async def update_queue_embed(channel: discord.TextChannel, qs=None):
         # Not at bottom or edit failed - delete and repost
         try:
             await queue_message.delete()
+            qs.queue_message = None
         except:
             pass
 
     # Post new message at bottom
-    await channel.send(embed=embed, view=view)
+    new_message = await channel.send(embed=embed, view=view)
+    qs.queue_message = new_message  # Cache the new message

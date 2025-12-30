@@ -468,6 +468,15 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         if has_pregame:
             pregame_vc = interaction.guild.get_channel(queue_state.pregame_vc_id)
             if pregame_vc:
+                # Move all players to postgame BEFORE deleting VC
+                postgame_vc = interaction.guild.get_channel(POSTGAME_LOBBY_ID)
+                if postgame_vc and pregame_vc.members:
+                    for member in list(pregame_vc.members):
+                        try:
+                            await member.move_to(postgame_vc)
+                            log_action(f"Moved {member.name} to Postgame Lobby")
+                        except:
+                            pass
                 try:
                     await pregame_vc.delete(reason="Match cancelled")
                     log_action("Deleted Pregame Lobby VC")
@@ -622,6 +631,15 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         if has_pregame:
             pregame_vc = interaction.guild.get_channel(queue_state.pregame_vc_id)
             if pregame_vc:
+                # Move all players to postgame BEFORE deleting VC
+                postgame_vc = interaction.guild.get_channel(POSTGAME_LOBBY_ID)
+                if postgame_vc and pregame_vc.members:
+                    for member in list(pregame_vc.members):
+                        try:
+                            await member.move_to(postgame_vc)
+                            log_action(f"Moved {member.name} to Postgame Lobby")
+                        except:
+                            pass
                 try:
                     await pregame_vc.delete(reason="Match cancelled")
                     log_action("Deleted Pregame Lobby VC")
@@ -788,10 +806,19 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
 
         log_action(f"Admin {interaction.user.name} restarting match #{match_number} to pregame")
 
-        # Delete team VCs
+        # Move players to postgame BEFORE deleting VCs (they'll be moved to new pregame VC later)
+        postgame_vc = interaction.guild.get_channel(POSTGAME_LOBBY_ID)
+
+        # Delete team VCs (move members first)
         if series.red_vc_id:
             red_vc = interaction.guild.get_channel(series.red_vc_id)
             if red_vc:
+                if postgame_vc and red_vc.members:
+                    for member in list(red_vc.members):
+                        try:
+                            await member.move_to(postgame_vc)
+                        except:
+                            pass
                 try:
                     await red_vc.delete(reason="Match restarting")
                     log_action("Deleted Red Team VC for restart")
@@ -801,6 +828,12 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         if series.blue_vc_id:
             blue_vc = interaction.guild.get_channel(series.blue_vc_id)
             if blue_vc:
+                if postgame_vc and blue_vc.members:
+                    for member in list(blue_vc.members):
+                        try:
+                            await member.move_to(postgame_vc)
+                        except:
+                            pass
                 try:
                     await blue_vc.delete(reason="Match restarting")
                     log_action("Deleted Blue Team VC for restart")
