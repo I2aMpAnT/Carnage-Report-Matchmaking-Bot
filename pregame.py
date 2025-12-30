@@ -645,6 +645,11 @@ async def team_selection_timeout(
         else:
             winning_method = max_options[0]  # Just pick first
 
+    # Final check before executing - prevent race condition with button clicks
+    if view.resolved:
+        log_action(f"Team selection already resolved by button click - skipping timeout execution")
+        return
+
     log_action(f"Team selection timeout - auto-selecting: {winning_method}")
 
     # Mark as resolved to prevent further votes
@@ -1771,6 +1776,11 @@ async def captain_method_timeout(view: CaptainMethodView, channel: discord.TextC
             winning_method = "highest_mmr"
         else:
             winning_method = max_options[0]
+
+    # Final check before executing - prevent race condition with button clicks
+    if view.resolved:
+        log_action(f"Captain method already resolved by button click - skipping timeout execution")
+        return
 
     log_action(f"Captain method timeout - auto-selecting: {winning_method}")
     view.resolved = True
