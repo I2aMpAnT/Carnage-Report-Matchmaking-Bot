@@ -86,33 +86,35 @@ async def update_general_chat_embed(guild: discord.Guild, series):
     
     # Check if test mode
     is_test = getattr(series, 'test_mode', False)
-    
-    # Find existing message or create new one
+
+    # Try to use cached message reference first (fast path)
     if hasattr(series, 'general_message') and series.general_message:
         try:
             if view:
                 await series.general_message.edit(embed=embed, view=view)
             else:
                 await series.general_message.edit(embed=embed)
-            return
+            return  # Success - no history search needed
         except:
-            pass
-    
-    # Look for existing message
-    async for message in channel.history(limit=20):
-        if message.author.bot and message.embeds:
-            if message.embeds[0].title and "Match In Progress" in message.embeds[0].title:
-                try:
-                    if view:
-                        await message.edit(embed=embed, view=view)
-                    else:
-                        await message.edit(embed=embed)
-                    series.general_message = message
-                    return
-                except:
-                    pass
-    
-    # Send the actual embed with multistream buttons (no @here ping)
+            series.general_message = None  # Clear invalid reference
+
+    # Only search history if no cached reference (e.g., after bot restart)
+    # This is a slow fallback - avoid when possible
+    if not hasattr(series, 'general_message') or series.general_message is None:
+        async for message in channel.history(limit=20):
+            if message.author.bot and message.embeds:
+                if message.embeds[0].title and "Match In Progress" in message.embeds[0].title:
+                    try:
+                        if view:
+                            await message.edit(embed=embed, view=view)
+                        else:
+                            await message.edit(embed=embed)
+                        series.general_message = message  # Cache for future
+                        return
+                    except:
+                        pass
+
+    # No existing message found - create new one
     if view:
         series.general_message = await channel.send(embed=embed, view=view)
     else:
@@ -120,13 +122,16 @@ async def update_general_chat_embed(guild: discord.Guild, series):
 
 async def delete_general_chat_embed(guild: discord.Guild, series):
     """Delete the match-in-progress embed from general chat"""
+    # Try to delete cached message first (fast path)
     if hasattr(series, 'general_message') and series.general_message:
         try:
             await series.general_message.delete()
+            series.general_message = None
+            return  # Success - skip history search
         except:
-            pass
-    
-    # Also try to find and delete any orphaned messages
+            series.general_message = None  # Clear invalid reference
+
+    # Only search history if cached message was missing/invalid (slow fallback)
     channel = guild.get_channel(GENERAL_CHANNEL_ID)
     if channel:
         async for message in channel.history(limit=20):
