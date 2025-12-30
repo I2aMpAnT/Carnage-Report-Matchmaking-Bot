@@ -3,7 +3,7 @@ state_manager.py - Matchmaking State Persistence
 Saves and restores queue/match state across bot restarts
 """
 
-MODULE_VERSION = "1.3.0"
+MODULE_VERSION = "1.4.0"
 
 import json
 import os
@@ -39,6 +39,13 @@ def save_state():
         "test_mode": queue_state.test_mode,
         "test_team": queue_state.test_team,
         "current_series": None,
+        # Pregame state for queue 1
+        "pregame_vc_id": getattr(queue_state, 'pregame_vc_id', None),
+        "series_text_channel_id": getattr(queue_state, 'series_text_channel_id', None),
+        "locked_players": getattr(queue_state, 'locked_players', []),
+        "pending_match_number": getattr(queue_state, 'pending_match_number', None),
+        "locked": getattr(queue_state, 'locked', False),
+        "testers": getattr(queue_state, 'testers', []),
         # Queue 2 (queue_state_2)
         "queue_2": queue_state_2.queue,
         "queue_2_join_times": {
@@ -50,7 +57,14 @@ def save_state():
             for uid, time in queue_state_2.last_activity_times.items()
         },
         "queue_2_test_mode": queue_state_2.test_mode,
-        "queue_2_current_series": None
+        "queue_2_current_series": None,
+        # Pregame state for queue 2
+        "queue_2_pregame_vc_id": getattr(queue_state_2, 'pregame_vc_id', None),
+        "queue_2_series_text_channel_id": getattr(queue_state_2, 'series_text_channel_id', None),
+        "queue_2_locked_players": getattr(queue_state_2, 'locked_players', []),
+        "queue_2_pending_match_number": getattr(queue_state_2, 'pending_match_number', None),
+        "queue_2_locked": getattr(queue_state_2, 'locked', False),
+        "queue_2_testers": getattr(queue_state_2, 'testers', [])
     }
     
     # Save series state if active
@@ -110,10 +124,20 @@ def save_state():
             "general_message_id": series.general_message.id if hasattr(series, 'general_message') and series.general_message else None
         }
 
+    # Always save match counters (important for pregame state)
+    try:
+        from ingame import Series
+        state["match_counter"] = Series.match_counter
+        state["test_counter"] = Series.test_counter
+    except:
+        pass
+
+    has_pregame = state.get("pregame_vc_id") or state.get("locked_players") or state.get("queue_2_pregame_vc_id") or state.get("queue_2_locked_players")
+
     try:
         with open(STATE_FILE, 'w') as f:
             json.dump(state, f, indent=2)
-        log_state(f"State saved - Queue 1: {len(queue_state.queue)}, Queue 2: {len(queue_state_2.queue)}, Series: {'Active' if queue_state.current_series else 'None'}")
+        log_state(f"State saved - Queue 1: {len(queue_state.queue)}, Queue 2: {len(queue_state_2.queue)}, Series: {'Active' if queue_state.current_series else 'None'}, Pregame: {has_pregame}")
     except Exception as e:
         log_state(f"Failed to save state: {e}")
 
@@ -157,7 +181,16 @@ async def restore_state(bot) -> bool:
         for uid_str, time_str in last_activity_times.items():
             queue_state.last_activity_times[int(uid_str)] = datetime.fromisoformat(time_str)
 
-        log_state(f"Restored queue 1: {len(queue_state.queue)} players")
+        # Restore pregame state for queue 1
+        queue_state.pregame_vc_id = state.get("pregame_vc_id")
+        queue_state.series_text_channel_id = state.get("series_text_channel_id")
+        queue_state.locked_players = state.get("locked_players", [])
+        queue_state.pending_match_number = state.get("pending_match_number")
+        queue_state.locked = state.get("locked", False)
+        queue_state.testers = state.get("testers", [])
+
+        has_pregame_1 = queue_state.pregame_vc_id or queue_state.locked_players
+        log_state(f"Restored queue 1: {len(queue_state.queue)} players, pregame: {has_pregame_1}")
 
         # Restore queue 2 (queue_state_2)
         queue_state_2.queue = state.get("queue_2", [])
@@ -173,15 +206,26 @@ async def restore_state(bot) -> bool:
         for uid_str, time_str in queue_2_activity_times.items():
             queue_state_2.last_activity_times[int(uid_str)] = datetime.fromisoformat(time_str)
 
-        log_state(f"Restored queue 2: {len(queue_state_2.queue)} players")
-        
+        # Restore pregame state for queue 2
+        queue_state_2.pregame_vc_id = state.get("queue_2_pregame_vc_id")
+        queue_state_2.series_text_channel_id = state.get("queue_2_series_text_channel_id")
+        queue_state_2.locked_players = state.get("queue_2_locked_players", [])
+        queue_state_2.pending_match_number = state.get("queue_2_pending_match_number")
+        queue_state_2.locked = state.get("queue_2_locked", False)
+        queue_state_2.testers = state.get("queue_2_testers", [])
+
+        has_pregame_2 = queue_state_2.pregame_vc_id or queue_state_2.locked_players
+        log_state(f"Restored queue 2: {len(queue_state_2.queue)} players, pregame: {has_pregame_2}")
+
+        # Always restore match counters (important for pregame state)
+        if state.get("match_counter") is not None:
+            Series.match_counter = state.get("match_counter", 0)
+            Series.test_counter = state.get("test_counter", 0)
+            log_state(f"Restored match counter: {Series.match_counter}, test counter: {Series.test_counter}")
+
         # Restore series if active
         series_data = state.get("current_series")
         if series_data:
-            # Restore counters first
-            Series.match_counter = state.get("match_counter", 0)
-            Series.test_counter = state.get("test_counter", 0)
-            
             # Create series without incrementing counter
             series = Series.__new__(Series)
             series.red_team = series_data["red_team"]
