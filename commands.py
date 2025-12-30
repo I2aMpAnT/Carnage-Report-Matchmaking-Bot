@@ -212,7 +212,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         
         # List of valid commands
         valid_commands = [
-            "addplayer", "removeplayer", "resetqueue", "cancelmatch", "cancelcurrent", "restartmatch",
+            "addplayer", "removeplayer", "resetqueue", "cancelmatch", "cancelcurrent", "restartmatch", "resetteams",
             "correctcurrent", "testmatchmaking", "swap", "ping", "silentping",
             "bannedroles", "requiredroles",
             "adminunlinkalias", "linkalias", "unlinkalias", "myalias",
@@ -910,6 +910,84 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         match_type = "Test" if test_mode else "Match #"
         await interaction.followup.send(f"✅ {match_type}{match_number} restarted to pregame lobby!", ephemeral=True)
 
+    @bot.tree.command(name="resetteams", description="[STAFF] Reset current match back to team selection")
+    @has_staff_role()
+    async def reset_teams(interaction: discord.Interaction):
+        """Reset current match back to team selection phase (keeps same pregame VC)"""
+        from searchmatchmaking import queue_state, queue_state_2
+        from pregame import show_team_selection_buttons
+
+        # Check both queue states for active pregame
+        qs = None
+        if hasattr(queue_state, 'pregame_vc_id') and queue_state.pregame_vc_id:
+            qs = queue_state
+        elif hasattr(queue_state_2, 'pregame_vc_id') and queue_state_2.pregame_vc_id:
+            qs = queue_state_2
+
+        # Also check if we have an active series (in captains/players pick phase)
+        if not qs:
+            if queue_state.current_series:
+                qs = queue_state
+            elif queue_state_2.current_series:
+                qs = queue_state_2
+
+        if not qs:
+            await interaction.response.send_message("❌ No active pregame or team selection to reset!", ephemeral=True)
+            return
+
+        # Get players and state
+        players = qs.locked_players if qs.locked_players else []
+        if not players and qs.current_series:
+            players = qs.current_series.red_team + qs.current_series.blue_team
+
+        if not players:
+            await interaction.response.send_message("❌ No players found for reset!", ephemeral=True)
+            return
+
+        test_mode = getattr(qs, 'test_mode', False)
+        testers = getattr(qs, 'testers', [])
+        pregame_vc_id = getattr(qs, 'pregame_vc_id', None)
+
+        # Get match label
+        if qs.current_series:
+            match_label = f"Match {qs.current_series.match_number}"
+            if test_mode:
+                match_label = f"Test Match {qs.current_series.match_number}"
+        else:
+            pending = getattr(qs, 'pending_match_number', None)
+            if pending:
+                match_label = f"Test Match {pending}" if test_mode else f"Match {pending}"
+            else:
+                match_label = "Match"
+
+        await interaction.response.defer()
+
+        # Get the series text channel
+        series_text_channel_id = getattr(qs, 'series_text_channel_id', None)
+        if series_text_channel_id:
+            channel = interaction.guild.get_channel(series_text_channel_id)
+        else:
+            channel = interaction.channel
+
+        # Get or use existing pregame message
+        pregame_message = getattr(qs, 'pregame_message', None)
+
+        if not pregame_message and channel:
+            # Create a new message
+            pings = " ".join([f"<@{uid}>" for uid in players])
+            pregame_message = await channel.send(content=f"{pings}\n**Team selection reset by staff!**")
+            qs.pregame_message = pregame_message
+
+        log_action(f"Staff {interaction.user.name} reset teams to team selection")
+
+        # Show team selection buttons
+        await show_team_selection_buttons(
+            channel, pregame_message, players, pregame_vc_id,
+            test_mode=test_mode, testers=testers, match_label=match_label
+        )
+
+        await interaction.followup.send(f"✅ Reset to team selection for {match_label}!", ephemeral=True)
+
     @bot.tree.command(name="endmatch", description="[ADMIN] End an active match (properly records results)")
     @has_admin_role()
     @app_commands.describe(
@@ -1593,6 +1671,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             commands_list.append("**⚙️ STAFF - MATCH** `[STAFF]`")
             commands_list.append("`/cancelmatch` - Cancel the current match")
             commands_list.append("`/restartmatch` - Restart match to pregame")
+            commands_list.append("`/resetteams` - Reset to team selection")
             commands_list.append("`/correctcurrent` - Correct current match stats")
             commands_list.append("`/setgamestats` - Manually set game stats")
             commands_list.append("`/adminarrange` - Arrange teams manually")
