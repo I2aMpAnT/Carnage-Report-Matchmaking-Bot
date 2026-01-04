@@ -4188,10 +4188,10 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         # Public message - button clicks give each user their own private view
         await interaction.response.send_message(embed=embed, view=view)
 
-    @bot.tree.command(name="populatestatsrefresh", description="[ADMIN] Clear all stats files and repopulate from scratch")
+    @bot.tree.command(name="populatestatsrefresh", description="[ADMIN] Clear processed state and repopulate stats")
     @has_admin_role()
     async def populatestatsrefresh(interaction: discord.Interaction):
-        """Clear stats JSON files and run populate_stats.py"""
+        """Clear processed state and run populate_stats.py"""
         await interaction.response.defer(ephemeral=True)
 
         import subprocess
@@ -4199,18 +4199,6 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         # Shell commands to run
         script = '''cd /home/carnagereport/CarnageReport.com
 rm -f processed_state.json
-rm -f gamestats.json
-rm -f gameshistory.json
-rm -f rankstats.json
-rm -f ranks.json
-rm -f customgames.json
-rm -f "MLG 4v4_matches.json"
-rm -f "MLG 4v4_stats.json"
-rm -f rankhistory.json
-rm -f series.json
-rm -f head_to_head_matches.json
-rm -f head_to_head_stats.json
-rm -f matchhistory.json
 python3 populate_stats.py'''
 
         try:
