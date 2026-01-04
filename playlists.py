@@ -72,6 +72,7 @@ PLAYLIST_CONFIG = {
         "auto_balance": True,
         "show_map_gametype": True,  # Random MLG map/gametype
         "description": "4v4 auto-balanced teams based on MMR",
+        "enabled": False,  # Channel deleted
     },
     PlaylistType.DOUBLE_TEAM: {
         "name": "Double Team",

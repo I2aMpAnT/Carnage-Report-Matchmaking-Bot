@@ -1703,6 +1703,7 @@ class CaptainMethodView(View):
 
 async def captain_method_timeout(view: CaptainMethodView, channel: discord.TextChannel):
     """Handle 30-second timeout for captain method selection"""
+    import asyncio
     from searchmatchmaking import get_queue_progress_image
 
     TIMEOUT_SECONDS = 30
@@ -1933,6 +1934,7 @@ class PlayersCaptainVoteView(View):
 
 async def players_captain_vote_timeout(view: PlayersCaptainVoteView, channel: discord.TextChannel):
     """Handle 30-second timeout for players captain voting"""
+    import asyncio
     from searchmatchmaking import get_queue_progress_image
 
     TIMEOUT_SECONDS = 30
