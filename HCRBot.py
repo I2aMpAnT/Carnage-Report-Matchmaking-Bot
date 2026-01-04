@@ -24,8 +24,8 @@ QUEUE_CHANNEL_ID = 1403855421625733151
 # MLG 4v4 (second queue - with banned role restriction)
 QUEUE_CHANNEL_ID_2 = 1449951027183882321
 QUEUE_2_BANNED_ROLE = "☢️"  # Users with this role cannot join queue 2
-# Team Hardcore 4v4
-TEAM_HARDCORE_CHANNEL_ID = 1443783840169721988
+# Team Hardcore 4v4 (DISABLED - channel deleted)
+# TEAM_HARDCORE_CHANNEL_ID = 1443783840169721988
 # Double Team 2v2
 DOUBLE_TEAM_CHANNEL_ID = 1443784213135626260
 # Head to Head 1v1
