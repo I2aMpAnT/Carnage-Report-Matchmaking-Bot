@@ -2,13 +2,14 @@
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 # Supports ALL playlists: MLG 4v4 (voting), Team Hardcore/Double Team (auto-balance), Head to Head (1v1)
 
-MODULE_VERSION = "1.8.0"
+MODULE_VERSION = "1.8.1"
 
 import discord
 from discord.ui import View, Button, Select
 from typing import List, Optional, TYPE_CHECKING
 import random
 import json
+import asyncio
 
 if TYPE_CHECKING:
     from playlists import PlaylistQueueState, PlaylistMatch
