@@ -2,7 +2,7 @@
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 # Supports ALL playlists: MLG 4v4 (voting), Team Hardcore/Double Team (auto-balance), Head to Head (1v1)
 
-MODULE_VERSION = "1.8.3"
+MODULE_VERSION = "1.8.4"
 
 import discord
 from discord.ui import View, Button, Select
@@ -1853,15 +1853,15 @@ class PlayersCaptainVoteView(View):
             self.player_mmrs[uid] = await get_player_mmr(uid)
             self.player_ranks[uid] = get_player_rank(uid)
 
-        # Sort by MMR for display
+        # Sort by MMR for display (highest to lowest)
         sorted_players = sorted(self.players, key=lambda x: self.player_mmrs.get(x, 1500), reverse=True)
 
-        # Create a button for each player
+        # Create a button for each player - single column (1 per row), capped at row 4 for Discord limit
         for i, uid in enumerate(sorted_players):
             member = self.guild.get_member(uid) if self.guild else None
             name = member.display_name if member else f"Player"
-            if len(name) > 12:
-                name = name[:9] + "..."
+            if len(name) > 20:
+                name = name[:17] + "..."
 
             mmr = self.player_mmrs.get(uid, 1500)
             rank = self.player_ranks.get(uid, 1)
@@ -1875,7 +1875,7 @@ class PlayersCaptainVoteView(View):
                 style=discord.ButtonStyle.secondary,
                 emoji=rank_emoji,
                 custom_id=f"captain_vote_{uid}",
-                row=i // 4  # 4 buttons per row
+                row=min(i, 4)  # 1 button per row, max row 4 (Discord limit)
             )
             btn.callback = self.make_vote_callback(uid)
             self.add_item(btn)
@@ -2132,7 +2132,7 @@ class CaptainDraftView(View):
         # Only show available players (remaining) as buttons - sorted by MMR (highest to lowest)
         sorted_remaining = sorted(self.remaining, key=lambda uid: self.player_mmrs.get(uid, 500), reverse=True)
 
-        # Create buttons - 2 per row (rows 0-2), sorted by MMR
+        # Create buttons - single column (1 per row), sorted by MMR, max row 3 to leave room for undo
         for i, uid in enumerate(sorted_remaining):
             member = self.guild.get_member(uid) if self.guild else None
             player_name = member.display_name if member else f"Player {uid}"
@@ -2142,7 +2142,7 @@ class CaptainDraftView(View):
             mmr = self.player_mmrs.get(uid, 500)
             rank = self.player_ranks.get(uid, 1)
             rank_emoji = get_rank_emoji_for_button(self.guild, rank)
-            row = i // 2  # 2 buttons per row, starting at row 0
+            row = min(i, 3)  # 1 button per row, max row 3 (row 4 reserved for undo)
 
             # Available - grey button, clickable by current captain
             button = Button(
@@ -2155,13 +2155,13 @@ class CaptainDraftView(View):
             button.callback = self.make_pick_callback(uid)
             self.add_item(button)
 
-        # Row 3: Undo Last Pick button (only show if there are picks to undo)
+        # Row 4: Undo Last Pick button (only show if there are picks to undo)
         if hasattr(self, 'pick_history') and self.pick_history:
             undo_btn = Button(
                 label="↩️ Undo Last Pick",
                 style=discord.ButtonStyle.secondary,
                 custom_id="undo_pick",
-                row=3
+                row=4
             )
             undo_btn.callback = self.undo_last_pick
             self.add_item(undo_btn)
