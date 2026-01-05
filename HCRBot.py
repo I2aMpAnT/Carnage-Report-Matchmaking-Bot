@@ -321,6 +321,14 @@ async def on_ready():
                         print(f'✅ Restored queue 2 series: {series.series_number}')
             else:
                 print('⚠️ State restoration failed')
+
+            # Resume any pregame tasks that were in progress
+            try:
+                resumed = await state_manager.resume_pregame_tasks(bot)
+                if resumed > 0:
+                    print(f'✅ Resumed {resumed} pregame task(s)')
+            except Exception as e:
+                print(f'⚠️ Failed to resume pregame tasks: {e}')
     except Exception as e:
         print(f'⚠️ State restoration error: {e}')
         import traceback
