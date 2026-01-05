@@ -264,9 +264,9 @@ class MultiStreamView(View):
 
         all_names = red_names + blue_names
 
-        # Use custom labels if provided, otherwise default to "Red Team" / "Blue Team"
-        red_label = red_label or "Red Team"
-        blue_label = blue_label or "Blue Team"
+        # Use custom labels if provided, otherwise default to "Red Team Streams" / "Blue Team Streams"
+        red_label = red_label or "Red Team Streams"
+        blue_label = blue_label or "Blue Team Streams"
 
         # Note: Discord link buttons are always grey - we use emoji in labels for color indication
         # Red Team button
@@ -806,6 +806,42 @@ def is_discord_user_live(user_id: int) -> bool:
         return False
 
     return is_user_live(twitch_name)
+
+
+async def refresh_live_status_for_players(player_ids: List[int]):
+    """
+    Refresh live status for specific Discord users (e.g., players in a match).
+    Updates the _live_streams cache with current status.
+    """
+    global _live_streams
+
+    players = load_players()
+    twitch_names = []
+
+    # Get Twitch names for the specified players
+    for uid in player_ids:
+        player_data = players.get(str(uid))
+        if player_data:
+            twitch_name = player_data.get("twitch_name")
+            if twitch_name:
+                twitch_names.append(twitch_name.lower())
+
+    if not twitch_names:
+        return
+
+    # Check who is live
+    live_users = await batch_check_live_streams(twitch_names)
+
+    # Update _live_streams cache
+    for twitch_name, stream_info in live_users.items():
+        user_id = stream_info.get("user_id")
+        if user_id:
+            _live_streams[user_id] = {
+                "stream_info": stream_info,
+                "started_at": datetime.now(),
+                "message_id": None
+            }
+            logger.info(f"Refreshed live status: {twitch_name} is LIVE")
 
 
 async def batch_check_live_streams(twitch_names: List[str]) -> Dict[str, dict]:

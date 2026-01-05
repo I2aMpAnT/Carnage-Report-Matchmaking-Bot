@@ -298,11 +298,12 @@ async def on_ready():
                     await update_queue_embed(channel)
                     print(f'✅ Restored main queue: {len(queue_state.queue)} players')
 
-                    # If series was active, recreate the series embed
+                    # If series was active, recreate the series embed and register the view
                     if queue_state.current_series:
                         from ingame import SeriesView
                         series = queue_state.current_series
                         view = SeriesView(series)
+                        bot.add_view(view)  # Register view so buttons work after restart
                         await view.update_series_embed(channel)
                         print(f'✅ Restored active series: {series.series_number}')
 
@@ -312,11 +313,12 @@ async def on_ready():
                     await update_queue_embed(channel2, queue_state_2)
                     print(f'✅ Restored queue 2: {len(queue_state_2.queue)} players')
 
-                    # If series was active on queue 2, recreate the series embed
+                    # If series was active on queue 2, recreate the series embed and register the view
                     if queue_state_2.current_series:
                         from ingame import SeriesView
                         series = queue_state_2.current_series
                         view = SeriesView(series)
+                        bot.add_view(view)  # Register view so buttons work after restart
                         await view.update_series_embed(channel2)
                         print(f'✅ Restored queue 2 series: {series.series_number}')
             else:
