@@ -434,39 +434,41 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
     )
     async def cancel_queue(interaction: discord.Interaction, match_number: int, test_mode: bool = False):
         """Cancel match but register games"""
-        from searchmatchmaking import queue_state, update_queue_embed
+        from searchmatchmaking import queue_state, queue_state_2, update_queue_embed, QUEUE_CHANNEL_ID_2
         from postgame import save_match_history
-        
-        # Check if there's a series OR if we're in pregame
-        has_series = queue_state.current_series is not None
-        has_pregame = hasattr(queue_state, 'pregame_vc_id') and queue_state.pregame_vc_id
-        
-        if not has_series and not has_pregame:
-            await interaction.response.send_message("❌ No active match!", ephemeral=True)
+
+        # Check both queue states for active matches/pregame
+        qs = None  # Will be set to the queue state with the matching match
+
+        # Check queue_state first
+        if queue_state.current_series:
+            if queue_state.current_series.match_number == match_number and queue_state.current_series.test_mode == test_mode:
+                qs = queue_state
+        elif hasattr(queue_state, 'pregame_vc_id') and queue_state.pregame_vc_id:
+            # Pregame in progress - assume it's for this match number
+            qs = queue_state
+
+        # Check queue_state_2 if not found in queue_state
+        if not qs:
+            if queue_state_2.current_series:
+                if queue_state_2.current_series.match_number == match_number and queue_state_2.current_series.test_mode == test_mode:
+                    qs = queue_state_2
+            elif hasattr(queue_state_2, 'pregame_vc_id') and queue_state_2.pregame_vc_id:
+                qs = queue_state_2
+
+        if not qs:
+            await interaction.response.send_message("❌ No active match with that number!", ephemeral=True)
             return
-        
-        # If we have a series, verify the match number and type
-        if has_series:
-            series = queue_state.current_series
-            current_match_num = series.match_number
-            current_is_test = series.test_mode
-            
-            if match_number != current_match_num or test_mode != current_is_test:
-                current_type = "Test" if current_is_test else "Match #"
-                requested_type = "Test" if test_mode else "Match #"
-                await interaction.response.send_message(
-                    f"❌ Match mismatch!\n"
-                    f"You specified: **{requested_type}{match_number}**\n"
-                    f"Current active match: **{current_type}{current_match_num}**",
-                    ephemeral=True
-                )
-                return
-        
+
+        has_series = qs.current_series is not None
+        has_pregame = hasattr(qs, 'pregame_vc_id') and qs.pregame_vc_id
+        is_chill_queue = (qs == queue_state_2)
+
         await interaction.response.defer()
-        
+
         # Handle pregame cleanup
         if has_pregame:
-            pregame_vc = interaction.guild.get_channel(queue_state.pregame_vc_id)
+            pregame_vc = interaction.guild.get_channel(qs.pregame_vc_id)
             if pregame_vc:
                 # Move all players to postgame BEFORE deleting VC
                 postgame_vc = interaction.guild.get_channel(POSTGAME_LOBBY_ID)
@@ -482,34 +484,34 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                     log_action("Deleted Pregame Lobby VC")
                 except:
                     pass
-            queue_state.pregame_vc_id = None
+            qs.pregame_vc_id = None
 
             # Delete series text channel (used for team selection)
-            if hasattr(queue_state, 'series_text_channel_id') and queue_state.series_text_channel_id:
-                series_text = interaction.guild.get_channel(queue_state.series_text_channel_id)
+            if hasattr(qs, 'series_text_channel_id') and qs.series_text_channel_id:
+                series_text = interaction.guild.get_channel(qs.series_text_channel_id)
                 if series_text:
                     try:
                         await series_text.delete(reason="Match cancelled")
                         log_action("Deleted Series Text Channel")
                     except:
                         pass
-                queue_state.series_text_channel_id = None
+                qs.series_text_channel_id = None
 
             # Delete pregame message
-            if hasattr(queue_state, 'pregame_message') and queue_state.pregame_message:
+            if hasattr(qs, 'pregame_message') and qs.pregame_message:
                 try:
-                    await queue_state.pregame_message.delete()
+                    await qs.pregame_message.delete()
                 except:
                     pass
-                queue_state.pregame_message = None
+                qs.pregame_message = None
 
             # Remove match roles if assigned during pregame (before series created)
-            pending_match = getattr(queue_state, 'pending_match_number', None)
-            playlist_name = getattr(queue_state, 'playlist_name', 'MLG4v4')
+            pending_match = getattr(qs, 'pending_match_number', None)
+            playlist_name = getattr(qs, 'playlist_name', 'MLG4v4')
             if pending_match and not test_mode and not has_series:
                 try:
                     from searchmatchmaking import remove_active_match_roles
-                    locked_players = queue_state.locked_players if queue_state.locked_players else []
+                    locked_players = qs.locked_players if qs.locked_players else []
                     if locked_players:
                         await remove_active_match_roles(interaction.guild, locked_players, playlist_name, pending_match)
                         log_action(f"Removed match roles for cancelled pregame match #{pending_match}")
@@ -521,20 +523,20 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                             log_action(f"Recycled match number - counter reset to {Series.match_counter}")
                 except Exception as e:
                     log_action(f"Failed to remove pregame match roles: {e}")
-                queue_state.pending_match_number = None
+                qs.pending_match_number = None
 
         match_type = "Test" if test_mode else "Match #"
 
         # Handle series cleanup
         if has_series:
-            series = queue_state.current_series
-            
+            series = qs.current_series
+
             if series.games:
                 log_action(f"Admin {interaction.user.name} cancelled {match_type}{match_number} - {len(series.games)} games played")
                 save_match_history(series, 'CANCELLED')
             else:
                 log_action(f"Admin {interaction.user.name} cancelled {match_type}{match_number} - no games played")
-            
+
             # Move players to postgame
             postgame_vc = interaction.guild.get_channel(POSTGAME_LOBBY_ID)
             if postgame_vc:
@@ -546,7 +548,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                             await member.move_to(postgame_vc)
                         except:
                             pass
-            
+
             # Delete VCs
             if series.red_vc_id:
                 red_vc = interaction.guild.get_channel(series.red_vc_id)
@@ -555,7 +557,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                         await red_vc.delete(reason="Match cancelled")
                     except:
                         pass
-            
+
             if series.blue_vc_id:
                 blue_vc = interaction.guild.get_channel(series.blue_vc_id)
                 if blue_vc:
@@ -588,14 +590,14 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                 except Exception as e:
                     log_action(f"Failed to remove active match roles: {e}")
 
-        # Clear state
-        queue_state.current_series = None
-        queue_state.queue.clear()
-        queue_state.test_mode = False
-        queue_state.testers = []
-        queue_state.locked = False
-        queue_state.locked_players = []
-        queue_state.pending_match_number = None
+        # Clear state for the correct queue
+        qs.current_series = None
+        qs.queue.clear()
+        qs.test_mode = False
+        qs.testers = []
+        qs.locked = False
+        qs.locked_players = []
+        qs.pending_match_number = None
 
         # Clear saved state
         try:
@@ -604,32 +606,51 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         except:
             pass
 
-        channel = interaction.guild.get_channel(QUEUE_CHANNEL_ID)
+        # Update the correct queue embed
+        queue_channel_id = QUEUE_CHANNEL_ID_2 if is_chill_queue else QUEUE_CHANNEL_ID
+        channel = interaction.guild.get_channel(queue_channel_id)
         if channel:
-            await update_queue_embed(channel)
+            await update_queue_embed(channel, qs)
 
-        await interaction.followup.send(f"✅ {match_type}{match_number} has been cancelled!", ephemeral=True)
+        queue_name = "Chill Queue " if is_chill_queue else ""
+        await interaction.followup.send(f"✅ {queue_name}{match_type}{match_number} has been cancelled!", ephemeral=True)
 
     @bot.tree.command(name="cancelcurrent", description="[STAFF] Cancel the current active match (any type)")
     @has_staff_role()
     async def cancel_current(interaction: discord.Interaction):
         """Cancel whatever match is currently active"""
-        from searchmatchmaking import queue_state, update_queue_embed
+        from searchmatchmaking import queue_state, queue_state_2, update_queue_embed, QUEUE_CHANNEL_ID_2
         from postgame import save_match_history
-        
-        # Check if there's a series OR if we're in pregame
-        has_series = queue_state.current_series is not None
-        has_pregame = hasattr(queue_state, 'pregame_vc_id') and queue_state.pregame_vc_id
-        
-        if not has_series and not has_pregame:
+
+        # Check both queue states for active matches/pregame
+        qs = None
+
+        # Check queue_state first
+        if queue_state.current_series:
+            qs = queue_state
+        elif hasattr(queue_state, 'pregame_vc_id') and queue_state.pregame_vc_id:
+            qs = queue_state
+
+        # Check queue_state_2 if not found
+        if not qs:
+            if queue_state_2.current_series:
+                qs = queue_state_2
+            elif hasattr(queue_state_2, 'pregame_vc_id') and queue_state_2.pregame_vc_id:
+                qs = queue_state_2
+
+        if not qs:
             await interaction.response.send_message("❌ No active match or pregame!", ephemeral=True)
             return
-        
+
+        has_series = qs.current_series is not None
+        has_pregame = hasattr(qs, 'pregame_vc_id') and qs.pregame_vc_id
+        is_chill_queue = (qs == queue_state_2)
+
         await interaction.response.defer()
-        
+
         # Handle pregame cleanup
         if has_pregame:
-            pregame_vc = interaction.guild.get_channel(queue_state.pregame_vc_id)
+            pregame_vc = interaction.guild.get_channel(qs.pregame_vc_id)
             if pregame_vc:
                 # Move all players to postgame BEFORE deleting VC
                 postgame_vc = interaction.guild.get_channel(POSTGAME_LOBBY_ID)
@@ -645,34 +666,34 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                     log_action("Deleted Pregame Lobby VC")
                 except:
                     pass
-            queue_state.pregame_vc_id = None
+            qs.pregame_vc_id = None
 
             # Delete series text channel (used for team selection)
-            if hasattr(queue_state, 'series_text_channel_id') and queue_state.series_text_channel_id:
-                series_text = interaction.guild.get_channel(queue_state.series_text_channel_id)
+            if hasattr(qs, 'series_text_channel_id') and qs.series_text_channel_id:
+                series_text = interaction.guild.get_channel(qs.series_text_channel_id)
                 if series_text:
                     try:
                         await series_text.delete(reason="Match cancelled")
                         log_action("Deleted Series Text Channel")
                     except:
                         pass
-                queue_state.series_text_channel_id = None
+                qs.series_text_channel_id = None
 
             # Delete pregame message
-            if hasattr(queue_state, 'pregame_message') and queue_state.pregame_message:
+            if hasattr(qs, 'pregame_message') and qs.pregame_message:
                 try:
-                    await queue_state.pregame_message.delete()
+                    await qs.pregame_message.delete()
                 except:
                     pass
-                queue_state.pregame_message = None
+                qs.pregame_message = None
 
             # Remove match roles if assigned during pregame (before series created)
-            pending_match = getattr(queue_state, 'pending_match_number', None)
-            playlist_name = getattr(queue_state, 'playlist_name', 'MLG4v4')
+            pending_match = getattr(qs, 'pending_match_number', None)
+            playlist_name = getattr(qs, 'playlist_name', 'MLG4v4')
             if pending_match and not has_series:
                 try:
                     from searchmatchmaking import remove_active_match_roles
-                    locked_players = queue_state.locked_players if queue_state.locked_players else []
+                    locked_players = qs.locked_players if qs.locked_players else []
                     if locked_players:
                         await remove_active_match_roles(interaction.guild, locked_players, playlist_name, pending_match)
                         log_action(f"Removed match roles for cancelled pregame match #{pending_match}")
@@ -684,11 +705,11 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                             log_action(f"Recycled match number - counter reset to {Series.match_counter}")
                 except Exception as e:
                     log_action(f"Failed to remove pregame match roles: {e}")
-                queue_state.pending_match_number = None
+                qs.pending_match_number = None
 
         # Handle series cleanup
         if has_series:
-            series = queue_state.current_series
+            series = qs.current_series
             match_type = "Test" if series.test_mode else "Match #"
             match_num = series.match_number
 
@@ -697,7 +718,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                 save_match_history(series, 'CANCELLED')
             else:
                 log_action(f"Staff {interaction.user.name} cancelled {match_type}{match_num} - no games played")
-            
+
             # Move players to postgame
             postgame_vc = interaction.guild.get_channel(POSTGAME_LOBBY_ID)
             if postgame_vc:
@@ -709,7 +730,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                             await member.move_to(postgame_vc)
                         except:
                             pass
-            
+
             # Delete VCs
             if series.red_vc_id:
                 red_vc = interaction.guild.get_channel(series.red_vc_id)
@@ -718,7 +739,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                         await red_vc.delete(reason="Match cancelled")
                     except:
                         pass
-            
+
             if series.blue_vc_id:
                 blue_vc = interaction.guild.get_channel(series.blue_vc_id)
                 if blue_vc:
@@ -751,14 +772,14 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                 except Exception as e:
                     log_action(f"Failed to remove active match roles: {e}")
 
-        # Clear all state
-        queue_state.current_series = None
-        queue_state.queue.clear()
-        queue_state.test_mode = False
-        queue_state.testers = []
-        queue_state.locked = False
-        queue_state.locked_players = []
-        queue_state.pending_match_number = None
+        # Clear state for the correct queue
+        qs.current_series = None
+        qs.queue.clear()
+        qs.test_mode = False
+        qs.testers = []
+        qs.locked = False
+        qs.locked_players = []
+        qs.pending_match_number = None
 
         # Clear saved state
         try:
@@ -767,15 +788,17 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         except:
             pass
 
-        channel = interaction.guild.get_channel(QUEUE_CHANNEL_ID)
+        # Update the correct queue embed
+        queue_channel_id = QUEUE_CHANNEL_ID_2 if is_chill_queue else QUEUE_CHANNEL_ID
+        channel = interaction.guild.get_channel(queue_channel_id)
         if channel:
-            await update_queue_embed(channel)
+            await update_queue_embed(channel, qs)
 
+        queue_name = "Chill Queue " if is_chill_queue else ""
         if has_series:
-            match_type = "Test" if queue_state.current_series is None and has_series else "Match"
-            await interaction.followup.send(f"✅ Match cancelled!", ephemeral=True)
+            await interaction.followup.send(f"✅ {queue_name}Match cancelled!", ephemeral=True)
         else:
-            await interaction.followup.send(f"✅ Pregame cancelled!", ephemeral=True)
+            await interaction.followup.send(f"✅ {queue_name}Pregame cancelled!", ephemeral=True)
 
     @bot.tree.command(name="restartmatch", description="[STAFF] Restart match back to pregame/team selection")
     @has_staff_role()

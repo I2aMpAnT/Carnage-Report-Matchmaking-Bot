@@ -83,6 +83,7 @@ def save_state():
             "red_vc_id": series.red_vc_id,
             "blue_vc_id": series.blue_vc_id,
             "text_channel_id": getattr(series, 'text_channel_id', None),
+            "source_queue_channel_id": getattr(series, 'source_queue_channel_id', None),
             "swap_history": getattr(series, 'swap_history', []),
             "start_time": series.start_time.isoformat() if hasattr(series, 'start_time') and series.start_time else None,
             "end_time": series.end_time.isoformat() if hasattr(series, 'end_time') and series.end_time else None,
@@ -92,7 +93,7 @@ def save_state():
             "series_message_channel_id": series.series_message.channel.id if series.series_message else None,
             "general_message_id": series.general_message.id if hasattr(series, 'general_message') and series.general_message else None
         }
-        
+
         # Save counters
         from ingame import Series
         state["match_counter"] = Series.match_counter
@@ -114,6 +115,7 @@ def save_state():
             "red_vc_id": series.red_vc_id,
             "blue_vc_id": series.blue_vc_id,
             "text_channel_id": getattr(series, 'text_channel_id', None),
+            "source_queue_channel_id": getattr(series, 'source_queue_channel_id', None),
             "swap_history": getattr(series, 'swap_history', []),
             "start_time": series.start_time.isoformat() if hasattr(series, 'start_time') and series.start_time else None,
             "end_time": series.end_time.isoformat() if hasattr(series, 'end_time') and series.end_time else None,
@@ -242,6 +244,7 @@ async def restore_state(bot) -> bool:
             series.red_vc_id = series_data["red_vc_id"]
             series.blue_vc_id = series_data["blue_vc_id"]
             series.text_channel_id = series_data.get("text_channel_id")
+            series.source_queue_channel_id = series_data.get("source_queue_channel_id")
             series.swap_history = series_data.get("swap_history", [])
             series.votes = {}
             series.end_series_votes = set()
@@ -303,6 +306,7 @@ async def restore_state(bot) -> bool:
             series2.red_vc_id = series_data_2["red_vc_id"]
             series2.blue_vc_id = series_data_2["blue_vc_id"]
             series2.text_channel_id = series_data_2.get("text_channel_id")
+            series2.source_queue_channel_id = series_data_2.get("source_queue_channel_id")
             series2.swap_history = series_data_2.get("swap_history", [])
             series2.votes = {}
             series2.end_series_votes = set()

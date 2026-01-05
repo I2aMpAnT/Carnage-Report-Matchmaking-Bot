@@ -191,6 +191,15 @@ class Series:
         # Series text channel (created for each match)
         self.text_channel_id: Optional[int] = None
 
+        # Source queue channel ID to identify which queue this series came from
+        self.source_queue_channel_id: Optional[int] = None
+
+        # Swap history for player swaps between teams
+        self.swap_history: List[dict] = []
+
+        # General chat embed message reference
+        self.general_message: Optional[discord.Message] = None
+
 class SeriesView(View):
     def __init__(self, series: Series):
         super().__init__(timeout=None)
@@ -532,6 +541,16 @@ async def show_series_embed(channel: discord.TextChannel):
 
     if not series:
         log_action("show_series_embed called but no active series found in either queue")
+        return
+
+    # Prevent duplicate embeds - if series_message already exists, just update it
+    if series.series_message:
+        log_action(f"show_series_embed: series_message already exists, updating instead of creating new")
+        view = SeriesView(series)
+        try:
+            await view.update_series_embed(channel)
+        except Exception as e:
+            log_action(f"Failed to update existing series embed: {e}")
         return
 
     # Use series text channel if available, otherwise fall back to queue channel

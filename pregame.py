@@ -57,18 +57,38 @@ def get_player_rank(user_id: int) -> int:
 
 
 def get_rank_emoji(guild: discord.Guild, level: int) -> str:
-    """Get the custom rank emoji for a level"""
+    """Get the custom rank emoji for a level (returns string for embed text)"""
     if guild:
         emoji_name = str(level)
         emoji = discord.utils.get(guild.emojis, name=emoji_name)
         if emoji:
             return str(emoji)
-        # Try underscore version for single digits
+        # Try underscore version for single digits (1_ through 9_)
         if level <= 9:
             emoji = discord.utils.get(guild.emojis, name=f"{level}_")
             if emoji:
                 return str(emoji)
     return f"Lv{level}"
+
+
+def get_rank_emoji_for_button(guild: discord.Guild, level: int):
+    """Get the rank emoji object for use in button emoji parameter.
+    Returns the emoji object (not string) so Discord can render it on buttons."""
+    if not guild:
+        return None
+
+    # Try exact number name first (10, 11, 12, etc.)
+    emoji = discord.utils.get(guild.emojis, name=str(level))
+    if emoji:
+        return emoji
+
+    # Try underscore version for single digits (1_, 2_, ... 9_)
+    if level <= 9:
+        emoji = discord.utils.get(guild.emojis, name=f"{level}_")
+        if emoji:
+            return emoji
+
+    return None
 
 async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, test_players: List[int] = None,
                         playlist_state: 'PlaylistQueueState' = None, playlist_players: List[int] = None,
@@ -1823,18 +1843,19 @@ class PlayersCaptainVoteView(View):
             member = self.guild.get_member(uid) if self.guild else None
             name = member.display_name if member else f"Player"
             if len(name) > 12:
-                name = name[:11] + "…"
+                name = name[:9] + "..."
 
             mmr = self.player_mmrs.get(uid, 1500)
-            rank = self.player_ranks.get(uid)
-            rank_emoji = get_rank_emoji(rank) if rank else ""
+            rank = self.player_ranks.get(uid, 1)
+            rank_emoji = get_rank_emoji_for_button(self.guild, rank)
 
             # Count votes for this player
             vote_count = sum(1 for votes in self.votes.values() for v in votes if v == uid)
 
             btn = Button(
-                label=f"{rank_emoji} {name} ({mmr}) [{vote_count}]",
+                label=f"{name} - {mmr} MMR [{vote_count}]",
                 style=discord.ButtonStyle.secondary,
+                emoji=rank_emoji,
                 custom_id=f"captain_vote_{uid}",
                 row=i // 4  # 4 buttons per row
             )
@@ -2091,17 +2112,17 @@ class CaptainDraftView(View):
         self.clear_items()
 
         # Row 0: Captains (always shown with team colors)
-        # Red captain - format: {rank_emoji} - {name} - {MMR} MMR (C)
         c1_member = self.guild.get_member(self.captain1) if self.guild else None
         c1_name = c1_member.display_name if c1_member else f"Captain"
-        if len(c1_name) > 10:
-            c1_name = c1_name[:7] + "..."
+        if len(c1_name) > 12:
+            c1_name = c1_name[:9] + "..."
         c1_mmr = self.player_mmrs.get(self.captain1, 500)
         c1_rank = self.player_ranks.get(self.captain1, 1)
-        c1_rank_emoji = get_rank_emoji(self.guild, c1_rank)
+        c1_emoji = get_rank_emoji_for_button(self.guild, c1_rank)
         captain1_btn = Button(
-            label=f"🔴 {c1_rank_emoji} {c1_name} - {c1_mmr} MMR (C)",
+            label=f"{c1_name} - {c1_mmr} MMR",
             style=discord.ButtonStyle.danger,
+            emoji=c1_emoji,
             custom_id=f"captain_{self.captain1}",
             disabled=True,
             row=0
@@ -2111,14 +2132,15 @@ class CaptainDraftView(View):
         # Blue captain
         c2_member = self.guild.get_member(self.captain2) if self.guild else None
         c2_name = c2_member.display_name if c2_member else f"Captain"
-        if len(c2_name) > 10:
-            c2_name = c2_name[:7] + "..."
+        if len(c2_name) > 12:
+            c2_name = c2_name[:9] + "..."
         c2_mmr = self.player_mmrs.get(self.captain2, 500)
         c2_rank = self.player_ranks.get(self.captain2, 1)
-        c2_rank_emoji = get_rank_emoji(self.guild, c2_rank)
+        c2_emoji = get_rank_emoji_for_button(self.guild, c2_rank)
         captain2_btn = Button(
-            label=f"🔵 {c2_rank_emoji} {c2_name} - {c2_mmr} MMR (C)",
+            label=f"{c2_name} - {c2_mmr} MMR",
             style=discord.ButtonStyle.primary,
+            emoji=c2_emoji,
             custom_id=f"captain_{self.captain2}",
             disabled=True,
             row=0
@@ -2144,19 +2166,20 @@ class CaptainDraftView(View):
         for i, (uid, team) in enumerate(button_order):
             member = self.guild.get_member(uid) if self.guild else None
             player_name = member.display_name if member else f"Player {uid}"
-            if len(player_name) > 10:
-                player_name = player_name[:7] + "..."
+            if len(player_name) > 12:
+                player_name = player_name[:9] + "..."
 
             mmr = self.player_mmrs.get(uid, 500)
             rank = self.player_ranks.get(uid, 1)
-            rank_emoji = get_rank_emoji(self.guild, rank)
+            rank_emoji = get_rank_emoji_for_button(self.guild, rank)
             row = 1 + (i // 3)  # Start at row 1 (row 0 is captains)
 
             if team == 'RED':
                 # Picked for red team - red button, disabled
                 button = Button(
-                    label=f"🔴 {rank_emoji} {player_name} - {mmr} MMR",
+                    label=f"{player_name} - {mmr} MMR",
                     style=discord.ButtonStyle.danger,
+                    emoji=rank_emoji,
                     custom_id=f"picked_{uid}",
                     disabled=True,
                     row=row
@@ -2164,8 +2187,9 @@ class CaptainDraftView(View):
             elif team == 'BLUE':
                 # Picked for blue team - blue button, disabled
                 button = Button(
-                    label=f"🔵 {rank_emoji} {player_name} - {mmr} MMR",
+                    label=f"{player_name} - {mmr} MMR",
                     style=discord.ButtonStyle.primary,
+                    emoji=rank_emoji,
                     custom_id=f"picked_{uid}",
                     disabled=True,
                     row=row
@@ -2173,8 +2197,9 @@ class CaptainDraftView(View):
             else:
                 # Available - grey button, clickable by either captain
                 button = Button(
-                    label=f"{rank_emoji} {player_name} - {mmr} MMR",
+                    label=f"{player_name} - {mmr} MMR",
                     style=discord.ButtonStyle.secondary,
+                    emoji=rank_emoji,
                     custom_id=f"pick_{uid}",
                     row=row
                 )
@@ -2562,6 +2587,11 @@ async def finalize_teams(channel: discord.TextChannel, red_team: List[int], blue
     # Clear the pending match number since it's been used
     qs.pending_match_number = None
     series_label = temp_series.series_number  # "Series 1" or "Test 1"
+
+    # Store source queue channel ID so we know which queue to clear when series ends
+    from searchmatchmaking import QUEUE_CHANNEL_ID, QUEUE_CHANNEL_ID_2
+    temp_series.source_queue_channel_id = QUEUE_CHANNEL_ID_2 if qs == queue_state_2 else QUEUE_CHANNEL_ID
+    log_action(f"Series {temp_series.series_number} source queue channel: {temp_series.source_queue_channel_id}")
 
     # Get the existing series text channel (created in start_pregame) and rename it with MMRs
     series_text_channel = None
