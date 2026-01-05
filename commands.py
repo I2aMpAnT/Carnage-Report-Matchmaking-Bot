@@ -3566,9 +3566,16 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
     async def _get_stream_links(interaction: discord.Interaction):
         """Shared helper for stream/twitch/transmission commands"""
         import twitch as twitch_module
-        from searchmatchmaking import queue_state
+        from searchmatchmaking import queue_state, queue_state_2
 
-        if not queue_state.current_series:
+        # Check both queues for active series
+        series = None
+        if queue_state.current_series:
+            series = queue_state.current_series
+        elif queue_state_2.current_series:
+            series = queue_state_2.current_series
+
+        if not series:
             await interaction.response.send_message(
                 "❌ No active match.",
                 ephemeral=True
@@ -3577,7 +3584,6 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
 
         await interaction.response.defer()
 
-        series = queue_state.current_series
         guild = interaction.guild
         players_data = twitch_module.load_players()
 
