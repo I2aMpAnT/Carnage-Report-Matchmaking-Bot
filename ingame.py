@@ -53,7 +53,11 @@ async def update_general_chat_embed(guild: discord.Guild, series):
         import twitch
         twitch.RED_TEAM_EMOJI_ID = RED_TEAM_EMOJI_ID
         twitch.BLUE_TEAM_EMOJI_ID = BLUE_TEAM_EMOJI_ID
-        
+
+        # Refresh live status for players in this match before building embed
+        all_players = series.red_team + series.blue_team
+        await twitch.refresh_live_status_for_players(all_players)
+
         # Build embed with Twitch links
         embed, view = twitch.build_match_embed_with_twitch(series, guild)
     except Exception as e:
