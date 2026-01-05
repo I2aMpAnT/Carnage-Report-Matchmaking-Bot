@@ -2,7 +2,7 @@
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 # Supports ALL playlists: MLG 4v4 (voting), Team Hardcore/Double Team (auto-balance), Head to Head (1v1)
 
-MODULE_VERSION = "1.8.1"
+MODULE_VERSION = "1.8.2"
 
 import discord
 from discord.ui import View, Button, Select
@@ -2108,103 +2108,33 @@ class CaptainDraftView(View):
         self.update_buttons()
 
     def update_buttons(self):
-        """Update player selection buttons - show all players with team colors and rank emojis"""
+        """Update player selection buttons - only show available players (not captains, not picked)"""
         self.clear_items()
 
-        # Row 0: Captains (always shown with team colors)
-        c1_member = self.guild.get_member(self.captain1) if self.guild else None
-        c1_name = c1_member.display_name if c1_member else f"Captain"
-        if len(c1_name) > 12:
-            c1_name = c1_name[:9] + "..."
-        c1_mmr = self.player_mmrs.get(self.captain1, 500)
-        c1_rank = self.player_ranks.get(self.captain1, 1)
-        c1_emoji = get_rank_emoji_for_button(self.guild, c1_rank)
-        captain1_btn = Button(
-            label=f"{c1_name} - {c1_mmr} MMR",
-            style=discord.ButtonStyle.danger,
-            emoji=c1_emoji,
-            custom_id=f"captain_{self.captain1}",
-            disabled=True,
-            row=0
-        )
-        self.add_item(captain1_btn)
-
-        # Blue captain
-        c2_member = self.guild.get_member(self.captain2) if self.guild else None
-        c2_name = c2_member.display_name if c2_member else f"Captain"
-        if len(c2_name) > 12:
-            c2_name = c2_name[:9] + "..."
-        c2_mmr = self.player_mmrs.get(self.captain2, 500)
-        c2_rank = self.player_ranks.get(self.captain2, 1)
-        c2_emoji = get_rank_emoji_for_button(self.guild, c2_rank)
-        captain2_btn = Button(
-            label=f"{c2_name} - {c2_mmr} MMR",
-            style=discord.ButtonStyle.primary,
-            emoji=c2_emoji,
-            custom_id=f"captain_{self.captain2}",
-            disabled=True,
-            row=0
-        )
-        self.add_item(captain2_btn)
-
-        # Build button list for other players: picked players first, then available
-        button_order = []
-        # Add red team picks (excluding captain)
-        for uid in self.red_team:
-            if uid != self.captain1:
-                button_order.append((uid, 'RED'))
-        # Add blue team picks (excluding captain)
-        for uid in self.blue_team:
-            if uid != self.captain2:
-                button_order.append((uid, 'BLUE'))
-        # Add remaining (available) sorted by MMR (highest to lowest)
+        # Only show available players (remaining) as buttons - sorted by MMR (highest to lowest)
         sorted_remaining = sorted(self.remaining, key=lambda uid: self.player_mmrs.get(uid, 500), reverse=True)
-        for uid in sorted_remaining:
-            button_order.append((uid, None))
 
-        # Create buttons for each player (rows 1-2 for up to 6 players)
-        for i, (uid, team) in enumerate(button_order):
+        # Create buttons - 2 per row (rows 0-2), sorted by MMR
+        for i, uid in enumerate(sorted_remaining):
             member = self.guild.get_member(uid) if self.guild else None
             player_name = member.display_name if member else f"Player {uid}"
-            if len(player_name) > 12:
-                player_name = player_name[:9] + "..."
+            if len(player_name) > 20:
+                player_name = player_name[:17] + "..."
 
             mmr = self.player_mmrs.get(uid, 500)
             rank = self.player_ranks.get(uid, 1)
             rank_emoji = get_rank_emoji_for_button(self.guild, rank)
-            row = 1 + (i // 3)  # Start at row 1 (row 0 is captains)
+            row = i // 2  # 2 buttons per row, starting at row 0
 
-            if team == 'RED':
-                # Picked for red team - red button, disabled
-                button = Button(
-                    label=f"{player_name} - {mmr} MMR",
-                    style=discord.ButtonStyle.danger,
-                    emoji=rank_emoji,
-                    custom_id=f"picked_{uid}",
-                    disabled=True,
-                    row=row
-                )
-            elif team == 'BLUE':
-                # Picked for blue team - blue button, disabled
-                button = Button(
-                    label=f"{player_name} - {mmr} MMR",
-                    style=discord.ButtonStyle.primary,
-                    emoji=rank_emoji,
-                    custom_id=f"picked_{uid}",
-                    disabled=True,
-                    row=row
-                )
-            else:
-                # Available - grey button, clickable by either captain
-                button = Button(
-                    label=f"{player_name} - {mmr} MMR",
-                    style=discord.ButtonStyle.secondary,
-                    emoji=rank_emoji,
-                    custom_id=f"pick_{uid}",
-                    row=row
-                )
-                button.callback = self.make_pick_callback(uid)
-
+            # Available - grey button, clickable by current captain
+            button = Button(
+                label=f"{player_name} - {mmr} MMR",
+                style=discord.ButtonStyle.secondary,
+                emoji=rank_emoji,
+                custom_id=f"pick_{uid}",
+                row=row
+            )
+            button.callback = self.make_pick_callback(uid)
             self.add_item(button)
 
         # Row 3: Undo Last Pick button (only show if there are picks to undo)
@@ -2361,14 +2291,6 @@ class CaptainDraftView(View):
             value=blue_text or "*No players yet*",
             inline=True
         )
-
-        # Available players section removed - MMR shown in buttons
-        if self.remaining:
-            embed.add_field(
-                name="Available Players",
-                value="*Click a button below to pick*",
-                inline=False
-            )
 
         return embed
 
