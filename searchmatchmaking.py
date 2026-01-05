@@ -1332,8 +1332,8 @@ async def update_queue_embed(channel: discord.TextChannel, qs=None):
                     mins = total_minutes % 60
                     time_str = f"{hours}h {mins}m"
                 elif total_minutes > 0:
-                    # Show minutes only (no seconds after 1 minute)
-                    time_str = f"{total_minutes}m"
+                    # Show minutes and seconds
+                    time_str = f"{total_minutes}m {seconds}s"
                 else:
                     # Show seconds only for first minute
                     time_str = f"{seconds}s"
