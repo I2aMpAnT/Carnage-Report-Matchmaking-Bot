@@ -1,7 +1,7 @@
 # searchmatchmaking.py - MLG 4v4 Queue Management System
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.7.0"
+MODULE_VERSION = "1.7.1"
 
 import discord
 from discord.ui import View, Button
@@ -769,6 +769,14 @@ class QueueView(View):
             # Update queue embed to show empty/available
             await update_queue_embed(interaction.channel, qs)
 
+            # Save state with locked players before starting pregame
+            try:
+                import state_manager
+                state_manager.save_state()
+                log_action("Saved state with locked players for pregame")
+            except:
+                pass
+
             from pregame import start_pregame
             await start_pregame(interaction.channel, mlg_queue_state=qs)
 
@@ -1105,6 +1113,14 @@ class PingJoinView(View):
             # Update queue embed to show empty/available
             if qs.queue_channel:
                 await update_queue_embed(qs.queue_channel, qs)
+
+                # Save state with locked players before starting pregame
+                try:
+                    import state_manager
+                    state_manager.save_state()
+                    log_action("Saved state with locked players for pregame")
+                except:
+                    pass
 
                 from pregame import start_pregame
                 await start_pregame(qs.queue_channel, mlg_queue_state=qs)
