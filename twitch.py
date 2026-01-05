@@ -264,9 +264,9 @@ class MultiStreamView(View):
 
         all_names = red_names + blue_names
 
-        # Use custom labels if provided, otherwise default to "Red Team" / "Blue Team"
-        red_label = red_label or "Red Team"
-        blue_label = blue_label or "Blue Team"
+        # Use custom labels if provided, otherwise default to "Red Team Streams" / "Blue Team Streams"
+        red_label = red_label or "Red Team Streams"
+        blue_label = blue_label or "Blue Team Streams"
 
         # Note: Discord link buttons are always grey - we use emoji in labels for color indication
         # Red Team button
