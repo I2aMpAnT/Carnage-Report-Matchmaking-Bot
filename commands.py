@@ -429,10 +429,9 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
     @bot.tree.command(name="cancelmatch", description="[STAFF] Cancel a match by number (completed games stay recorded)")
     @has_staff_role()
     @app_commands.describe(
-        match_number="The match/test number to cancel (e.g., 1 for Match #1 or Test 1)",
-        test_mode="Is this a test match? (Default: False)"
+        match_number="The match number to cancel (e.g., 1 for Match #1)"
     )
-    async def cancel_queue(interaction: discord.Interaction, match_number: int, test_mode: bool = False):
+    async def cancel_queue(interaction: discord.Interaction, match_number: int):
         """Cancel match but register games"""
         from searchmatchmaking import queue_state, queue_state_2, update_queue_embed, QUEUE_CHANNEL_ID_2
         from postgame import save_match_history
@@ -440,9 +439,9 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         # Check both queue states for active matches/pregame
         qs = None  # Will be set to the queue state with the matching match
 
-        # Check queue_state first
+        # Check queue_state first (match by number only, ignore test_mode)
         if queue_state.current_series:
-            if queue_state.current_series.match_number == match_number and queue_state.current_series.test_mode == test_mode:
+            if queue_state.current_series.match_number == match_number:
                 qs = queue_state
         elif hasattr(queue_state, 'pregame_vc_id') and queue_state.pregame_vc_id:
             # Pregame in progress - assume it's for this match number
@@ -451,7 +450,7 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
         # Check queue_state_2 if not found in queue_state
         if not qs:
             if queue_state_2.current_series:
-                if queue_state_2.current_series.match_number == match_number and queue_state_2.current_series.test_mode == test_mode:
+                if queue_state_2.current_series.match_number == match_number:
                     qs = queue_state_2
             elif hasattr(queue_state_2, 'pregame_vc_id') and queue_state_2.pregame_vc_id:
                 qs = queue_state_2
@@ -525,7 +524,9 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                     log_action(f"Failed to remove pregame match roles: {e}")
                 qs.pending_match_number = None
 
-        match_type = "Test" if test_mode else "Match #"
+        # Determine match type from series or queue state
+        is_test = (qs.current_series and qs.current_series.test_mode) or qs.test_mode
+        match_type = "Test " if is_test else "Match #"
 
         # Handle series cleanup
         if has_series:
