@@ -536,10 +536,17 @@ async def end_series(series_view_or_channel, channel: discord.TextChannel = None
     await cleanup_after_series(series, channel.guild)
 
     # Clear state (but NOT the queue - players waiting should stay in queue)
-    from searchmatchmaking import queue_state, queue_state_2, update_queue_embed
+    from searchmatchmaking import queue_state, queue_state_2, update_queue_embed, QUEUE_CHANNEL_ID_2
 
-    # Determine which queue this series belonged to and clear the correct one
-    if queue_state_2.current_series and queue_state_2.current_series == series:
+    # Determine which queue this series belonged to using source_queue_channel_id
+    # This is more reliable than object identity comparison which can fail after bot restarts
+    is_chill_queue = getattr(series, 'source_queue_channel_id', None) == QUEUE_CHANNEL_ID_2
+
+    # Fallback to object identity check if source_queue_channel_id not set (old series)
+    if not is_chill_queue and not hasattr(series, 'source_queue_channel_id'):
+        is_chill_queue = queue_state_2.current_series and queue_state_2.current_series == series
+
+    if is_chill_queue:
         queue_state_2.current_series = None
         queue_state_2.test_mode = False
         queue_state_2.test_team = None

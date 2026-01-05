@@ -2563,6 +2563,11 @@ async def finalize_teams(channel: discord.TextChannel, red_team: List[int], blue
     qs.pending_match_number = None
     series_label = temp_series.series_number  # "Series 1" or "Test 1"
 
+    # Store source queue channel ID so we know which queue to clear when series ends
+    from searchmatchmaking import QUEUE_CHANNEL_ID, QUEUE_CHANNEL_ID_2
+    temp_series.source_queue_channel_id = QUEUE_CHANNEL_ID_2 if qs == queue_state_2 else QUEUE_CHANNEL_ID
+    log_action(f"Series {temp_series.series_number} source queue channel: {temp_series.source_queue_channel_id}")
+
     # Get the existing series text channel (created in start_pregame) and rename it with MMRs
     series_text_channel = None
     if hasattr(qs, 'series_text_channel_id') and qs.series_text_channel_id:
