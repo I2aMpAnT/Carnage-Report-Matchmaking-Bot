@@ -2,7 +2,7 @@
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 # Supports ALL playlists: MLG 4v4 (voting), Team Hardcore/Double Team (auto-balance), Head to Head (1v1)
 
-MODULE_VERSION = "1.8.2"
+MODULE_VERSION = "1.8.3"
 
 import discord
 from discord.ui import View, Button, Select
@@ -1614,24 +1614,42 @@ class PickConfirmationView(View):
         self.selected_id = selected_id
         self.picker_id = picker_id
 
-        # Get player name for button labels
+        # Get player info for display
         member = draft_view.guild.get_member(selected_id) if draft_view.guild else None
         player_name = member.display_name if member else f"Player {selected_id}"
+        if len(player_name) > 20:
+            player_name = player_name[:17] + "..."
+        mmr = draft_view.player_mmrs.get(selected_id, 500)
+        rank = draft_view.player_ranks.get(selected_id, 1)
+        rank_emoji = get_rank_emoji_for_button(draft_view.guild, rank)
 
-        # Green Yes button
+        # Row 0: Show the selected player's info button (disabled)
+        player_info_btn = Button(
+            label=f"{player_name} - {mmr} MMR",
+            style=discord.ButtonStyle.secondary,
+            emoji=rank_emoji,
+            custom_id=f"player_info_{selected_id}",
+            disabled=True,
+            row=0
+        )
+        self.add_item(player_info_btn)
+
+        # Row 1: Green Yes button
         yes_button = Button(
-            label=f"✅ Yes, pick {player_name}",
+            label=f"✅ Yes, pick this player",
             style=discord.ButtonStyle.success,
-            custom_id=f"confirm_pick_{selected_id}"
+            custom_id=f"confirm_pick_{selected_id}",
+            row=1
         )
         yes_button.callback = self.confirm_callback
         self.add_item(yes_button)
 
-        # Red No button
+        # Row 1: Red No button
         no_button = Button(
             label="❌ No, go back",
             style=discord.ButtonStyle.danger,
-            custom_id=f"cancel_pick_{selected_id}"
+            custom_id=f"cancel_pick_{selected_id}",
+            row=1
         )
         no_button.callback = self.cancel_callback
         self.add_item(no_button)
