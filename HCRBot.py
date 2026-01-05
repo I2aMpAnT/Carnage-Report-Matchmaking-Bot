@@ -5,8 +5,8 @@
 # ============================================
 # VERSION INFO
 # ============================================
-BOT_VERSION = "1.6.4"
-BOT_BUILD_DATE = "2025-12-12"
+BOT_VERSION = "1.6.5"
+BOT_BUILD_DATE = "2026-01-05"
 # ============================================
 
 import discord
@@ -25,7 +25,7 @@ QUEUE_CHANNEL_ID = 1403855421625733151
 QUEUE_CHANNEL_ID_2 = 1449951027183882321
 QUEUE_2_BANNED_ROLE = "☢️"  # Users with this role cannot join queue 2
 # Team Hardcore 4v4 (DISABLED - channel deleted)
-# TEAM_HARDCORE_CHANNEL_ID = 1443783840169721988
+TEAM_HARDCORE_CHANNEL_ID = None  # Channel deleted, set to None
 # Double Team 2v2
 DOUBLE_TEAM_CHANNEL_ID = 1443784213135626260
 # Head to Head 1v1
@@ -35,6 +35,9 @@ PREGAME_LOBBY_ID = 1442711504498221118
 POSTGAME_LOBBY_ID = 1442711633518039072
 RED_TEAM_VC_ID = 1442711726855553154
 BLUE_TEAM_VC_ID = 1442711934662086859
+
+# General chat channel (for live notifications)
+GENERAL_CHANNEL_ID = 1403855176460406805
 
 # Team Emoji IDs
 RED_TEAM_EMOJI_ID = 1442675426886418522
@@ -99,6 +102,7 @@ def setup_module_config():
     # Set constants in twitch module
     twitch.RED_TEAM_EMOJI_ID = RED_TEAM_EMOJI_ID
     twitch.BLUE_TEAM_EMOJI_ID = BLUE_TEAM_EMOJI_ID
+    twitch.LIVE_NOTIFICATION_CHANNEL_ID = GENERAL_CHANNEL_ID
 
 # Bot Events
 @bot.event
@@ -325,6 +329,14 @@ async def on_ready():
     # Initialize permanent leaderboard
     await initialize_leaderboard()
 
+    # Start Twitch EventSub for live stream notifications
+    try:
+        import twitch
+        twitch.start_eventsub(bot)
+        print('✅ Twitch EventSub started for live notifications')
+    except Exception as e:
+        print(f'⚠️ Twitch EventSub not started: {e}')
+
 @bot.event
 async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandNotFound):
@@ -538,16 +550,14 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
 
-    # List of all queue channel IDs
-    QUEUE_CHANNELS = [
+    # List of all queue channel IDs (filter out None for disabled playlists)
+    QUEUE_CHANNELS = [ch for ch in [
         QUEUE_CHANNEL_ID,           # MLG 4v4
         QUEUE_CHANNEL_ID_2,         # MLG 4v4 Chill Queue
-        TEAM_HARDCORE_CHANNEL_ID,   # Team Hardcore
+        TEAM_HARDCORE_CHANNEL_ID,   # Team Hardcore (disabled)
         DOUBLE_TEAM_CHANNEL_ID,     # Double Team
         HEAD_TO_HEAD_CHANNEL_ID,    # Head to Head
-    ]
-
-    GENERAL_CHANNEL_ID = 1403855176460406805
+    ] if ch is not None]
 
     # Handle queue channels - keep queue embed at bottom
     if message.channel.id in QUEUE_CHANNELS:
