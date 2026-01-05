@@ -523,8 +523,16 @@ async def get_active_series_info(guild: discord.Guild) -> dict:
 
 async def show_series_embed(channel: discord.TextChannel):
     """Show initial series embed - in series text channel if available, otherwise queue channel"""
-    from searchmatchmaking import queue_state
+    from searchmatchmaking import queue_state, queue_state_2
+
+    # Check both queues for active series
     series = queue_state.current_series
+    if not series:
+        series = queue_state_2.current_series
+
+    if not series:
+        log_action("show_series_embed called but no active series found in either queue")
+        return
 
     # Use series text channel if available, otherwise fall back to queue channel
     if series.text_channel_id:
