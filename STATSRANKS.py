@@ -949,18 +949,18 @@ class LeaderboardView(discord.ui.View):
 
                 rank_emoji = self.get_rank_emoji(p["level"])
 
-                # Format: position. name + stats
+                # Format: position. rank + name + stats
                 if self.current_view == "MMR" or self.current_sort == "MMR":
                     # MMR view shows MMR value prominently
-                    line = f"{i}. {name} • **{p['mmr']} MMR**"
+                    line = f"{i}. {rank_emoji} {name} • **{p['mmr']} MMR**"
                 elif self.current_sort == "Level":
-                    line = f"{i}. {name} {rank_emoji}"
+                    line = f"{i}. {rank_emoji} {name}"
                 elif self.current_sort == "Wins":
-                    line = f"{i}. {name} • **{p['wins']}W** {rank_emoji}"
+                    line = f"{i}. {rank_emoji} {name} • **{p['wins']}W**"
                 elif self.current_sort == "K/D":
-                    line = f"{i}. {name} • **{p['kd']:.2f}** {rank_emoji}"
+                    line = f"{i}. {rank_emoji} {name} • **{p['kd']:.2f}**"
                 else:
-                    line = f"{i}. {name} {rank_emoji}"
+                    line = f"{i}. {rank_emoji} {name}"
 
                 leaderboard_lines.append(line)
 
