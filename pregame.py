@@ -209,7 +209,7 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
                         description=f"Your **{playlist_name}** match is starting! Please join the **Pregame Lobby** voice channel within 10 minutes or the match may be cancelled.",
                         color=discord.Color.gold()
                     )
-                    dm_embed.set_image(url=HEADER_IMAGE_URL)
+                    dm_embed.set_thumbnail(url=HEADER_IMAGE_URL)
                     await member.send(embed=dm_embed)
                     log_action(f"Sent pregame DM to {member.name}")
                 except discord.Forbidden:
@@ -401,7 +401,7 @@ async def start_pregame(channel: discord.TextChannel, test_mode: bool = False, t
                     description=f"Your match is starting! Please join the **Pregame Lobby** voice channel within 10 minutes or the match will be cancelled.",
                     color=discord.Color.gold()
                 )
-                dm_embed.set_image(url=HEADER_IMAGE_URL)
+                dm_embed.set_thumbnail(url=HEADER_IMAGE_URL)
                 await member.send(embed=dm_embed)
                 log_action(f"Sent pregame DM to {member.name}")
             except discord.Forbidden:
