@@ -541,6 +541,7 @@ async def on_message(message: discord.Message):
     # List of all queue channel IDs
     QUEUE_CHANNELS = [
         QUEUE_CHANNEL_ID,           # MLG 4v4
+        QUEUE_CHANNEL_ID_2,         # MLG 4v4 Chill Queue
         TEAM_HARDCORE_CHANNEL_ID,   # Team Hardcore
         DOUBLE_TEAM_CHANNEL_ID,     # Double Team
         HEAD_TO_HEAD_CHANNEL_ID,    # Head to Head
@@ -566,15 +567,25 @@ async def on_message(message: discord.Message):
 
 async def repost_queue_embed_if_needed(message: discord.Message):
     """Repost queue embed to keep it at the bottom of the channel"""
-    from searchmatchmaking import queue_state, update_queue_embed, log_action
+    from searchmatchmaking import queue_state, queue_state_2, update_queue_embed, log_action
 
     channel = message.channel
 
-    # Check if this is the MLG 4v4 queue channel
+    # Check if this is an MLG 4v4 queue channel (main or chill)
     if channel.id == QUEUE_CHANNEL_ID:
-        # Check if queue is active (has players or no match in progress)
-        if queue_state.current_series:
-            return  # Don't mess with embeds during active series
+        qs = queue_state
+        queue_name = "MLG"
+    elif channel.id == QUEUE_CHANNEL_ID_2:
+        qs = queue_state_2
+        queue_name = "Chill"
+    else:
+        qs = None
+        queue_name = None
+
+    if qs is not None:
+        # Check if queue has active series - don't mess with embeds
+        if qs.current_series:
+            return
 
         try:
             # Find the queue embed message
@@ -594,11 +605,11 @@ async def repost_queue_embed_if_needed(message: discord.Message):
                     pass
 
                 # Repost the queue embed
-                await update_queue_embed(channel)
-                log_action(f"Reposted MLG queue embed (triggered by {message.author.display_name})")
+                await update_queue_embed(channel, qs)
+                log_action(f"Reposted {queue_name} queue embed (triggered by {message.author.display_name})")
 
         except Exception as e:
-            print(f"Error reposting MLG queue embed: {e}")
+            print(f"Error reposting {queue_name} queue embed: {e}")
         return
 
     # Handle other playlist channels

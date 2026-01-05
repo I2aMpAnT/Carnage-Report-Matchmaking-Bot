@@ -543,6 +543,16 @@ async def show_series_embed(channel: discord.TextChannel):
         log_action("show_series_embed called but no active series found in either queue")
         return
 
+    # Prevent duplicate embeds - if series_message already exists, just update it
+    if series.series_message:
+        log_action(f"show_series_embed: series_message already exists, updating instead of creating new")
+        view = SeriesView(series)
+        try:
+            await view.update_series_embed(channel)
+        except Exception as e:
+            log_action(f"Failed to update existing series embed: {e}")
+        return
+
     # Use series text channel if available, otherwise fall back to queue channel
     if series.text_channel_id:
         target_channel = channel.guild.get_channel(series.text_channel_id)
