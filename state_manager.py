@@ -3,7 +3,7 @@ state_manager.py - Matchmaking State Persistence
 Saves and restores queue/match state across bot restarts
 """
 
-MODULE_VERSION = "1.4.0"
+MODULE_VERSION = "1.5.0"
 
 import json
 import os
@@ -338,10 +338,80 @@ async def restore_state(bot) -> bool:
 
         log_state("State restoration complete")
         return True
-    
+
     except Exception as e:
         log_state(f"Failed to restore state: {e}")
         return False
+
+
+async def resume_pregame_tasks(bot) -> int:
+    """Resume any pregame waiting tasks after bot restart.
+    Returns the number of pregame tasks resumed."""
+    import asyncio
+    from searchmatchmaking import queue_state, queue_state_2
+
+    resumed = 0
+
+    for qs in [queue_state, queue_state_2]:
+        # Check if there's a pregame in progress (has locked_players but no current_series)
+        if qs.locked_players and not qs.current_series and qs.pregame_vc_id:
+            guild = bot.guilds[0] if bot.guilds else None
+            if not guild:
+                continue
+
+            # Verify the pregame VC still exists
+            pregame_vc = guild.get_channel(qs.pregame_vc_id)
+            if not pregame_vc:
+                log_state(f"Pregame VC {qs.pregame_vc_id} no longer exists - clearing pregame state")
+                qs.pregame_vc_id = None
+                qs.locked_players = []
+                qs.series_text_channel_id = None
+                continue
+
+            # Get the series text channel
+            series_channel = guild.get_channel(qs.series_text_channel_id) if qs.series_text_channel_id else None
+            if not series_channel:
+                log_state(f"Series text channel not found - clearing pregame state")
+                qs.pregame_vc_id = None
+                qs.locked_players = []
+                qs.series_text_channel_id = None
+                continue
+
+            # Determine match label
+            from ingame import Series
+            match_number = qs.pending_match_number or (Series.match_counter + 1)
+            match_label = f"Match {match_number}"
+
+            log_state(f"Resuming pregame for {match_label} with {len(qs.locked_players)} players")
+
+            # Create a placeholder message for the pregame embed
+            try:
+                from searchmatchmaking import get_queue_progress_image
+                embed = discord.Embed(
+                    title=f"Pregame Lobby - {match_label}",
+                    description="⏳ **Waiting for all players to join the Pregame Lobby voice channel...**\n\nTeam selection will begin once everyone is in voice!\n\n*Bot restarted - resuming pregame...*",
+                    color=discord.Color.gold()
+                )
+                embed.set_image(url=get_queue_progress_image(8))
+                player_list = "\n".join([f"<@{uid}>" for uid in qs.locked_players])
+                embed.add_field(name=f"Players ({len(qs.locked_players)}/8)", value=player_list, inline=False)
+
+                pregame_message = await series_channel.send(embed=embed)
+
+                # Resume the waiting task
+                from pregame import wait_for_players_and_show_selection
+                asyncio.create_task(wait_for_players_and_show_selection(
+                    series_channel, pregame_message, qs.locked_players, qs.pregame_vc_id,
+                    test_mode=qs.test_mode, testers=getattr(qs, 'testers', []),
+                    match_label=match_label, mlg_queue_state=qs
+                ))
+                resumed += 1
+                log_state(f"Resumed pregame waiting task for {match_label}")
+            except Exception as e:
+                log_state(f"Failed to resume pregame: {e}")
+
+    return resumed
+
 
 def clear_state():
     """Clear saved state file"""

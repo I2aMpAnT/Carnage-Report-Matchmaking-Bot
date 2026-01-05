@@ -1,7 +1,7 @@
 # searchmatchmaking.py - MLG 4v4 Queue Management System
 # !! REMEMBER TO UPDATE VERSION NUMBER WHEN MAKING CHANGES !!
 
-MODULE_VERSION = "1.7.0"
+MODULE_VERSION = "1.7.2"
 
 import discord
 from discord.ui import View, Button
@@ -135,6 +135,8 @@ async def add_active_match_roles(guild: discord.Guild, player_ids: list, playlis
     - Adds Active{playlist} role (e.g., ActiveMLG4v4) - for pinging all active matches in playlist
     - Adds {playlist}Match{#} role (e.g., MLG4v4Match1) - for pinging specific match
     """
+    import asyncio
+
     # Clean playlist name for role (remove spaces)
     clean_playlist = playlist_name.replace(" ", "").replace("_", "")
     playlist_role_name = f"Active{clean_playlist}"
@@ -169,28 +171,39 @@ async def add_active_match_roles(guild: discord.Guild, player_ids: list, playlis
     # Get SearchingMatchmaking role to remove
     searching_role = discord.utils.get(guild.roles, name="SearchingMatchmaking")
 
-    # Apply roles to all players
-    for user_id in player_ids:
+    # Build list of roles to add/remove for each member
+    roles_to_add = []
+    if playlist_role:
+        roles_to_add.append(playlist_role)
+    if match_role:
+        roles_to_add.append(match_role)
+
+    async def update_member_roles(user_id):
+        """Update roles for a single member"""
         member = guild.get_member(user_id)
         if not member:
-            continue
-
+            return
         try:
-            # Remove searching role
+            # Combine remove and add into single edit if possible
+            roles_to_remove = []
             if searching_role and searching_role in member.roles:
-                await member.remove_roles(searching_role)
+                roles_to_remove.append(searching_role)
 
-            # Add active roles
-            roles_to_add = []
-            if playlist_role:
-                roles_to_add.append(playlist_role)
-            if match_role:
-                roles_to_add.append(match_role)
+            # Calculate new role set
+            new_roles = set(member.roles)
+            for r in roles_to_remove:
+                new_roles.discard(r)
+            for r in roles_to_add:
+                new_roles.add(r)
 
-            if roles_to_add:
-                await member.add_roles(*roles_to_add)
+            # Single API call to update all roles
+            if new_roles != set(member.roles):
+                await member.edit(roles=list(new_roles))
         except Exception as e:
             log_action(f"Failed to update roles for {member.display_name}: {e}")
+
+    # Run all role updates in parallel
+    await asyncio.gather(*[update_member_roles(uid) for uid in player_ids], return_exceptions=True)
 
     log_action(f"Added active match roles to {len(player_ids)} players: {playlist_role_name} + {match_role_name}")
 
@@ -201,6 +214,8 @@ async def remove_active_match_roles(guild: discord.Guild, player_ids: list, play
     - Removes Active{playlist} role (only if no other active matches in that playlist)
     - Removes and deletes the {playlist}Match{#} role
     """
+    import asyncio
+
     # Clean playlist name for role
     clean_playlist = playlist_name.replace(" ", "").replace("_", "")
     playlist_role_name = f"Active{clean_playlist}"
@@ -210,11 +225,11 @@ async def remove_active_match_roles(guild: discord.Guild, player_ids: list, play
     playlist_role = discord.utils.get(guild.roles, name=playlist_role_name)
     match_role = discord.utils.get(guild.roles, name=match_role_name)
 
-    # Remove roles from players
-    for user_id in player_ids:
+    async def remove_member_roles(user_id):
+        """Remove roles from a single member"""
         member = guild.get_member(user_id)
         if not member:
-            continue
+            return
 
         try:
             roles_to_remove = []
@@ -236,6 +251,9 @@ async def remove_active_match_roles(guild: discord.Guild, player_ids: list, play
                 await member.remove_roles(*roles_to_remove)
         except Exception as e:
             log_action(f"Failed to remove roles from {member.display_name}: {e}")
+
+    # Run all role removals in parallel
+    await asyncio.gather(*[remove_member_roles(uid) for uid in player_ids], return_exceptions=True)
 
     # Delete both roles when match ends
     if match_role:
@@ -769,6 +787,14 @@ class QueueView(View):
             # Update queue embed to show empty/available
             await update_queue_embed(interaction.channel, qs)
 
+            # Save state with locked players before starting pregame
+            try:
+                import state_manager
+                state_manager.save_state()
+                log_action("Saved state with locked players for pregame")
+            except:
+                pass
+
             from pregame import start_pregame
             await start_pregame(interaction.channel, mlg_queue_state=qs)
 
@@ -1105,6 +1131,14 @@ class PingJoinView(View):
             # Update queue embed to show empty/available
             if qs.queue_channel:
                 await update_queue_embed(qs.queue_channel, qs)
+
+                # Save state with locked players before starting pregame
+                try:
+                    import state_manager
+                    state_manager.save_state()
+                    log_action("Saved state with locked players for pregame")
+                except:
+                    pass
 
                 from pregame import start_pregame
                 await start_pregame(qs.queue_channel, mlg_queue_state=qs)

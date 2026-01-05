@@ -3,7 +3,7 @@ twitch.py - Twitch Integration Module
 Manages player Twitch links, multi-stream URLs, and live stream notifications via EventSub WebSocket
 """
 
-MODULE_VERSION = "1.3.0"
+MODULE_VERSION = "1.4.0"
 
 import discord
 from discord import app_commands
@@ -225,7 +225,8 @@ def get_player_display_name(user_id: int, guild: discord.Guild) -> str:
     return str(user_id)
 
 def get_player_as_link(user_id: int, guild: discord.Guild) -> str:
-    """Get player as a clickable Twitch link (Discord name displayed) or just Discord name if no Twitch"""
+    """Get player as a clickable Twitch link (Discord name displayed) or just Discord name if no Twitch.
+    Shows 🔴 LIVE indicator if the player is currently streaming."""
     players = load_players()
     player_data = players.get(str(user_id))
 
@@ -234,8 +235,14 @@ def get_player_as_link(user_id: int, guild: discord.Guild) -> str:
     discord_name = member.display_name if member else str(user_id)
 
     if player_data and 'twitch_url' in player_data:
+        # Check if user is live
+        twitch_name = player_data.get("twitch_name", "").lower()
+        is_live = is_user_live(twitch_name) if twitch_name else False
+
         # Use Discord name but link to Twitch
         url = player_data["twitch_url"]
+        if is_live:
+            return f"🔴 [{discord_name}]({url}) - LIVE"
         return f"[{discord_name}]({url})"
 
     # No Twitch linked - just show Discord name (no link)
@@ -745,7 +752,7 @@ async def subscribe_all_linked_users():
 
 
 def start_eventsub(bot):
-    """Start the EventSub WebSocket connection (call from bot.py on_ready)"""
+    """Start the EventSub WebSocket connection and live polling (call from bot.py on_ready)"""
     global _bot_instance, _websocket_task
 
     _bot_instance = bot
@@ -756,6 +763,12 @@ def start_eventsub(bot):
 
     _websocket_task = asyncio.create_task(eventsub_websocket_loop())
     logger.info("Started EventSub WebSocket task")
+
+    # Start the 5-minute polling task for live status
+    start_live_polling()
+
+    # Do an immediate poll to populate live status on startup
+    asyncio.create_task(poll_all_linked_users())
 
 
 def stop_eventsub():
@@ -779,3 +792,165 @@ def is_user_live(twitch_name: str) -> bool:
         if stream_data.get("stream_info", {}).get("user_login", "").lower() == twitch_name.lower():
             return True
     return False
+
+
+def is_discord_user_live(user_id: int) -> bool:
+    """Check if a Discord user (by their linked Twitch) is currently live"""
+    players = load_players()
+    player_data = players.get(str(user_id))
+    if not player_data:
+        return False
+
+    twitch_name = player_data.get("twitch_name", "").lower()
+    if not twitch_name:
+        return False
+
+    return is_user_live(twitch_name)
+
+
+async def batch_check_live_streams(twitch_names: List[str]) -> Dict[str, dict]:
+    """
+    Batch check which Twitch users are currently live.
+    Returns dict of {twitch_name: stream_info} for users that are live.
+    """
+    token = await get_app_access_token()
+    if not token:
+        return {}
+
+    live_users = {}
+
+    # Twitch API allows up to 100 user_logins per request
+    for i in range(0, len(twitch_names), 100):
+        batch = twitch_names[i:i+100]
+        try:
+            async with aiohttp.ClientSession() as session:
+                params = [("user_login", name) for name in batch]
+                async with session.get(
+                    f"{TWITCH_API_BASE}/streams",
+                    params=params,
+                    headers={
+                        "Client-ID": TWITCH_CLIENT_ID,
+                        "Authorization": f"Bearer {token}"
+                    }
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        for stream in data.get("data", []):
+                            user_login = stream.get("user_login", "").lower()
+                            live_users[user_login] = stream
+        except Exception as e:
+            logger.exception(f"Error batch checking live streams: {e}")
+
+    return live_users
+
+
+async def poll_all_linked_users():
+    """Poll all linked Twitch users to check who is currently live"""
+    global _live_streams
+
+    players = load_players()
+    twitch_names = []
+
+    # Collect all linked Twitch names
+    for discord_id, player_data in players.items():
+        twitch_name = player_data.get("twitch_name")
+        if twitch_name:
+            twitch_names.append(twitch_name.lower())
+
+    if not twitch_names:
+        return
+
+    logger.info(f"Polling {len(twitch_names)} linked Twitch users for live status...")
+
+    # Batch check who is live
+    live_users = await batch_check_live_streams(twitch_names)
+
+    # Update _live_streams with current live status
+    # First, mark any users who are no longer live
+    offline_users = []
+    for user_id in list(_live_streams.keys()):
+        stream_info = _live_streams[user_id].get("stream_info", {})
+        user_login = stream_info.get("user_login", "").lower()
+        if user_login not in live_users:
+            offline_users.append(user_id)
+
+    for user_id in offline_users:
+        _live_streams.pop(user_id, None)
+
+    # Add newly live users
+    newly_live = []
+    for twitch_name, stream_info in live_users.items():
+        user_id = stream_info.get("user_id")
+        if user_id and user_id not in _live_streams:
+            _live_streams[user_id] = {
+                "stream_info": stream_info,
+                "started_at": datetime.now(),
+                "message_id": None
+            }
+            newly_live.append(stream_info.get("user_name", twitch_name))
+
+    if newly_live:
+        logger.info(f"Found {len(newly_live)} live users: {', '.join(newly_live)}")
+    else:
+        logger.info(f"Currently live: {len(_live_streams)} users")
+
+    # Update active match embeds if any users are in a match
+    await update_active_match_embeds()
+
+
+async def update_active_match_embeds():
+    """Update all active match embeds to reflect current live status"""
+    if not _bot_instance:
+        return
+
+    try:
+        from searchmatchmaking import queue_state, queue_state_2
+
+        for qs in [queue_state, queue_state_2]:
+            if qs.current_series:
+                series = qs.current_series
+                guild = None
+
+                # Get guild from series channel
+                if series.text_channel_id:
+                    channel = _bot_instance.get_channel(series.text_channel_id)
+                    if channel:
+                        guild = channel.guild
+
+                if not guild and hasattr(series, 'general_message') and series.general_message:
+                    guild = series.general_message.guild
+
+                if guild:
+                    # Update general chat embed
+                    from ingame import update_general_chat_embed
+                    await update_general_chat_embed(guild, series)
+                    logger.info(f"Updated match embed with live status for {series.series_number}")
+    except Exception as e:
+        logger.exception(f"Error updating active match embeds: {e}")
+
+
+_poll_task: Optional[asyncio.Task] = None
+
+
+async def live_status_poll_loop():
+    """Background loop that polls live status every 5 minutes"""
+    while True:
+        try:
+            await poll_all_linked_users()
+        except Exception as e:
+            logger.exception(f"Error in live status poll: {e}")
+
+        # Wait 5 minutes
+        await asyncio.sleep(300)
+
+
+def start_live_polling():
+    """Start the live status polling task"""
+    global _poll_task
+
+    if _poll_task and not _poll_task.done():
+        logger.info("Live polling already running")
+        return
+
+    _poll_task = asyncio.create_task(live_status_poll_loop())
+    logger.info("Started live status polling task (every 5 minutes)")
