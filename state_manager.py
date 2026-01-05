@@ -285,7 +285,53 @@ async def restore_state(bot) -> bool:
                     log_state("Updated general chat embed")
                 except Exception as e:
                     log_state(f"Failed to update general chat: {e}")
-        
+
+        # Restore queue 2 series if active
+        series_data_2 = state.get("queue_2_current_series")
+        if series_data_2:
+            series2 = Series.__new__(Series)
+            series2.red_team = series_data_2["red_team"]
+            series2.blue_team = series_data_2["blue_team"]
+            series2.games = series_data_2["games"]
+            raw_game_stats = series_data_2.get("game_stats", {})
+            series2.game_stats = {int(k): v for k, v in raw_game_stats.items()}
+            series2.current_game = series_data_2["current_game"]
+            series2.test_mode = series_data_2["test_mode"]
+            series2.testers = series_data_2.get("testers", [])
+            series2.match_number = series_data_2["match_number"]
+            series2.series_number = series_data_2["series_number"]
+            series2.red_vc_id = series_data_2["red_vc_id"]
+            series2.blue_vc_id = series_data_2["blue_vc_id"]
+            series2.text_channel_id = series_data_2.get("text_channel_id")
+            series2.swap_history = series_data_2.get("swap_history", [])
+            series2.votes = {}
+            series2.end_series_votes = set()
+            series2.series_message = None
+            series2.general_message = None
+            series2.results_message = None
+            series2.results_channel_id = series_data_2.get("results_channel_id")
+
+            start_time_str = series_data_2.get("start_time")
+            if start_time_str:
+                series2.start_time = datetime.fromisoformat(start_time_str)
+            else:
+                series2.start_time = datetime.now()
+
+            end_time_str = series_data_2.get("end_time")
+            series2.end_time = datetime.fromisoformat(end_time_str) if end_time_str else None
+
+            queue_state_2.current_series = series2
+            log_state(f"Restored queue 2 series: {series2.series_number} - Game {series2.current_game}")
+
+            # Update general chat embed for queue 2 series
+            guild = bot.guilds[0] if bot.guilds else None
+            if guild:
+                try:
+                    await update_general_chat_embed(guild, series2)
+                    log_state("Updated general chat embed for queue 2 series")
+                except Exception as e:
+                    log_state(f"Failed to update general chat for queue 2: {e}")
+
         log_state("State restoration complete")
         return True
     

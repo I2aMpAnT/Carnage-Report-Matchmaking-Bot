@@ -536,14 +536,25 @@ async def end_series(series_view_or_channel, channel: discord.TextChannel = None
     await cleanup_after_series(series, channel.guild)
 
     # Clear state (but NOT the queue - players waiting should stay in queue)
-    from searchmatchmaking import queue_state, update_queue_embed
-    queue_state.current_series = None
-    # queue_state.queue.clear()  # REMOVED - don't clear queue, players are waiting!
-    queue_state.test_mode = False
-    queue_state.test_team = None
-    queue_state.testers = []
-    queue_state.locked = False
-    queue_state.locked_players = []
+    from searchmatchmaking import queue_state, queue_state_2, update_queue_embed
+
+    # Determine which queue this series belonged to and clear the correct one
+    if queue_state_2.current_series and queue_state_2.current_series == series:
+        queue_state_2.current_series = None
+        queue_state_2.test_mode = False
+        queue_state_2.test_team = None
+        queue_state_2.testers = []
+        queue_state_2.locked = False
+        queue_state_2.locked_players = []
+        log_action("Cleared queue_state_2 after series end")
+    else:
+        queue_state.current_series = None
+        queue_state.test_mode = False
+        queue_state.test_team = None
+        queue_state.testers = []
+        queue_state.locked = False
+        queue_state.locked_players = []
+        log_action("Cleared queue_state after series end")
 
     await update_queue_embed(queue_channel if queue_channel else channel)
 
