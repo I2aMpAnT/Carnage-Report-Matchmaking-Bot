@@ -214,6 +214,8 @@ async def remove_active_match_roles(guild: discord.Guild, player_ids: list, play
     - Removes Active{playlist} role (only if no other active matches in that playlist)
     - Removes and deletes the {playlist}Match{#} role
     """
+    import asyncio
+
     # Clean playlist name for role
     clean_playlist = playlist_name.replace(" ", "").replace("_", "")
     playlist_role_name = f"Active{clean_playlist}"
@@ -223,11 +225,11 @@ async def remove_active_match_roles(guild: discord.Guild, player_ids: list, play
     playlist_role = discord.utils.get(guild.roles, name=playlist_role_name)
     match_role = discord.utils.get(guild.roles, name=match_role_name)
 
-    # Remove roles from players
-    for user_id in player_ids:
+    async def remove_member_roles(user_id):
+        """Remove roles from a single member"""
         member = guild.get_member(user_id)
         if not member:
-            continue
+            return
 
         try:
             roles_to_remove = []
@@ -249,6 +251,9 @@ async def remove_active_match_roles(guild: discord.Guild, player_ids: list, play
                 await member.remove_roles(*roles_to_remove)
         except Exception as e:
             log_action(f"Failed to remove roles from {member.display_name}: {e}")
+
+    # Run all role removals in parallel
+    await asyncio.gather(*[remove_member_roles(uid) for uid in player_ids], return_exceptions=True)
 
     # Delete both roles when match ends
     if match_role:

@@ -5,7 +5,7 @@
 # ============================================
 # VERSION INFO
 # ============================================
-BOT_VERSION = "1.6.5"
+BOT_VERSION = "1.6.6"
 BOT_BUILD_DATE = "2026-01-05"
 # ============================================
 
@@ -606,12 +606,17 @@ async def repost_queue_embed_if_needed(message: discord.Message):
             return
 
         try:
-            # Find the queue embed message
+            # Find the queue embed message based on queue type
             queue_message = None
+            if channel.id == QUEUE_CHANNEL_ID:
+                search_terms = ["MLG", "Matchmaking"]
+            else:  # QUEUE_CHANNEL_ID_2
+                search_terms = ["Chill", "Lobby"]
+
             async for msg in channel.history(limit=20):
                 if msg.author.bot and msg.embeds:
                     title = msg.embeds[0].title or ""
-                    if "Matchmaking" in title and "MLG" in title:
+                    if all(term in title for term in search_terms):
                         queue_message = msg
                         break
 

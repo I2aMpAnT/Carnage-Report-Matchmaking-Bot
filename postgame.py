@@ -1,6 +1,6 @@
 # postgame.py - Postgame Processing, Stats Recording, and Cleanup
 
-MODULE_VERSION = "1.4.0"
+MODULE_VERSION = "1.4.1"
 
 import discord
 from discord.ui import View, Button
@@ -607,33 +607,38 @@ def save_series_for_stats_matching(series):
 
 async def cleanup_after_series(series, guild: discord.Guild):
     """Move ALL users (not just players) to postgame and delete team VCs"""
+    import asyncio
+
     # Move to Postgame Carnage Report (ID: 1424845826362048643) FIRST before deleting VCs
     POSTGAME_CARNAGE_REPORT_ID = 1424845826362048643
     postgame_vc = guild.get_channel(POSTGAME_CARNAGE_REPORT_ID)
 
     # Move ALL users from team VCs to postgame (not just players - includes spectators/staff)
     if postgame_vc:
-        # Move everyone from Red VC
+        members_to_move = []
+
+        # Collect members from Red VC
         if series.red_vc_id:
             red_vc = guild.get_channel(series.red_vc_id)
             if red_vc and red_vc.members:
-                for member in list(red_vc.members):  # Use list() to avoid modification during iteration
-                    try:
-                        await member.move_to(postgame_vc)
-                        log_action(f"Moved {member.name} to Postgame Carnage Report")
-                    except:
-                        pass
+                members_to_move.extend(list(red_vc.members))
 
-        # Move everyone from Blue VC
+        # Collect members from Blue VC
         if series.blue_vc_id:
             blue_vc = guild.get_channel(series.blue_vc_id)
             if blue_vc and blue_vc.members:
-                for member in list(blue_vc.members):  # Use list() to avoid modification during iteration
-                    try:
-                        await member.move_to(postgame_vc)
-                        log_action(f"Moved {member.name} to Postgame Carnage Report")
-                    except:
-                        pass
+                members_to_move.extend(list(blue_vc.members))
+
+        # Move all members in parallel
+        async def move_member(member):
+            try:
+                await member.move_to(postgame_vc)
+            except:
+                pass
+
+        if members_to_move:
+            await asyncio.gather(*[move_member(m) for m in members_to_move], return_exceptions=True)
+            log_action(f"Moved {len(members_to_move)} members to Postgame Carnage Report")
     else:
         log_action(f"Warning: Postgame Carnage Report channel {POSTGAME_CARNAGE_REPORT_ID} not found")
 
