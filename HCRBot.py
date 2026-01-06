@@ -547,13 +547,17 @@ async def on_message(message: discord.Message):
                 except Exception as backfill_error:
                     print(f"[RANKS] Backfill error: {backfill_error}")
 
-                # Delete trigger message only on success
-                await message.delete()
                 print("[RANKS] Webhook completed successfully")
             except Exception as e:
                 print(f"[RANKS] Error during rank refresh: {e}")
                 import traceback
                 traceback.print_exc()
+            finally:
+                # Always delete trigger message
+                try:
+                    await message.delete()
+                except:
+                    pass
             return
 
     # Ignore bot messages for other handlers
