@@ -242,7 +242,7 @@ def get_player_as_link(user_id: int, guild: discord.Guild) -> str:
         # Use Discord name but link to Twitch
         url = player_data["twitch_url"]
         if is_live:
-            return f"🔴 [{discord_name}]({url}) - LIVE"
+            return f"[{discord_name}]({url}) - 🔴 LIVE"
         return f"[{discord_name}]({url})"
 
     # No Twitch linked - just show Discord name (no link)
