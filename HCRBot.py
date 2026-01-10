@@ -556,8 +556,24 @@ async def on_message(message: discord.Message):
                 traceback.print_exc()
             return
 
-    # Ignore bot messages for other handlers
+    # Ignore bot messages for other handlers (but queue channels handled separately below)
     if message.author.bot:
+        # Still handle queue channels for bot messages (match embeds should push queue down)
+        QUEUE_CHANNELS = [ch for ch in [
+            QUEUE_CHANNEL_ID,           # MLG 4v4
+            QUEUE_CHANNEL_ID_2,         # MLG 4v4 Chill Queue
+            TEAM_HARDCORE_CHANNEL_ID,   # Team Hardcore (disabled)
+            DOUBLE_TEAM_CHANNEL_ID,     # Double Team
+            HEAD_TO_HEAD_CHANNEL_ID,    # Head to Head
+        ] if ch is not None]
+
+        if message.channel.id in QUEUE_CHANNELS:
+            # Skip if this message IS the queue embed (avoid infinite loop)
+            if message.embeds:
+                title = message.embeds[0].title or ""
+                if "Matchmaking" in title or "Chill Lobby" in title:
+                    return  # This is the queue embed itself, don't repost
+            await repost_queue_embed_if_needed(message)
         return
 
     # List of all queue channel IDs (filter out None for disabled playlists)
