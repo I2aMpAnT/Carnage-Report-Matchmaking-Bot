@@ -42,12 +42,18 @@ def format_game_result(game_num: int, winner: str, game_stats: dict) -> str:
     
     return f"{emoji} Game {game_num} Winner\n"
 
-async def update_general_chat_embed(guild: discord.Guild, series):
-    """Send/update match-in-progress embed in general chat with Twitch links and multistream buttons"""
+async def update_general_chat_embed(guild: discord.Guild, series, repost: bool = False):
+    """Send/update match-in-progress embed in general chat with Twitch links and multistream buttons
+
+    Args:
+        guild: Discord guild
+        series: Active series object
+        repost: If True, delete old message and post new one to be most recent (used for live status changes)
+    """
     channel = guild.get_channel(GENERAL_CHANNEL_ID)
     if not channel:
         return
-    
+
     # Import twitch module for links
     try:
         import twitch
@@ -68,16 +74,16 @@ async def update_general_chat_embed(guild: discord.Guild, series):
             description="**Halo 2 MLG 2007 Matchmaking**",
             color=discord.Color.from_rgb(0, 112, 192)
         )
-        
+
         red_mentions = "\n".join([f"<@{uid}>" for uid in series.red_team])
         blue_mentions = "\n".join([f"<@{uid}>" for uid in series.blue_team])
-        
+
         red_wins = series.games.count('RED')
         blue_wins = series.games.count('BLUE')
-        
+
         embed.add_field(
-            name=f"<:redteam:{RED_TEAM_EMOJI_ID}> Red Team - {red_wins}", 
-            value=red_mentions, 
+            name=f"<:redteam:{RED_TEAM_EMOJI_ID}> Red Team - {red_wins}",
+            value=red_mentions,
             inline=True
         )
         embed.add_field(
@@ -87,10 +93,35 @@ async def update_general_chat_embed(guild: discord.Guild, series):
         )
         embed.set_footer(text="Match in progress - voting in matchmaking channel")
         view = None
-    
-    # Check if test mode
-    is_test = getattr(series, 'test_mode', False)
 
+    # If repost requested (live status change), delete old and post new
+    if repost:
+        # Delete existing message if we have one
+        if hasattr(series, 'general_message') and series.general_message:
+            try:
+                await series.general_message.delete()
+            except:
+                pass
+            series.general_message = None
+
+        # Also check history for any orphaned embeds
+        async for message in channel.history(limit=20):
+            if message.author.bot and message.embeds:
+                if message.embeds[0].title and "Match In Progress" in message.embeds[0].title:
+                    try:
+                        await message.delete()
+                    except:
+                        pass
+                    break
+
+        # Post new message at bottom
+        if view:
+            series.general_message = await channel.send(embed=embed, view=view)
+        else:
+            series.general_message = await channel.send(embed=embed)
+        return
+
+    # Normal update path - edit in place
     # Try to use cached message reference first (fast path)
     if hasattr(series, 'general_message') and series.general_message:
         try:

@@ -136,6 +136,28 @@ def remove_from_active_matches(series) -> dict:
 
     return removed_match
 
+
+def remove_from_active_matches_by_id(match_id: int) -> dict:
+    """Remove a match from activematch.json by match_id (for stale/orphaned matches)"""
+    data = load_active_matches()
+
+    removed_match = None
+    new_active = []
+
+    for match in data["active_matches"]:
+        if match.get("match_id") == match_id:
+            removed_match = match
+        else:
+            new_active.append(match)
+
+    data["active_matches"] = new_active
+    save_active_matches(data)
+
+    if removed_match:
+        log_action(f"Removed match #{match_id} from {ACTIVE_MATCH_FILE}")
+
+    return removed_match
+
 def log_action(message: str):
     """Log actions"""
     from searchmatchmaking import log_action as queue_log
@@ -404,6 +426,11 @@ async def end_series(series_view_or_channel, channel: discord.TextChannel = None
         # Called with series_view (vote button)
         series = series_view_or_channel.series
 
+    # Prevent duplicate end_series calls - check if already ended
+    if series.end_time is not None:
+        log_action(f"end_series called but series #{series.match_number} already ended - ignoring duplicate call")
+        return
+
     # Record end time for stats matching window
     series.end_time = datetime.now()
     log_action(f"Series #{series.match_number} ended - Stats window: {series.start_time} to {series.end_time}")
@@ -427,54 +454,36 @@ async def end_series(series_view_or_channel, channel: discord.TextChannel = None
 
     log_action(f"Series ended - Current Winner: {winner} ({red_wins}-{blue_wins}) in Match #{series.match_number}")
 
-    # Create results embed - will be updated later when stats are parsed
+    # Create results embed
     if winner == 'RED':
         embed_color = discord.Color.red()
-        title = f"Match #{series.match_number} Results - RED WINS!"
+        title = f"Match #{series.match_number} Complete - RED WINS!"
     elif winner == 'BLUE':
         embed_color = discord.Color.blue()
-        title = f"Match #{series.match_number} Results - BLUE WINS!"
+        title = f"Match #{series.match_number} Complete - BLUE WINS!"
     else:
         embed_color = discord.Color.gold()
-        title = f"Match #{series.match_number} Results - Awaiting Stats"
+        title = f"Match #{series.match_number} Complete - TIE"
 
     embed = discord.Embed(
         title=title,
-        description="*Results will update automatically when game stats are parsed*",
         color=embed_color
     )
 
     red_mentions = "\n".join([f"<@{uid}>" for uid in series.red_team])
     blue_mentions = "\n".join([f"<@{uid}>" for uid in series.blue_team])
 
-    # Team fields with win counts
+    # Team fields
     embed.add_field(
-        name=f"<:redteam:{RED_TEAM_EMOJI_ID}> Red Team - {red_wins}",
+        name=f"<:redteam:{RED_TEAM_EMOJI_ID}> Red Team",
         value=red_mentions,
         inline=True
     )
     embed.add_field(
-        name=f"<:blueteam:{BLUE_TEAM_EMOJI_ID}> Blue Team - {blue_wins}",
+        name=f"<:blueteam:{BLUE_TEAM_EMOJI_ID}> Blue Team",
         value=blue_mentions,
         inline=True
     )
-
-    embed.add_field(name="Final Score", value=f"Red **{red_wins}** - **{blue_wins}** Blue", inline=False)
-
-    # Show game results with map/gametype stats (if any parsed yet)
-    if series.games:
-        from ingame import format_game_result
-        results_text = ""
-        for i, game_winner in enumerate(series.games, 1):
-            results_text += format_game_result(i, game_winner, series.game_stats)
-        embed.add_field(name="Game Results", value=results_text.strip(), inline=False)
-    else:
-        embed.add_field(name="Game Results", value="*No games recorded yet - will update from parsed stats*", inline=False)
-
-    # Add stats matching info (convert to EST if needed)
-    start_est = series.start_time.astimezone(EST) if series.start_time.tzinfo else series.start_time
-    end_est = series.end_time.astimezone(EST) if series.end_time.tzinfo else series.end_time
-    embed.set_footer(text=f"Stats window: {start_est.strftime('%H:%M')} - {end_est.strftime('%H:%M')} EST")
 
     # Post to queue channel and store reference for later updates
     queue_channel = channel.guild.get_channel(QUEUE_CHANNEL_ID)

@@ -765,8 +765,10 @@ class QueueView(View):
 
             # Assign match roles immediately so players can be pinged in team selection
             # Get the next match number (will be used when Series is created)
+            # IMPORTANT: Increment counter immediately to prevent duplicate numbers if another queue fills
             from ingame import Series
-            next_match_number = Series.match_counter + 1
+            Series.match_counter += 1
+            next_match_number = Series.match_counter
             qs.pending_match_number = next_match_number
             log_action(f"Assigned pending match number: {next_match_number}")
 
@@ -1110,8 +1112,10 @@ class PingJoinView(View):
 
             # Assign match roles immediately so players can be pinged in team selection
             # Get the next match number (will be used when Series is created)
+            # IMPORTANT: Increment counter immediately to prevent duplicate numbers if another queue fills
             from ingame import Series
-            next_match_number = Series.match_counter + 1
+            Series.match_counter += 1
+            next_match_number = Series.match_counter
             qs.pending_match_number = next_match_number
             log_action(f"Assigned pending match number: {next_match_number}")
 
@@ -1230,40 +1234,18 @@ async def create_queue_embed(channel: discord.TextChannel, qs=None):
     # Try to use cached message reference first (much faster than history search)
     queue_message = getattr(qs, 'queue_message', None)
 
-    # Try to edit cached message directly (fastest path)
+    # Always check if cached message is at the bottom before editing
+    # This ensures queue embed stays at bottom even after game results are posted
     if queue_message:
         try:
-            await queue_message.edit(embed=embed, view=view)
-            # Start auto-update task if not already running
-            if qs.auto_update_task is None or qs.auto_update_task.done():
-                qs.auto_update_task = asyncio.create_task(auto_update_queue_times(qs))
-                queue_name = "Halo 2 Chill Lobby" if is_restricted else "MLG 4v4"
-                log_action(f"Started {queue_name} queue auto-update task")
-            return  # Success - no need to search history
-        except:
-            # Message was deleted or invalid - clear cache
-            qs.queue_message = None
-            queue_message = None
+            # Quick check: get the most recent message to see if queue embed is at bottom
+            is_at_bottom = False
+            async for most_recent in channel.history(limit=1):
+                is_at_bottom = (most_recent.id == queue_message.id)
+                break
 
-    # Only search history if cached edit failed
-    is_at_bottom = True
-    message_count = 0
-    async for message in channel.history(limit=50):
-        if message.author.bot and message.embeds:
-            for emb in message.embeds:
-                if emb.title and ("Matchmaking" in emb.title or "Chill Lobby" in emb.title):
-                    queue_message = message
-                    qs.queue_message = message  # Cache for future use
-                    is_at_bottom = (message_count == 0)
-                    break
-        if queue_message:
-            break
-        message_count += 1
-
-    if queue_message:
-        if is_at_bottom:
-            # Already at bottom - just edit in place
-            try:
+            if is_at_bottom:
+                # At bottom - edit in place (fast path)
                 await queue_message.edit(embed=embed, view=view)
                 # Start auto-update task if not already running
                 if qs.auto_update_task is None or qs.auto_update_task.done():
@@ -1271,14 +1253,34 @@ async def create_queue_embed(channel: discord.TextChannel, qs=None):
                     queue_name = "Halo 2 Chill Lobby" if is_restricted else "MLG 4v4"
                     log_action(f"Started {queue_name} queue auto-update task")
                 return
-            except:
-                pass
-        # Not at bottom - delete and repost
-        try:
-            await queue_message.delete()
-            qs.queue_message = None
+            else:
+                # Not at bottom - delete and repost to move to bottom
+                try:
+                    await queue_message.delete()
+                except:
+                    pass
+                qs.queue_message = None
+                queue_message = None
         except:
-            pass
+            # Message was deleted or invalid - clear cache
+            qs.queue_message = None
+            queue_message = None
+
+    # Search history to find queue embed if not cached
+    if not queue_message:
+        async for message in channel.history(limit=50):
+            if message.author.bot and message.embeds:
+                for emb in message.embeds:
+                    if emb.title and ("Matchmaking" in emb.title or "Chill Lobby" in emb.title):
+                        queue_message = message
+                        # Found it - delete since it's not at bottom (we already checked cached)
+                        try:
+                            await queue_message.delete()
+                        except:
+                            pass
+                        break
+            if queue_message:
+                break
 
     # Post new message at bottom
     new_message = await channel.send(embed=embed, view=view)
@@ -1393,45 +1395,48 @@ async def update_queue_embed(channel: discord.TextChannel, qs=None):
     # Try to use cached message reference first (much faster than history search)
     queue_message = getattr(qs, 'queue_message', None)
 
-    # Try to edit cached message directly (fastest path)
+    # Always check if cached message is at the bottom before editing
+    # This ensures queue embed stays at bottom even after game results are posted
     if queue_message:
         try:
-            await queue_message.edit(embed=embed, view=view)
-            return  # Success - no need to search history
+            # Quick check: get the most recent message to see if queue embed is at bottom
+            is_at_bottom = False
+            async for most_recent in channel.history(limit=1):
+                is_at_bottom = (most_recent.id == queue_message.id)
+                break
+
+            if is_at_bottom:
+                # At bottom - edit in place (fast path)
+                await queue_message.edit(embed=embed, view=view)
+                return
+            else:
+                # Not at bottom - delete and repost to move to bottom
+                try:
+                    await queue_message.delete()
+                except:
+                    pass
+                qs.queue_message = None
+                queue_message = None
         except:
             # Message was deleted or invalid - clear cache
             qs.queue_message = None
             queue_message = None
 
-    # Only search history if cached edit failed
-    is_at_bottom = True
-    message_count = 0
-    async for message in channel.history(limit=50):
-        if message.author.bot and message.embeds:
-            for emb in message.embeds:
-                if emb.title and ("Matchmaking" in emb.title or "Chill Lobby" in emb.title):
-                    queue_message = message
-                    qs.queue_message = message  # Cache for future use
-                    is_at_bottom = (message_count == 0)
-                    break
-        if queue_message:
-            break
-        message_count += 1
-
-    if queue_message:
-        if is_at_bottom:
-            # Already at bottom - just edit in place
-            try:
-                await queue_message.edit(embed=embed, view=view)
-                return
-            except:
-                pass
-        # Not at bottom or edit failed - delete and repost
-        try:
-            await queue_message.delete()
-            qs.queue_message = None
-        except:
-            pass
+    # Search history to find queue embed if not cached
+    if not queue_message:
+        async for message in channel.history(limit=50):
+            if message.author.bot and message.embeds:
+                for emb in message.embeds:
+                    if emb.title and ("Matchmaking" in emb.title or "Chill Lobby" in emb.title):
+                        queue_message = message
+                        # Found it - delete since it's not at bottom (we already checked cached)
+                        try:
+                            await queue_message.delete()
+                        except:
+                            pass
+                        break
+            if queue_message:
+                break
 
     # Post new message at bottom
     new_message = await channel.send(embed=embed, view=view)

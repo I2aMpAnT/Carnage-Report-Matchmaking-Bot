@@ -618,6 +618,9 @@ async def handle_stream_online(event_data: dict):
         except Exception as e:
             logger.exception(f"Error posting live notification: {e}")
 
+    # Immediately update active match embeds to show live status
+    await update_active_match_embeds()
+
 
 async def handle_stream_offline(event_data: dict):
     """Handle stream.offline event - player went offline"""
@@ -648,6 +651,9 @@ async def handle_stream_offline(event_data: dict):
                     pass
         except Exception as e:
             logger.exception(f"Error updating offline notification: {e}")
+
+    # Immediately update active match embeds to remove live status
+    await update_active_match_embeds()
 
 
 async def eventsub_websocket_loop():
@@ -930,12 +936,20 @@ async def poll_all_linked_users():
     else:
         logger.info(f"Currently live: {len(_live_streams)} users")
 
-    # Update active match embeds if any users are in a match
-    await update_active_match_embeds()
+    # Only repost active match embeds if there was a live status change
+    if newly_live or offline_users:
+        await update_active_match_embeds(repost=True)
+    # Otherwise just do a quiet edit-in-place update (no repost)
+    elif _live_streams:
+        await update_active_match_embeds(repost=False)
 
 
-async def update_active_match_embeds():
-    """Update all active match embeds to reflect current live status"""
+async def update_active_match_embeds(repost: bool = True):
+    """Update all active match embeds to reflect current live status
+
+    Args:
+        repost: If True, delete and repost embed to be most recent message (for live status changes)
+    """
     if not _bot_instance:
         return
 
@@ -957,9 +971,9 @@ async def update_active_match_embeds():
                     guild = series.general_message.guild
 
                 if guild:
-                    # Update general chat embed
+                    # Update general chat embed (repost to be most recent when live status changes)
                     from ingame import update_general_chat_embed
-                    await update_general_chat_embed(guild, series)
+                    await update_general_chat_embed(guild, series, repost=repost)
                     logger.info(f"Updated match embed with live status for {series.series_number}")
     except Exception as e:
         logger.exception(f"Error updating active match embeds: {e}")
