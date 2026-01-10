@@ -434,17 +434,28 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
     async def cancel_queue(interaction: discord.Interaction, match_number: int):
         """Cancel match but register games"""
         from searchmatchmaking import queue_state, queue_state_2, update_queue_embed, QUEUE_CHANNEL_ID_2
-        from postgame import save_match_history
+        from postgame import save_match_history, load_active_matches, remove_from_active_matches, remove_from_active_matches_by_id
 
         # Check both queue states for active matches/pregame
         qs = None  # Will be set to the queue state with the matching match
+        found_in_file = False
 
-        # Check queue_state first (match by number only, ignore test_mode)
+        # First check activematch.json for the match (most reliable source)
+        active_data = load_active_matches()
+        active_match = None
+        for match in active_data.get("active_matches", []):
+            if match.get("match_id") == match_number:
+                active_match = match
+                found_in_file = True
+                log_action(f"Found match #{match_number} in activematch.json")
+                break
+
+        # Check queue_state for current series matching the number
         if queue_state.current_series:
             if queue_state.current_series.match_number == match_number:
                 qs = queue_state
-        elif hasattr(queue_state, 'pregame_vc_id') and queue_state.pregame_vc_id:
-            # Pregame in progress - assume it's for this match number
+        # Check queue_state for pregame with matching pending_match_number
+        elif hasattr(queue_state, 'pending_match_number') and queue_state.pending_match_number == match_number:
             qs = queue_state
 
         # Check queue_state_2 if not found in queue_state
@@ -452,11 +463,25 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             if queue_state_2.current_series:
                 if queue_state_2.current_series.match_number == match_number:
                     qs = queue_state_2
-            elif hasattr(queue_state_2, 'pregame_vc_id') and queue_state_2.pregame_vc_id:
+            elif hasattr(queue_state_2, 'pending_match_number') and queue_state_2.pending_match_number == match_number:
                 qs = queue_state_2
 
-        if not qs:
-            await interaction.response.send_message("❌ No active match with that number!", ephemeral=True)
+        # If found in file but not in queue state, we still need to clean it up
+        if not qs and not found_in_file:
+            await interaction.response.send_message(
+                f"❌ No active match #{match_number} found!\n"
+                f"Check `/matchstatus` to see active matches.",
+                ephemeral=True
+            )
+            return
+
+        # If we found it in file but not in queue state, just remove from file
+        if not qs and found_in_file:
+            remove_from_active_matches_by_id(match_number)
+            await interaction.response.send_message(
+                f"✅ Removed stale match #{match_number} from active matches file.",
+                ephemeral=True
+            )
             return
 
         has_series = qs.current_series is not None
@@ -507,26 +532,18 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
             # Remove match roles if assigned during pregame (before series created)
             pending_match = getattr(qs, 'pending_match_number', None)
             playlist_name = getattr(qs, 'playlist_name', 'MLG4v4')
-            if pending_match and not test_mode and not has_series:
+            if pending_match and not has_series:
                 try:
                     from searchmatchmaking import remove_active_match_roles
                     locked_players = qs.locked_players if qs.locked_players else []
                     if locked_players:
                         await remove_active_match_roles(interaction.guild, locked_players, playlist_name, pending_match)
                         log_action(f"Removed match roles for cancelled pregame match #{pending_match}")
-
-                        # Recycle the match number
-                        from ingame import Series
-                        if Series.match_counter >= pending_match:
-                            Series.match_counter = pending_match - 1
-                            log_action(f"Recycled match number - counter reset to {Series.match_counter}")
                 except Exception as e:
                     log_action(f"Failed to remove pregame match roles: {e}")
                 qs.pending_match_number = None
 
-        # Determine match type from series or queue state
-        is_test = (qs.current_series and qs.current_series.test_mode) or qs.test_mode
-        match_type = "Test " if is_test else "Match #"
+        match_type = "Match #"
 
         # Handle series cleanup
         if has_series:
@@ -582,14 +599,13 @@ def setup_commands(bot: commands.Bot, PREGAME_LOBBY_ID: int, POSTGAME_LOBBY_ID: 
                     pass
 
             # Remove active matchmaking roles from all players
-            if not test_mode:
-                try:
-                    from searchmatchmaking import remove_active_match_roles
-                    all_players = series.red_team + series.blue_team
-                    playlist_name = getattr(series, 'playlist_name', 'MLG4v4')
-                    await remove_active_match_roles(interaction.guild, all_players, playlist_name, series.match_number)
-                except Exception as e:
-                    log_action(f"Failed to remove active match roles: {e}")
+            try:
+                from searchmatchmaking import remove_active_match_roles
+                all_players = series.red_team + series.blue_team
+                playlist_name = getattr(series, 'playlist_name', 'MLG4v4')
+                await remove_active_match_roles(interaction.guild, all_players, playlist_name, series.match_number)
+            except Exception as e:
+                log_action(f"Failed to remove active match roles: {e}")
 
         # Clear state for the correct queue
         qs.current_series = None

@@ -136,6 +136,28 @@ def remove_from_active_matches(series) -> dict:
 
     return removed_match
 
+
+def remove_from_active_matches_by_id(match_id: int) -> dict:
+    """Remove a match from activematch.json by match_id (for stale/orphaned matches)"""
+    data = load_active_matches()
+
+    removed_match = None
+    new_active = []
+
+    for match in data["active_matches"]:
+        if match.get("match_id") == match_id:
+            removed_match = match
+        else:
+            new_active.append(match)
+
+    data["active_matches"] = new_active
+    save_active_matches(data)
+
+    if removed_match:
+        log_action(f"Removed match #{match_id} from {ACTIVE_MATCH_FILE}")
+
+    return removed_match
+
 def log_action(message: str):
     """Log actions"""
     from searchmatchmaking import log_action as queue_log
