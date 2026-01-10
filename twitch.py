@@ -618,6 +618,9 @@ async def handle_stream_online(event_data: dict):
         except Exception as e:
             logger.exception(f"Error posting live notification: {e}")
 
+    # Immediately update active match embeds to show live status
+    await update_active_match_embeds()
+
 
 async def handle_stream_offline(event_data: dict):
     """Handle stream.offline event - player went offline"""
@@ -648,6 +651,9 @@ async def handle_stream_offline(event_data: dict):
                     pass
         except Exception as e:
             logger.exception(f"Error updating offline notification: {e}")
+
+    # Immediately update active match embeds to remove live status
+    await update_active_match_embeds()
 
 
 async def eventsub_websocket_loop():
